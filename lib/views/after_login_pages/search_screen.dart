@@ -1,24 +1,15 @@
+import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
 import 'package:flutter/material.dart';
 import '../../res/app_colors.dart';
 import '../../utils/text_style.dart';
 
 class SearchScreen extends StatelessWidget {
-   SearchScreen({super.key});
+  SearchScreen({super.key});
 
   final List<SearchItem> recentSearches = [
-    SearchItem(
-      image: "assets/images/1.png",
-      title: "Avatar",
-    ),
-    SearchItem(
-      image: "assets/images/2.png",
-      title: "1917",
-    ),
-    SearchItem(
-      image: "assets/images/3.png",
-      title: "Spider-Man",
-    ),
-
+    SearchItem(image: "assets/images/1.png", title: "Avatar"),
+    SearchItem(image: "assets/images/2.png", title: "1917"),
+    SearchItem(image: "assets/images/3.png", title: "Spider-Man"),
   ];
 
   @override
@@ -76,12 +67,14 @@ class SearchScreen extends StatelessWidget {
         // Recent Searches List
         Expanded(
           child: ListView.builder(
-
             itemCount: recentSearches.length,
             itemBuilder: (context, index) {
               final item = recentSearches[index];
               return ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
                 leading: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Image.asset(
@@ -101,14 +94,17 @@ class SearchScreen extends StatelessWidget {
                   color: AppColors.primary,
                 ),
                 onTap: () {
-                  // TODO: Navigate to movie/series detail
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => MovieDetailScreen()),
+                  );
                 },
               );
             },
           ),
         ),
 
-      // Extra space for bottom navigation
+        // Extra space for bottom navigation
       ],
     );
   }

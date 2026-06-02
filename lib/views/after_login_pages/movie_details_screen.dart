@@ -147,7 +147,7 @@ class _VideoContent extends StatelessWidget {
           Image.network(
             provider.movie.thumbnailUrl,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(color: Colors.grey[900]),
+            errorBuilder: (_, _, _) => Container(color: Colors.grey[900]),
           ),
           Container(color: Colors.black.withOpacity(0.5)),
           const Center(
@@ -253,7 +253,7 @@ class _PlayerTopBar extends StatelessWidget {
     onTap: onTap,
     child: Padding(
       padding: const EdgeInsets.all(8),
-      child: Icon(icon, color: Colors.white, size: 20),
+      child: Icon(icon, color: AppColors.white, size: 20),
     ),
   );
 
@@ -303,7 +303,7 @@ class _PlayerControls extends StatelessWidget {
               color: AppColors.primary,
               shape: BoxShape.circle,
               border: Border.all(
-                color: Colors.white.withOpacity(0.3),
+                color: AppColors.white.withOpacity(0.3),
                 width: 2,
               ),
             ),
@@ -311,7 +311,7 @@ class _PlayerControls extends StatelessWidget {
               provider.isPlaying
                   ? Icons.pause_rounded
                   : Icons.play_arrow_rounded,
-              color: Colors.white,
+              color: AppColors.white,
               size: 34,
             ),
           ),
@@ -339,10 +339,10 @@ class _SeekButton extends StatelessWidget {
         width: 44,
         height: 44,
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.15),
+          color: AppColors.white.withOpacity(0.15),
           shape: BoxShape.circle,
         ),
-        child: Icon(icon, color: Colors.white, size: 24),
+        child: Icon(icon, color: AppColors.white, size: 24),
       ),
     );
   }
@@ -366,11 +366,11 @@ class _PlayerBottomBar extends StatelessWidget {
               children: [
                 Text(
                   provider.formattedPosition,
-                  style: text11(color: Colors.white70),
+                  style: text11(color: AppColors.white70),
                 ),
                 Text(
                   provider.formattedDuration,
-                  style: text11(color: Colors.white70),
+                  style: text11(color: AppColors.white70),
                 ),
               ],
             ),
@@ -383,7 +383,7 @@ class _PlayerBottomBar extends StatelessWidget {
                     height: 3,
                     width: constraints.maxWidth * provider.bufferedValue,
                     decoration: BoxDecoration(
-                      color: Colors.white38,
+                      color: AppColors.white38,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -421,7 +421,7 @@ class _PlayerBottomBar extends StatelessWidget {
                     provider.isFullscreen
                         ? Icons.fullscreen_exit_rounded
                         : Icons.fullscreen_rounded,
-                    color: Colors.white,
+                    color: AppColors.white,
                     size: 22,
                   ),
                 ),
@@ -689,7 +689,7 @@ class _CastSection extends StatelessWidget {
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: cast.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 14),
+            separatorBuilder: (_, _) => const SizedBox(width: 14),
             itemBuilder: (_, i) => _CastCard(member: cast[i]),
           ),
         ),
@@ -720,7 +720,7 @@ class _CastCard extends StatelessWidget {
             child: Image.network(
               member.imageUrl,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
+              errorBuilder: (_, _, _) => Container(
                 color: AppColors.grey200,
                 child: const Icon(Icons.person, color: AppColors.grey400),
               ),
@@ -774,7 +774,7 @@ class _MoreLikeThisSection extends StatelessWidget {
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: movies.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
             itemBuilder: (_, i) => _MovieThumbCard(movie: movies[i]),
           ),
         ),
@@ -800,7 +800,7 @@ class _MovieThumbCard extends StatelessWidget {
               width: 110,
               height: 160,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) =>
+              errorBuilder: (_, _, _) =>
                   Container(width: 110, height: 160, color: AppColors.grey200),
             ),
             Positioned(

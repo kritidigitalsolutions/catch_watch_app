@@ -37,9 +37,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     final auth = context.watch<AuthProvider>();
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.white,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: AppColors.white,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
@@ -202,7 +202,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               // ── Save button ──────────────────────────────────
               AppButton(
                 title: 'Continue',
-
+                isLoading: auth.profileSaving,
                 onTap: () {
                   context.read<AuthProvider>().saveProfile(context);
                 },

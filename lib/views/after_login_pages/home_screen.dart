@@ -2,10 +2,26 @@ import 'package:carousel_slider/carousel_slider.dart';
 import 'package:catch_watch/utils/custom_button.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/notification_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../res/app_colors.dart';
 import '../../utils/text_style.dart';
+
+Future<void> _openMovieAfterSubscription(BuildContext context) async {
+  final subscribed = await Navigator.push<bool>(
+    context,
+    MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+  );
+
+  if (!context.mounted || subscribed != true) return;
+
+  Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => MovieDetailScreen()),
+  );
+}
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -17,13 +33,13 @@ class HomeScreen extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildTopBar(),
+        _buildTopBar(context, provider),
         _buildTabBar(provider),
         Expanded(
           child: ListView(
             padding: EdgeInsets.zero,
             children: [
-              _buildCarousel(provider),
+              _buildCarousel(provider, context),
               _buildDotIndicator(provider),
               const SizedBox(height: 24),
               _buildSectionHeader('🔥 Trending Now'),
@@ -33,6 +49,14 @@ class HomeScreen extends StatelessWidget {
               _buildSectionHeader('▶ Continue Watching'),
               const SizedBox(height: 10),
               _buildContinueRow(provider),
+              const SizedBox(height: 24),
+              _buildSectionHeader('Action Movies'),
+              const SizedBox(height: 10),
+              _buildMovieRow(provider.actionMovies),
+              const SizedBox(height: 24),
+              _buildSectionHeader('Horror Movies'),
+              const SizedBox(height: 10),
+              _buildMovieRow(provider.horrorMovies),
               const SizedBox(height: 100),
             ],
           ),
@@ -41,7 +65,7 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildTopBar() {
+  Widget _buildTopBar(BuildContext context, HomeScreenProvider provider) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
       child: Row(
@@ -60,7 +84,7 @@ class HomeScreen extends StatelessWidget {
                 TextSpan(
                   text: 'WATCH',
                   style: text24(
-                    color: Colors.white,
+                    color: AppColors.black,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -69,13 +93,25 @@ class HomeScreen extends StatelessWidget {
           ),
           Row(
             children: [
-              CustomIconButton(icon: Icons.search_rounded, onPressed: () {}),
+              CustomIconButton(
+                icon: Icons.search_rounded,
+                onPressed: () {
+                  provider.changePage(3);
+                },
+              ),
               const SizedBox(width: 6),
               Stack(
                 children: [
                   CustomIconButton(
                     icon: Icons.notifications_outlined,
-                    onPressed: () {},
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => NotificationsScreen(),
+                        ),
+                      );
+                    },
                   ),
                   Positioned(
                     top: 8,
@@ -136,94 +172,102 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildCarousel(HomeScreenProvider provider) {
-    return CarouselSlider(
-      options: CarouselOptions(
-        height: 220,
-        viewportFraction: 1.0,
-        autoPlay: true,
-        autoPlayInterval: const Duration(seconds: 5),
-        autoPlayAnimationDuration: const Duration(milliseconds: 700),
-        onPageChanged: (i, _) => provider.updateBannerIndex(i),
-      ),
-      items: provider.banners.map((item) {
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.asset(item.image, fit: BoxFit.cover),
-            // Dark gradient
-            Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Colors.black.withOpacity(0.95)],
-                  stops: const [0.3, 1.0],
+  Widget _buildCarousel(HomeScreenProvider provider, BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        _openMovieAfterSubscription(context);
+      },
+      child: CarouselSlider(
+        options: CarouselOptions(
+          height: 220,
+          viewportFraction: 1.0,
+          autoPlay: true,
+          autoPlayInterval: const Duration(seconds: 5),
+          autoPlayAnimationDuration: const Duration(milliseconds: 700),
+          onPageChanged: (i, _) => provider.updateBannerIndex(i),
+        ),
+        items: provider.banners.map((item) {
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.asset(item.image, fit: BoxFit.cover),
+              // Dark gradient
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.95),
+                    ],
+                    stops: const [0.3, 1.0],
+                  ),
                 ),
               ),
-            ),
-            // Badge + info
-            Positioned(
-              bottom: 16,
-              left: 16,
-              right: 16,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      item.badge,
-                      style: text10(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
+              // Badge + info
+              Positioned(
+                bottom: 16,
+                left: 16,
+                right: 16,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        item.badge,
+                        style: text10(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    item.title,
-                    style: text30(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
+                    const SizedBox(height: 6),
+                    Text(
+                      item.title,
+                      style: text30(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
-                  ),
-                  Text(
-                    item.subtitle,
-                    style: text18(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w700,
+                    Text(
+                      item.subtitle,
+                      style: text18(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(item.meta, style: text12(color: AppColors.grey400)),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      _playButton(),
-                      const SizedBox(width: 8),
-                      _iconCircle(Icons.bookmark_border_rounded),
-                      const SizedBox(width: 8),
-                      _iconCircle(Icons.share_rounded),
-                    ],
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    Text(item.meta, style: text12(color: AppColors.grey400)),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        _playButton(context),
+                        const SizedBox(width: 8),
+                        _iconCircle(Icons.bookmark_border_rounded),
+                        const SizedBox(width: 8),
+                        _iconCircle(Icons.share_rounded),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        );
-      }).toList(),
+            ],
+          );
+        }).toList(),
+      ),
     );
   }
 
-  Widget _playButton() {
+  Widget _playButton(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.primary,
@@ -233,7 +277,7 @@ class HomeScreen extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
-          onTap: () {},
+          onTap: () => _openMovieAfterSubscription(context),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
             child: Row(
@@ -337,7 +381,7 @@ class HomeScreen extends StatelessWidget {
 
   Widget _buildContinueRow(HomeScreenProvider provider) {
     return SizedBox(
-      height: 130,
+      height: 170,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.only(left: 16),
@@ -345,9 +389,27 @@ class HomeScreen extends StatelessWidget {
         itemBuilder: (_, i) {
           final item = provider.continueWatching[i];
           return Container(
-            width: 200,
-            margin: const EdgeInsets.only(right: 10),
+            width: 240,
+            margin: const EdgeInsets.only(right: 12),
             child: _ContinueCard(item: item),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildMovieRow(List<ContentItem> items) {
+    return SizedBox(
+      height: 210,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(left: 16),
+        itemCount: items.length,
+        itemBuilder: (_, i) {
+          return Container(
+            width: 132,
+            margin: const EdgeInsets.only(right: 12),
+            child: _MoviePosterCard(item: items[i]),
           );
         },
       ),
@@ -362,12 +424,7 @@ class _ContentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => MovieDetailScreen()),
-        );
-      },
+      onTap: () => _openMovieAfterSubscription(context),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: Stack(
@@ -409,14 +466,12 @@ class _ContinueCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final progress = double.tryParse(item.progress ?? '0') ?? 0;
+    final progress = (double.tryParse(item.progress ?? '0') ?? 0).clamp(
+      0.0,
+      1.0,
+    );
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => MovieDetailScreen()),
-        );
-      },
+      onTap: () => _openMovieAfterSubscription(context),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: Stack(
@@ -441,15 +496,53 @@ class _ContinueCard extends StatelessWidget {
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      item.title,
-                      style: text12(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(
+                            Icons.play_arrow_rounded,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: text14(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              if (item.episode != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  item.episode!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: text10(color: AppColors.grey300),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 5),
+                    const SizedBox(height: 8),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(2),
                       child: LinearProgressIndicator(
@@ -459,18 +552,179 @@ class _ContinueCard extends StatelessWidget {
                         minHeight: 3,
                       ),
                     ),
-                    const SizedBox(height: 3),
-                    if (item.remaining != null)
+                    const SizedBox(height: 7),
+                    Row(
+                      children: [
+                        if (item.badge != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.16),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.18),
+                              ),
+                            ),
+                            child: Text(
+                              item.badge!,
+                              style: text10(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        if (item.badge != null) const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            item.meta ?? item.remaining ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: text10(color: AppColors.grey300),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (item.remaining != null) ...[
+                      const SizedBox(height: 3),
                       Text(
                         item.remaining!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: text10(color: AppColors.grey400),
                       ),
+                    ],
                   ],
+                ),
+              ),
+            ),
+            Positioned(
+              top: 10,
+              right: 10,
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.45),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Icon(
+                  Icons.more_vert,
+                  color: Colors.white,
+                  size: 18,
                 ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _MoviePosterCard extends StatelessWidget {
+  final ContentItem item;
+  const _MoviePosterCard({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _openMovieAfterSubscription(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.asset(item.image, fit: BoxFit.cover),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.12),
+                          Colors.transparent,
+                          Colors.black.withOpacity(0.65),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (item.badge != null)
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          item.badge!,
+                          style: text10(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    left: 8,
+                    right: 8,
+                    bottom: 8,
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.play_circle_fill_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            item.views,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: text11(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            item.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: text13(
+              color: AppColors.textPrimary,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            item.meta ?? '',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: text11(color: AppColors.grey600),
+          ),
+        ],
       ),
     );
   }

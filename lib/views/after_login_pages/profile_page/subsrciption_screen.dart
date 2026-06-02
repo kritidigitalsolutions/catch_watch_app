@@ -223,7 +223,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             width: double.infinity,
             child: ElevatedButton(
               onPressed: () {
-
+                Navigator.pop(context, true);
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,

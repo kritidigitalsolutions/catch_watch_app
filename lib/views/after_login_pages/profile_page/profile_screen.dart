@@ -1,4 +1,6 @@
 import 'package:catch_watch/utils/custom_button.dart';
+import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/edit_profile_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/menu_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -60,7 +62,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
               // Divider
               const SliverToBoxAdapter(
-                child: Divider(color: Color(0xFFF0F0F0), thickness: 1, height: 1),
+                child: Divider(
+                  color: Color(0xFFF0F0F0),
+                  thickness: 1,
+                  height: 1,
+                ),
               ),
 
               // Grid
@@ -80,42 +86,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: _CollapsedBar(provider: provider),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildStats(ProfileProvider provider) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      child: Row(
-        children: [
-          _statCard(provider.videosCount, 'VIDEOS'),
-          const SizedBox(width: 10),
-          _statCard(provider.followers, 'FOLLOWERS'),
-          const SizedBox(width: 10),
-          _statCard(provider.following, 'FOLLOWING'),
-        ],
-      ),
-    );
-  }
-
-  Widget _statCard(String value, String label) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: AppColors.grey100,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          children: [
-            Text(value,
-                style: text18(color: AppColors.primary, fontWeight: FontWeight.w900)),
-            const SizedBox(height: 2),
-            Text(label,
-                style: text10(color: AppColors.grey600, fontWeight: FontWeight.w700)),
-          ],
-        ),
       ),
     );
   }
@@ -149,15 +119,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 child: Column(
                   children: [
-                    Icon(t.$2,
-                        size: 18,
-                        color: isActive ? AppColors.primary : AppColors.grey600),
+                    Icon(
+                      t.$2,
+                      size: 18,
+                      color: isActive ? AppColors.primary : AppColors.grey600,
+                    ),
                     const SizedBox(height: 4),
-                    Text(t.$3,
-                        style: text8(
-                          color: isActive ? AppColors.primary : AppColors.grey600,
-                          fontWeight: FontWeight.w700,
-                        )),
+                    Text(
+                      t.$3,
+                      style: text8(
+                        color: isActive ? AppColors.primary : AppColors.grey600,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -174,7 +148,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
       sliver: SliverGrid(
         delegate: SliverChildBuilderDelegate(
-              (_, i) => _GridCard(item: items[i]),
+          (_, i) => _GridCard(item: items[i]),
           childCount: items.length,
         ),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -215,9 +189,11 @@ class _ExpandedHeader extends StatelessWidget {
         children: [
           // Decorative circles
           Positioned(
-            top: -30, right: -30,
+            top: -30,
+            right: -30,
             child: Container(
-              width: 130, height: 130,
+              width: 130,
+              height: 130,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.white.withOpacity(0.06),
@@ -225,9 +201,11 @@ class _ExpandedHeader extends StatelessWidget {
             ),
           ),
           Positioned(
-            bottom: -20, left: -20,
+            bottom: -20,
+            left: -20,
             child: Container(
-              width: 90, height: 90,
+              width: 90,
+              height: 90,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.black.withOpacity(0.08),
@@ -237,15 +215,23 @@ class _ExpandedHeader extends StatelessWidget {
 
           // ── Menu button top-right (always visible in expanded state) ──
           Positioned(
-            top: 0, right: 16,
+            top: 0,
+            right: 16,
             child: Container(
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: CustomIconButton(icon: Icons.menu_rounded, color: AppColors.white, onPressed: () {
-                Navigator.push(context, MaterialPageRoute(builder: (_) => MenuScreen()));
-              }),
+              child: CustomIconButton(
+                icon: Icons.menu_rounded,
+                color: AppColors.white,
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => MenuScreen()),
+                  );
+                },
+              ),
             ),
           ),
 
@@ -258,7 +244,10 @@ class _ExpandedHeader extends StatelessWidget {
               Container(
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white.withOpacity(0.3), width: 3),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.3),
+                    width: 3,
+                  ),
                 ),
                 child: CircleAvatar(
                   radius: 42,
@@ -267,12 +256,14 @@ class _ExpandedHeader extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              Text(provider.name,
-                  style: text20(color: Colors.white, fontWeight: FontWeight.w900)),
+              Text(
+                provider.name,
+                style: text20(color: Colors.white, fontWeight: FontWeight.w900),
+              ),
               const SizedBox(height: 2),
               Text(provider.handle, style: text14(color: Colors.white70)),
               const SizedBox(height: 14),
-              _pill(Icons.edit_rounded, 'Edit Profile'),
+              _pill(context, Icons.edit_rounded, 'Edit Profile'),
             ],
           ),
         ],
@@ -280,7 +271,7 @@ class _ExpandedHeader extends StatelessWidget {
     );
   }
 
-  Widget _pill(IconData icon, String label) {
+  Widget _pill(BuildContext context, IconData icon, String label) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.15),
@@ -290,7 +281,12 @@ class _ExpandedHeader extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: () {},
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => EditProfileScreen()),
+            );
+          },
           borderRadius: BorderRadius.circular(20),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -299,8 +295,13 @@ class _ExpandedHeader extends StatelessWidget {
               children: [
                 Icon(icon, color: Colors.white, size: 14),
                 const SizedBox(width: 5),
-                Text(label,
-                    style: text12(color: Colors.white, fontWeight: FontWeight.w700)),
+                Text(
+                  label,
+                  style: text12(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ],
             ),
           ),
@@ -327,7 +328,6 @@ class _CollapsedBar extends StatelessWidget {
         right: 16,
       ),
       decoration: const BoxDecoration(
-
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -351,7 +351,10 @@ class _CollapsedBar extends StatelessWidget {
           Container(
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withOpacity(0.3), width: 2),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.3),
+                width: 2,
+              ),
             ),
             child: CircleAvatar(
               radius: 18,
@@ -367,8 +370,13 @@ class _CollapsedBar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(provider.name,
-                    style: text14(color: Colors.white, fontWeight: FontWeight.w800)),
+                Text(
+                  provider.name,
+                  style: text14(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 Text(provider.handle, style: text11(color: Colors.white70)),
               ],
             ),
@@ -384,18 +392,34 @@ class _CollapsedBar extends StatelessWidget {
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                onTap: () {},
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => EditProfileScreen()),
+                  );
+                },
                 borderRadius: BorderRadius.circular(20),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.edit_rounded, color: Colors.white, size: 13),
+                      const Icon(
+                        Icons.edit_rounded,
+                        color: Colors.white,
+                        size: 13,
+                      ),
                       const SizedBox(width: 4),
-                      Text('Edit',
-                          style:
-                          text11(color: Colors.white, fontWeight: FontWeight.w700)),
+                      Text(
+                        'Edit',
+                        style: text11(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -411,9 +435,16 @@ class _CollapsedBar extends StatelessWidget {
               color: Colors.white.withOpacity(0.15),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: CustomIconButton(icon: Icons.menu_rounded,  color: AppColors.white, onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => MenuScreen()));
-            }),
+            child: CustomIconButton(
+              icon: Icons.menu_rounded,
+              color: AppColors.white,
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => MenuScreen()),
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -428,35 +459,54 @@ class _GridCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.asset(item.image, fit: BoxFit.cover),
-          Positioned(
-            bottom: 0, left: 0, right: 0,
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(5, 10, 5, 5),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Colors.black.withOpacity(0.82)],
+    final provider = context.watch<HomeScreenProvider>();
+    return GestureDetector(
+      onTap: () {
+        provider.changePage(1);
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.asset(item.image, fit: BoxFit.cover),
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(5, 10, 5, 5),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.82),
+                    ],
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.play_circle_fill_rounded,
+                      color: Colors.white,
+                      size: 12,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      item.views,
+                      style: text8(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              child: Row(
-                children: [
-                  const Icon(Icons.play_circle_fill_rounded,
-                      color: Colors.white, size: 12),
-                  const SizedBox(width: 3),
-                  Text(item.views,
-                      style: text8(color: Colors.white, fontWeight: FontWeight.w700)),
-                ],
-              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

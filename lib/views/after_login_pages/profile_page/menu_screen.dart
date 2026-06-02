@@ -4,6 +4,7 @@ import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_sc
 import 'package:catch_watch/views/after_login_pages/profile_page/edit_profile_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/wish_list_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/help_support_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/policy_screen.dart';
 import 'package:flutter/material.dart';
 import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
@@ -83,6 +84,19 @@ class MenuScreen extends StatelessWidget {
                         context,
                         MaterialPageRoute(
                           builder: (_) => const WishListScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _divider(),
+                  _menuItem(
+                    Icons.privacy_tip_outlined,
+                    'Privacy Policy',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const PolicyScreen(),
                         ),
                       );
                     },

@@ -16,19 +16,19 @@ class OnboardingProvider extends ChangeNotifier {
       image: "assets/images/1.png",
       title: "Discover Content",
       subtitle:
-      "Watch stories that match your vibe\nDiscover short films, premium movies and trending entertainment in one place.",
+          "Watch stories that match your vibe\nDiscover short films, premium movies and trending entertainment in one place.",
     ),
     OnboardingItem(
       image: "assets/images/2.png",
       title: "Shorts Experience",
       subtitle:
-      "Scroll. Watch. Enjoy.\nWatch unlimited short videos from creators for free.",
+          "Scroll. Watch. Enjoy.\nWatch unlimited short videos from creators for free.",
     ),
     OnboardingItem(
       image: "assets/images/3.png",
       title: "Premium + Create",
       subtitle:
-      "Unlock premium. Create your own.\nStream premium stories or upload your own videos.",
+          "Unlock premium. Create your own.\nStream premium stories or upload your own videos.",
     ),
   ];
 
@@ -72,8 +72,6 @@ class OnboardingItem {
     required this.subtitle,
   });
 }
-
-
 
 enum AuthStep { login, otp, categories, profile, done }
 
@@ -124,7 +122,8 @@ class AuthProvider extends ChangeNotifier {
       return;
     }
     if (!_agreedToTerms) {
-      _errorMessage = 'Please agree to the Terms of Service and Privacy Policy.';
+      _errorMessage =
+          'Please agree to the Terms of Service and Privacy Policy.';
       notifyListeners();
       return;
     }
@@ -142,9 +141,7 @@ class AuthProvider extends ChangeNotifier {
     _step = AuthStep.otp;
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => const OtpScreen(),
-      ),
+      MaterialPageRoute(builder: (context) => const OtpScreen()),
     );
     notifyListeners();
   }
@@ -223,21 +220,19 @@ class AuthProvider extends ChangeNotifier {
     // Simulate API verification — accept "123456" as valid for demo
     await Future.delayed(const Duration(seconds: 2));
 
-    if (code == '123456') {
-      _otpVerifying = false;
-      _step = AuthStep.categories;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => const CategoriesScreen(),
-        ),
-      );
-      notifyListeners();
-    } else {
-      _otpVerifying = false;
-      _otpError = 'Invalid OTP. Use 123456 for demo.';
-      notifyListeners();
-    }
+    // if (code == '123456') {
+    _otpVerifying = false;
+    _step = AuthStep.categories;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const CategoriesScreen()),
+    );
+    notifyListeners();
+    // } else {
+    _otpVerifying = false;
+    _otpError = 'Invalid OTP. Use 123456 for demo.';
+    notifyListeners();
+    // }
   }
 
   void goBackToLogin() {
@@ -248,9 +243,16 @@ class AuthProvider extends ChangeNotifier {
 
   // ─── Categories State ───────────────────────────────────────
   final List<String> allGenres = [
-    'Action', 'Comedy', 'Romance',
-    'Thriller', 'Horror', 'Crime', 'Drama',
-    'Adventure', 'Sci-Fi', 'Documentary',
+    'Action',
+    'Comedy',
+    'Romance',
+    'Thriller',
+    'Horror',
+    'Crime',
+    'Drama',
+    'Adventure',
+    'Sci-Fi',
+    'Documentary',
   ];
 
   final Set<String> _selectedGenres = {};
@@ -278,9 +280,7 @@ class AuthProvider extends ChangeNotifier {
     _step = AuthStep.profile;
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => const ProfileSetupScreen(),
-      ),
+      MaterialPageRoute(builder: (context) => const ProfileSetupScreen()),
     );
     notifyListeners();
   }
@@ -354,16 +354,11 @@ class AuthProvider extends ChangeNotifier {
     _profileError = null;
     notifyListeners();
 
-    // Simulate API save
-    await Future.delayed(const Duration(seconds: 2));
-
     _profileSaving = false;
     _step = AuthStep.done;
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(
-        builder: (context) => const MyHomePage(),
-      ),
+      MaterialPageRoute(builder: (context) => const MyHomePage()),
     );
     notifyListeners();
   }

@@ -184,7 +184,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 20),
             scrollDirection: Axis.horizontal,
             itemCount: _contactOptions.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
             itemBuilder: (context, index) {
               final item = _contactOptions[index];
               return GestureDetector(
