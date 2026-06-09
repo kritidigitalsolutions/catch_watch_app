@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../res/app_colors.dart';
@@ -75,8 +78,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                         ),
                         child: auth.avatarPath != null
                             ? ClipOval(
-                                child: Image.network(
-                                  auth.avatarPath!,
+                                child: Image.file(
+                                  File(auth.avatarPath!),
                                   fit: BoxFit.cover,
                                   errorBuilder: (_, _, _) => const Icon(
                                     Icons.person,
@@ -308,12 +311,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   label: 'Camera',
                   onTap: () {
                     Navigator.pop(context);
-                    // In a real app: use image_picker package
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Camera: integrate image_picker package'),
-                      ),
-                    );
+                    context.read<AuthProvider>().pickImage(ImageSource.camera);
                   },
                 ),
                 _AvatarOption(
@@ -321,14 +319,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   label: 'Gallery',
                   onTap: () {
                     Navigator.pop(context);
-                    // In a real app: use image_picker package
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Gallery: integrate image_picker package',
-                        ),
-                      ),
-                    );
+                    context.read<AuthProvider>().pickImage(ImageSource.gallery);
                   },
                 ),
                 if (context.read<AuthProvider>().avatarPath != null)

@@ -25,6 +25,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<ProfileProvider>().fetchProfile();
+    });
     _scrollController.addListener(() {
       final collapsed = _scrollController.offset > _collapseThreshold;
       if (collapsed != _isCollapsed) {
@@ -249,11 +252,17 @@ class _ExpandedHeader extends StatelessWidget {
                     width: 3,
                   ),
                 ),
-                child: CircleAvatar(
-                  radius: 42,
-                  backgroundImage: AssetImage(provider.avatarAsset),
-                  backgroundColor: Colors.white,
-                ),
+                child: provider.user?.profileImage != null && provider.user!.profileImage!.isNotEmpty
+                    ? CircleAvatar(
+                        radius: 42,
+                        backgroundImage: NetworkImage(provider.user!.profileImage!),
+                        backgroundColor: Colors.white,
+                      )
+                    : const CircleAvatar(
+                        radius: 42,
+                        backgroundImage: AssetImage('assets/images/logo.jpg'),
+                        backgroundColor: Colors.white,
+                      ),
               ),
               const SizedBox(height: 12),
               Text(
@@ -356,11 +365,17 @@ class _CollapsedBar extends StatelessWidget {
                 width: 2,
               ),
             ),
-            child: CircleAvatar(
-              radius: 18,
-              backgroundImage: AssetImage(provider.avatarAsset),
-              backgroundColor: Colors.white,
-            ),
+            child: provider.user?.profileImage != null && provider.user!.profileImage!.isNotEmpty
+                ? CircleAvatar(
+                    radius: 18,
+                    backgroundImage: NetworkImage(provider.user!.profileImage!),
+                    backgroundColor: Colors.white,
+                  )
+                : const CircleAvatar(
+                    radius: 18,
+                    backgroundImage: AssetImage('assets/images/logo.jpg'),
+                    backgroundColor: Colors.white,
+                  ),
           ),
           const SizedBox(width: 10),
 

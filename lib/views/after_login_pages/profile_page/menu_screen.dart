@@ -5,7 +5,9 @@ import 'package:catch_watch/views/after_login_pages/profile_page/edit_profile_sc
 import 'package:catch_watch/views/after_login_pages/profile_page/wish_list_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/help_support_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/policy_screen.dart';
+import 'package:catch_watch/view_model/after_login_provider/profile_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
 
@@ -14,11 +16,12 @@ class MenuScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<ProfileProvider>();
     return Scaffold(
       backgroundColor: AppColors.white,
       body: Column(
         children: [
-          _buildHeader(context),
+          _buildHeader(context, provider),
           Expanded(
             child: SingleChildScrollView(
               child: Column(
@@ -116,7 +119,7 @@ class MenuScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   _divider(),
-                  _logoutItem(),
+                  _logoutItem(context, provider),
                   const SizedBox(height: 32),
                 ],
               ),
@@ -127,7 +130,7 @@ class MenuScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, ProfileProvider provider) {
     return Container(
       padding: EdgeInsets.only(
         top: MediaQuery.of(context).padding.top + 12,
@@ -181,18 +184,27 @@ class MenuScreen extends StatelessWidget {
                         width: 2.5,
                       ),
                     ),
-                    child: const CircleAvatar(
-                      radius: 28,
-                      backgroundImage: AssetImage('assets/images/logo.jpg'),
-                      backgroundColor: Colors.white,
-                    ),
+                    child: provider.user?.profileImage != null &&
+                            provider.user!.profileImage!.isNotEmpty
+                        ? CircleAvatar(
+                            radius: 28,
+                            backgroundImage:
+                                NetworkImage(provider.user!.profileImage!),
+                            backgroundColor: Colors.white,
+                          )
+                        : const CircleAvatar(
+                            radius: 28,
+                            backgroundImage:
+                                AssetImage('assets/images/logo.jpg'),
+                            backgroundColor: Colors.white,
+                          ),
                   ),
                   const SizedBox(width: 14),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Raghav Chadda',
+                        provider.name,
                         style: text18(
                           color: Colors.white,
                           fontWeight: FontWeight.w800,
@@ -200,7 +212,7 @@ class MenuScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '@chaddaraghav5',
+                        provider.handle,
                         style: text13(color: Colors.white70),
                       ),
                     ],
@@ -266,9 +278,9 @@ class MenuScreen extends StatelessWidget {
     );
   }
 
-  Widget _logoutItem() {
+  Widget _logoutItem(BuildContext context, ProfileProvider provider) {
     return InkWell(
-      onTap: () {},
+      onTap: () => provider.logout(context),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
         child: Row(

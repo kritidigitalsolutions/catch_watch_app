@@ -1,4 +1,9 @@
+import 'dart:io';
+
+import 'package:catch_watch/view_model/after_login_provider/profile_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
 
@@ -10,13 +15,20 @@ class EditProfileScreen extends StatefulWidget {
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
-  final _nameController = TextEditingController(text: 'Raghav Chadda');
-  final _usernameController = TextEditingController(text: 'chaddaraghav5');
-  //final _emailController = TextEditingController(text: 'raghav@email.com');
-  final _phoneController = TextEditingController(text: '+91 98765 43210');
-  final _bioController = TextEditingController(
-    text: 'Movie enthusiast & binge watcher 🎬',
-  );
+  late TextEditingController _nameController;
+  late TextEditingController _usernameController;
+  late TextEditingController _phoneController;
+  late TextEditingController _bioController;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = context.read<ProfileProvider>().user;
+    _nameController = TextEditingController(text: user?.name ?? '');
+    _usernameController = TextEditingController(text: user?.username ?? '');
+    _phoneController = TextEditingController(text: user?.phone ?? '');
+    _bioController = TextEditingController(text: user?.bio ?? '');
+  }
 
   @override
   void dispose() {
@@ -130,6 +142,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Widget _buildAvatar() {
+    final provider = context.watch<ProfileProvider>();
     return Stack(
       alignment: Alignment.bottomRight,
       children: [
@@ -138,14 +151,27 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             shape: BoxShape.circle,
             border: Border.all(color: AppColors.primary, width: 3),
           ),
-          child: const CircleAvatar(
-            radius: 48,
-            backgroundImage: AssetImage('assets/images/logo.jpg'),
-            backgroundColor: AppColors.grey100,
-          ),
+          child: provider.selectedImagePath != null
+              ? CircleAvatar(
+                  radius: 48,
+                  backgroundImage: FileImage(File(provider.selectedImagePath!)),
+                  backgroundColor: AppColors.grey100,
+                )
+              : provider.user?.profileImage != null &&
+                      provider.user!.profileImage!.isNotEmpty
+                  ? CircleAvatar(
+                      radius: 48,
+                      backgroundImage: NetworkImage(provider.user!.profileImage!),
+                      backgroundColor: AppColors.grey100,
+                    )
+                  : const CircleAvatar(
+                      radius: 48,
+                      backgroundImage: AssetImage('assets/images/logo.jpg'),
+                      backgroundColor: AppColors.grey100,
+                    ),
         ),
         GestureDetector(
-          onTap: () {},
+          onTap: () => _showImagePicker(context),
           child: Container(
             width: 32,
             height: 32,
@@ -162,6 +188,38 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  void _showImagePicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      builder: (builder) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt),
+                title: const Text('Camera'),
+                onTap: () {
+                  Navigator.pop(context);
+                  context.read<ProfileProvider>().pickImage(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library),
+                title: const Text('Gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  context.read<ProfileProvider>().pickImage(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -266,11 +324,30 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Widget _buildSaveButton() {
+    final provider = context.watch<ProfileProvider>();
     return SizedBox(
       width: double.infinity,
       height: 52,
       child: ElevatedButton(
-        onPressed: () {},
+        onPressed: provider.isLoading
+            ? null
+            : () async {
+                final success = await provider.updateProfile(
+                  name: _nameController.text,
+                  username: _usernameController.text,
+                  bio: _bioController.text,
+                );
+                if (success && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Profile updated successfully')),
+                  );
+                  Navigator.pop(context);
+                } else if (provider.error != null && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(provider.error!)),
+                  );
+                }
+              },
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primary,
           shape: RoundedRectangleBorder(
@@ -278,10 +355,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ),
           elevation: 0,
         ),
-        child: Text(
-          'Save Changes',
-          style: text16(color: Colors.white, fontWeight: FontWeight.w700),
-        ),
+        child: provider.isLoading
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
+              )
+            : Text(
+                'Save Changes',
+                style: text16(color: Colors.white, fontWeight: FontWeight.w700),
+              ),
       ),
     );
   }

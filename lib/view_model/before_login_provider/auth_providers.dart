@@ -1,9 +1,16 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:catch_watch/main.dart';
+import 'package:catch_watch/models/auth_models.dart';
+import 'package:catch_watch/repository/auth_repository.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
+import 'package:catch_watch/utils/hive_service/userdetail.dart';
 import 'package:catch_watch/views/before_login_Pages/categories_screen.dart';
 import 'package:catch_watch/views/before_login_Pages/profile_setup_screen.dart';
+import 'package:dio/dio.dart' as dio;
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../views/before_login_Pages/otp_verify_screen.dart';
 
@@ -76,6 +83,8 @@ class OnboardingItem {
 enum AuthStep { login, otp, categories, profile, done }
 
 class AuthProvider extends ChangeNotifier {
+  final AuthRepository _authRepository = AuthRepository();
+
   // ─── Navigation State ──────────────────────────────────────
   AuthStep _step = AuthStep.login;
   AuthStep get step => _step;
@@ -132,17 +141,26 @@ class AuthProvider extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
-    // Simulate API call
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      final data = {'phone': _phoneNumber};
+      final response = await _authRepository.sendOtp(data);
 
-    _isLoading = false;
-    _otpSent = true;
-    _startResendTimer();
-    _step = AuthStep.otp;
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const OtpScreen()),
-    );
+      _isLoading = false;
+      if (response.success == true) {
+        _otpSent = true;
+        _startResendTimer();
+        _step = AuthStep.otp;
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const OtpScreen()),
+        );
+      } else {
+        _errorMessage = response.message ?? 'Failed to send OTP';
+      }
+    } catch (e) {
+      _isLoading = false;
+      _errorMessage = e.toString();
+    }
     notifyListeners();
   }
 
@@ -217,22 +235,50 @@ class AuthProvider extends ChangeNotifier {
     _otpError = null;
     notifyListeners();
 
-    // Simulate API verification — accept "123456" as valid for demo
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      final data = {
+        'phone': _phoneNumber,
+        'otp': code,
+      };
+      final response = await _authRepository.verifyOtp(data);
 
-    // if (code == '123456') {
-    _otpVerifying = false;
-    _step = AuthStep.categories;
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const CategoriesScreen()),
-    );
+      if (response.success == true) {
+        if (response.isNewUser == true) {
+          _otpVerifying = false;
+          _step = AuthStep.categories;
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const CategoriesScreen()),
+          );
+        } else {
+          // Existing user, save details and go to Home
+          if (response.token != null) {
+            final userDetail = UserDetails(
+              name: response.user?.name,
+              phone: response.user?.phone,
+              image: response.user?.profileImage,
+              token: response.token,
+              sId: response.user?.id,
+              isNewUser: false,
+            );
+            await HiveService.saveUser(userDetail);
+          }
+          _otpVerifying = false;
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => const MyHomePage()),
+            (route) => false,
+          );
+        }
+      } else {
+        _otpVerifying = false;
+        _otpError = response.message ?? 'Invalid OTP';
+      }
+    } catch (e) {
+      _otpVerifying = false;
+      _otpError = e.toString();
+    }
     notifyListeners();
-    // } else {
-    _otpVerifying = false;
-    _otpError = 'Invalid OTP. Use 123456 for demo.';
-    notifyListeners();
-    // }
   }
 
   void goBackToLogin() {
@@ -324,6 +370,15 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> pickImage(ImageSource source) async {
+    final ImagePicker picker = ImagePicker();
+    final XFile? image = await picker.pickImage(source: source, imageQuality: 50);
+    if (image != null) {
+      _avatarPath = image.path;
+      notifyListeners();
+    }
+  }
+
   bool _validateProfile() {
     bool valid = true;
     if (_name.isEmpty) {
@@ -354,12 +409,51 @@ class AuthProvider extends ChangeNotifier {
     _profileError = null;
     notifyListeners();
 
-    _profileSaving = false;
-    _step = AuthStep.done;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const MyHomePage()),
-    );
+    try {
+      dio.FormData formData = dio.FormData.fromMap({
+        'name': _name,
+        'username': _username,
+        'phone': _phoneNumber,
+        'genres': _selectedGenres.toList(),
+        'bio': '',
+      });
+
+      if (_avatarPath != null) {
+        formData.files.add(MapEntry(
+          'profileImage',
+          await dio.MultipartFile.fromFile(_avatarPath!,
+              filename: 'profile.jpg'),
+        ));
+      }
+
+      final response = await _authRepository.completeProfile(formData);
+
+      if (response.success == true) {
+        // Save to Hive
+        final userDetail = UserDetails(
+          name: response.user?.name,
+          phone: response.user?.phone,
+          image: response.user?.profileImage,
+          token: response.token,
+          sId: response.user?.id,
+          isNewUser: false,
+        );
+        await HiveService.saveUser(userDetail);
+
+        _profileSaving = false;
+        _step = AuthStep.done;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const MyHomePage()),
+        );
+      } else {
+        _profileSaving = false;
+        _profileError = response.message ?? 'Failed to complete profile';
+      }
+    } catch (e) {
+      _profileSaving = false;
+      _profileError = e.toString();
+    }
     notifyListeners();
   }
 
