@@ -1,5 +1,5 @@
 class AppUrl {
-  static const String serverUrl = 'http://192.168.1.13:5000';
+  static const String serverUrl = 'http://192.168.1.16:5000';
   static const String baseUrl = '$serverUrl/api';
 
   // Auth Endpoints
@@ -8,6 +8,17 @@ class AppUrl {
   static const String completeProfile = '$baseUrl/user/complete-profile';
   static const String getProfile = '$baseUrl/user/profile';
   static const String updateProfile = '$baseUrl/user/update-profile';
+  static const String getLegal = '$baseUrl/legal';
+  static const String getHelp = '$baseUrl/help';
+  static const String watchlist = '$baseUrl/watchlist';
+  static const String addToWatchlist = '$baseUrl/watchlist';
+
+  /// plans & subscriptions
+  static const String getPlans = '$baseUrl/plan';
+  static const String subscribe = '$baseUrl/subscription/subscribe';
+  static const String cancelSubscription = '$baseUrl/subscription/cancel';
+  static const String subscriptionStatus = '$baseUrl/subscription/status';
+  static const String getContent = '$baseUrl/content';
   //
   // /// fcm
   // static const String updateFcmToken = '$baseUrl/notifications/fcm-token';
@@ -18,11 +29,12 @@ class AppUrl {
   // static String replyTicket(String id) => '$baseUrl/support/reply/$id';
   // static String getConversation(String id) => '$baseUrl/support/conversation/$id';
   //
-  // /// notifications
-  // static const String getNotifications = '$baseUrl/notifications';
-  // static String markNotificationRead(String id) => '$baseUrl/notifications/$id/read';
-  // static const String markAllNotificationsRead = '$baseUrl/notifications/read-all';
-  // static String deleteNotification(String id) => '$baseUrl/notifications/$id';
+  /// notifications
+  static const String getNotifications = '$baseUrl/notifications';
+  static String markNotificationRead(String id) => '$baseUrl/notifications/$id/read';
+  static const String markAllNotificationsRead = '$baseUrl/notifications/read-all';
+  static String deleteNotification(String id) => '$baseUrl/notifications/$id';
+  static const String deleteAllNotifications = '$baseUrl/notifications';
   //
   // /// legal
   // static const String privacyPolicyUrl = '$baseUrl/legal/privacy-policy';

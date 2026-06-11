@@ -99,7 +99,33 @@ class MenuScreen extends StatelessWidget {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const PolicyScreen(),
+                          builder: (_) => const PolicyScreen(type: 'privacy-policy'),
+                        ),
+                      );
+                    },
+                  ),
+                  _divider(),
+                  _menuItem(
+                    Icons.description_outlined,
+                    'Terms & Conditions',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const PolicyScreen(type: 'terms-conditions'),
+                        ),
+                      );
+                    },
+                  ),
+                  _divider(),
+                  _menuItem(
+                    Icons.assignment_return_outlined,
+                    'Refund Policy',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const PolicyScreen(type: 'refund-policy'),
                         ),
                       );
                     },

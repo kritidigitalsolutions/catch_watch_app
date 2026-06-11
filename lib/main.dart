@@ -1,7 +1,7 @@
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/custom_nav_bar.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
-import 'package:catch_watch/view_model/after_login_provider/movie_details_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/legal_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/profile_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/video_upload_provider.dart';
 import 'package:catch_watch/view_model/before_login_provider/auth_providers.dart';
@@ -12,6 +12,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+
+import 'package:catch_watch/view_model/after_login_provider/help_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/notification_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,7 +38,11 @@ void main() async {
         ChangeNotifierProvider(create: (_) => HomeScreenProvider()),
         ChangeNotifierProvider(create: (_) => ProfileProvider()),
         ChangeNotifierProvider(create: (_) => VideoUploadProvider()),
-        ChangeNotifierProvider(create: (_) => MovieDetailProvider()),
+        ChangeNotifierProvider(create: (_) => LegalProvider()),
+        ChangeNotifierProvider(create: (_) => HelpProvider()),
+        ChangeNotifierProvider(create: (_) => WatchlistProvider()),
+        ChangeNotifierProvider(create: (_) => SubscriptionProvider()),
+        ChangeNotifierProvider(create: (_) => NotificationProvider()),
       ],
       child: const MyApp(),
     ),

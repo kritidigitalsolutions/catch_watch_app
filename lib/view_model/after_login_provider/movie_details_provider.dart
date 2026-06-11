@@ -1,166 +1,15 @@
 import 'dart:async';
+import 'package:catch_watch/models/content_model.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
-// ─── Models ──────────────────────────────────────────────────────────────────
-
-class CastMember {
-  final String name;
-  final String role;
-  final String imageUrl;
-
-  const CastMember({
-    required this.name,
-    required this.role,
-    required this.imageUrl,
-  });
-}
-
-class MovieModel {
-  final String id;
-  final String title;
-  final String description;
-  final String thumbnailUrl;
-  final String videoUrl;
-  final String year;
-  final List<String> genres;
-  final List<String> languages;
-  final double rating;
-  final String duration;
-  final List<CastMember> cast;
-  final List<MovieModel> moreLikeThis;
-
-  const MovieModel({
-    required this.id,
-    required this.title,
-    required this.description,
-    required this.thumbnailUrl,
-    required this.videoUrl,
-    required this.year,
-    required this.genres,
-    required this.languages,
-    required this.rating,
-    required this.duration,
-    required this.cast,
-    this.moreLikeThis = const [],
-  });
-}
-
-// ─── Sample Data ──────────────────────────────────────────────────────────────
-
-class SampleMovies {
-  static final List<CastMember> spiderManCast = [
-    const CastMember(
-      name: 'Tom Holland',
-      role: 'Spider-Man',
-      imageUrl: 'https://i.pravatar.cc/150?img=11',
-    ),
-    const CastMember(
-      name: 'Zendaya',
-      role: 'MJ',
-      imageUrl: 'https://i.pravatar.cc/150?img=5',
-    ),
-    const CastMember(
-      name: 'Benedict C.',
-      role: 'Dr Strange',
-      imageUrl: 'https://i.pravatar.cc/150?img=13',
-    ),
-    const CastMember(
-      name: 'Alfred Molina',
-      role: 'Doc Ock',
-      imageUrl: 'https://i.pravatar.cc/150?img=15',
-    ),
-    const CastMember(
-      name: 'Jamie Foxx',
-      role: 'Electro',
-      imageUrl: 'https://i.pravatar.cc/150?img=17',
-    ),
-  ];
-
-  static final MovieModel spiderMan = MovieModel(
-    id: 'sm_nwh',
-    title: 'Spider-Man: No Way Home',
-    description:
-        'With Spider-Man\'s identity now revealed, Peter asks Doctor Strange for help. When a spell goes wrong, dangerous foes from other worlds start to appear, forcing Peter to discover what it truly means to be Spider-Man. A thrilling multiversal adventure that brings beloved characters from across Spider-Man\'s cinematic history.',
-    thumbnailUrl:
-        'https://images.unsplash.com/photo-1635805737707-575885ab0820?w=800',
-    // Public domain Big Buck Bunny — works without auth
-    videoUrl:
-        'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4',
-    year: '2021',
-    genres: ['Action', 'Adventure', 'Sci-Fi'],
-    languages: ['English', 'Hindi'],
-    rating: 8.3,
-    duration: '2h 28m',
-    cast: spiderManCast,
-    moreLikeThis: [
-      MovieModel(
-        id: 'doc_strange',
-        title: 'Doctor Strange MoM',
-        description: '',
-        thumbnailUrl:
-            'https://images.unsplash.com/photo-1518676590629-3dcbd9c5a5c9?w=400',
-        videoUrl: '',
-        year: '2022',
-        genres: ['Action'],
-        languages: ['English'],
-        rating: 6.9,
-        duration: '2h 6m',
-        cast: [],
-      ),
-      MovieModel(
-        id: 'thor',
-        title: 'Thor: Love and Thunder',
-        description: '',
-        thumbnailUrl:
-            'https://images.unsplash.com/photo-1508739773434-c26b3d09e071?w=400',
-        videoUrl: '',
-        year: '2022',
-        genres: ['Action'],
-        languages: ['English'],
-        rating: 6.3,
-        duration: '1h 59m',
-        cast: [],
-      ),
-      MovieModel(
-        id: 'black_panther',
-        title: 'Black Panther: Wakanda Forever',
-        description: '',
-        thumbnailUrl:
-            'https://images.unsplash.com/photo-1531259683007-016a7b628fc3?w=400',
-        videoUrl: '',
-        year: '2022',
-        genres: ['Action'],
-        languages: ['English'],
-        rating: 7.3,
-        duration: '2h 41m',
-        cast: [],
-      ),
-      MovieModel(
-        id: 'eternals',
-        title: 'Eternals',
-        description: '',
-        thumbnailUrl:
-            'https://images.unsplash.com/photo-1464802686167-b939a6910659?w=400',
-        videoUrl: '',
-        year: '2021',
-        genres: ['Sci-Fi'],
-        languages: ['English'],
-        rating: 6.3,
-        duration: '2h 36m',
-        cast: [],
-      ),
-    ],
-  );
-}
-
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 class MovieDetailProvider extends ChangeNotifier {
   // ── Data ──────────────────────────────────────────────────────────────────
-  final MovieModel movie = SampleMovies.spiderMan;
+  final Content content;
 
   // ── Video Player ──────────────────────────────────────────────────────────
   VideoPlayerController? _videoController;
@@ -207,16 +56,23 @@ class MovieDetailProvider extends ChangeNotifier {
 
   // ─────────────────────────────────────────────────────────────────────────
 
-  MovieDetailProvider() {
+  MovieDetailProvider(this.content) {
     _initPlayer();
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
   Future<void> _initPlayer() async {
+    if (content.videoUrl == null || content.videoUrl!.isEmpty) {
+      _hasError = true;
+      _errorMessage = 'Video URL is not available.';
+      notifyListeners();
+      return;
+    }
+
     try {
       _videoController = VideoPlayerController.networkUrl(
-        Uri.parse(movie.videoUrl),
+        Uri.parse(content.videoUrl!),
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
       );
 

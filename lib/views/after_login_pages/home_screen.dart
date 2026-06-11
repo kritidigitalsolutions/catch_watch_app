@@ -1,3 +1,7 @@
+import 'package:catch_watch/models/content_model.dart';
+import 'package:catch_watch/view_model/after_login_provider/notification_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:catch_watch/utils/custom_button.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
@@ -9,60 +13,108 @@ import 'package:provider/provider.dart';
 import '../../res/app_colors.dart';
 import '../../utils/text_style.dart';
 
-Future<void> _openMovieAfterSubscription(BuildContext context) async {
-  final subscribed = await Navigator.push<bool>(
-    context,
-    MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
-  );
+Future<void> _openMovie(BuildContext context, Content content) async {
+  final subProvider = context.read<SubscriptionProvider>();
 
-  if (!context.mounted || subscribed != true) return;
+  // Check if content is free or user has an active subscription
+  bool canWatch = content.isPremium != true || subProvider.currentSubscription != null;
 
-  Navigator.push(
-    context,
-    MaterialPageRoute(builder: (_) => MovieDetailScreen()),
-  );
+  if (canWatch) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MovieDetailScreen(content: content),
+      ),
+    );
+  } else {
+    // If premium and no subscription, go to plans
+    final subscribed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+    );
+
+    if (context.mounted && subscribed == true) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MovieDetailScreen(content: content),
+        ),
+      );
+    }
+  }
 }
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<SubscriptionProvider>().fetchSubscriptionStatus();
+      context.read<WatchlistProvider>().fetchWatchlist();
+      context.read<HomeScreenProvider>().fetchContent();
+      context.read<NotificationProvider>().fetchNotifications();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<HomeScreenProvider>();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildTopBar(context, provider),
-        _buildTabBar(provider),
-        Expanded(
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              _buildCarousel(provider, context),
-              _buildDotIndicator(provider),
-              const SizedBox(height: 24),
-              _buildSectionHeader('🔥 Trending Now'),
-              const SizedBox(height: 10),
-              _buildTrendingRow(provider),
-              const SizedBox(height: 24),
-              _buildSectionHeader('▶ Continue Watching'),
-              const SizedBox(height: 10),
-              _buildContinueRow(provider),
-              const SizedBox(height: 24),
-              _buildSectionHeader('Action Movies'),
-              const SizedBox(height: 10),
-              _buildMovieRow(provider.actionMovies),
-              const SizedBox(height: 24),
-              _buildSectionHeader('Horror Movies'),
-              const SizedBox(height: 10),
-              _buildMovieRow(provider.horrorMovies),
-              const SizedBox(height: 100),
-            ],
-          ),
-        ),
-      ],
-    );
+    return provider.isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : provider.error != null
+            ? Center(child: Text(provider.error!))
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildTopBar(context, provider),
+                  _buildTabBar(provider),
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: provider.fetchContent,
+                      child: ListView(
+                        padding: EdgeInsets.zero,
+                        children: [
+                          _buildCarousel(provider, context),
+                          _buildDotIndicator(provider),
+                          const SizedBox(height: 24),
+                          if (provider.trending.isNotEmpty) ...[
+                            _buildSectionHeader('🔥 Trending Now'),
+                            const SizedBox(height: 10),
+                            _buildTrendingRow(provider),
+                            const SizedBox(height: 24),
+                          ],
+                            if (provider.continueWatching.isNotEmpty) ...[
+                              _buildSectionHeader('▶ Continue Watching'),
+                              const SizedBox(height: 10),
+                              _buildContinueRow(provider),
+                              const SizedBox(height: 24),
+                            ],
+                          if (provider.movies.isNotEmpty) ...[
+                            _buildSectionHeader('Recommended Movies'),
+                            const SizedBox(height: 10),
+                            _buildMovieRow(provider.movies),
+                            const SizedBox(height: 24),
+                          ],
+                          _buildSectionHeader('Action Movies'),
+                          const SizedBox(height: 10),
+                          _buildMovieRow(provider.movies
+                              .where((m) => m.genre?.contains('Action') ?? false)
+                              .toList()),
+                          const SizedBox(height: 100),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              );
   }
 
   Widget _buildTopBar(BuildContext context, HomeScreenProvider provider) {
@@ -100,33 +152,38 @@ class HomeScreen extends StatelessWidget {
                 },
               ),
               const SizedBox(width: 6),
-              Stack(
-                children: [
-                  CustomIconButton(
-                    icon: Icons.notifications_outlined,
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => NotificationsScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.black, width: 1),
+              Consumer<NotificationProvider>(
+                builder: (context, notifProvider, child) {
+                  return Stack(
+                    children: [
+                      CustomIconButton(
+                        icon: Icons.notifications_outlined,
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const NotificationsScreen(),
+                            ),
+                          );
+                        },
                       ),
-                    ),
-                  ),
-                ],
+                      if (notifProvider.unreadCount > 0)
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.black, width: 1),
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
             ],
           ),
@@ -173,10 +230,10 @@ class HomeScreen extends StatelessWidget {
   }
 
   Widget _buildCarousel(HomeScreenProvider provider, BuildContext context) {
+    if (provider.bannersList.isEmpty) return const SizedBox();
+
     return GestureDetector(
-      onTap: () {
-        _openMovieAfterSubscription(context);
-      },
+      onTap: () {}, // Handled by individual buttons inside
       child: CarouselSlider(
         options: CarouselOptions(
           height: 220,
@@ -186,11 +243,13 @@ class HomeScreen extends StatelessWidget {
           autoPlayAnimationDuration: const Duration(milliseconds: 700),
           onPageChanged: (i, _) => provider.updateBannerIndex(i),
         ),
-        items: provider.banners.map((item) {
+        items: provider.bannersList.map((item) {
           return Stack(
             fit: StackFit.expand,
             children: [
-              Image.asset(item.image, fit: BoxFit.cover),
+              item.banner != null
+                  ? Image.network(item.banner!, fit: BoxFit.cover)
+                  : Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
               // Dark gradient
               Container(
                 decoration: BoxDecoration(
@@ -213,46 +272,42 @@ class HomeScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        item.badge,
-                        style: text10(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
+                    if (item.isTrending == true)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'TRENDING',
+                          style: text10(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
-                    ),
                     const SizedBox(height: 6),
                     Text(
-                      item.title,
+                      item.title ?? '',
                       style: text30(
                         color: Colors.white,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
-                    Text(
-                      item.subtitle,
-                      style: text18(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
                     const SizedBox(height: 4),
-                    Text(item.meta, style: text12(color: AppColors.grey400)),
+                    Text(
+                        '${item.releaseYear}  •  ${item.genre?.join(' / ')}  •  ${item.duration}',
+                        style: text12(color: AppColors.grey400)),
                     const SizedBox(height: 10),
                     Row(
                       children: [
-                        _playButton(context),
+                        _playButton(context, item),
                         const SizedBox(width: 8),
-                        _iconCircle(Icons.bookmark_border_rounded),
+                        _watchlistIcon(context, item),
                         const SizedBox(width: 8),
                         _iconCircle(Icons.share_rounded),
                       ],
@@ -267,7 +322,7 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _playButton(BuildContext context) {
+  Widget _playButton(BuildContext context, Content content) {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.primary,
@@ -277,7 +332,7 @@ class HomeScreen extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
-          onTap: () => _openMovieAfterSubscription(context),
+          onTap: () => _openMovie(context, content),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
             child: Row(
@@ -303,6 +358,38 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  Widget _watchlistIcon(BuildContext context, Content content) {
+    final watchlistProvider = context.watch<WatchlistProvider>();
+    final isInWatchlist =
+        watchlistProvider.items.any((i) => i.item?.id == content.id);
+
+    return GestureDetector(
+      onTap: () {
+        if (isInWatchlist) {
+          final watchlistItem =
+              watchlistProvider.items.firstWhere((i) => i.item?.id == content.id);
+          watchlistProvider.removeItem(watchlistItem.id!);
+        } else {
+          watchlistProvider.addItem(content.id!);
+        }
+      },
+      child: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white.withOpacity(0.1)),
+        ),
+        child: Icon(
+          isInWatchlist ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+          color: isInWatchlist ? AppColors.primary : Colors.white,
+          size: 18,
+        ),
+      ),
+    );
+  }
+
   Widget _iconCircle(IconData icon) {
     return Container(
       width: 38,
@@ -317,9 +404,10 @@ class HomeScreen extends StatelessWidget {
   }
 
   Widget _buildDotIndicator(HomeScreenProvider provider) {
+    if (provider.bannersList.isEmpty) return const SizedBox();
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(provider.banners.length, (i) {
+      children: List.generate(provider.bannersList.length, (i) {
         final active = i == provider.currentBannerIndex;
         return AnimatedContainer(
           duration: const Duration(milliseconds: 300),
@@ -372,7 +460,7 @@ class HomeScreen extends StatelessWidget {
           return Container(
             width: 110,
             margin: const EdgeInsets.only(right: 10),
-            child: _ContentCard(item: item),
+            child: _ContentCard(content: item),
           );
         },
       ),
@@ -398,7 +486,7 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildMovieRow(List<ContentItem> items) {
+  Widget _buildMovieRow(List<Content> items) {
     return SizedBox(
       height: 210,
       child: ListView.builder(
@@ -409,7 +497,7 @@ class HomeScreen extends StatelessWidget {
           return Container(
             width: 132,
             margin: const EdgeInsets.only(right: 12),
-            child: _MoviePosterCard(item: items[i]),
+            child: _MoviePosterCard(content: items[i]),
           );
         },
       ),
@@ -418,41 +506,21 @@ class HomeScreen extends StatelessWidget {
 }
 
 class _ContentCard extends StatelessWidget {
-  final ContentItem item;
-  const _ContentCard({required this.item});
+  final Content content;
+  const _ContentCard({required this.content});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => _openMovieAfterSubscription(context),
+      onTap: () => _openMovie(context, content),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Image.asset(item.image, fit: BoxFit.cover),
-            // Positioned(
-            //   bottom: 0,
-            //   left: 0,
-            //   right: 0,
-            //   child: Container(
-            //     padding: const EdgeInsets.all(6),
-            //     decoration: BoxDecoration(
-            //       gradient: LinearGradient(
-            //         begin: Alignment.topCenter,
-            //         end: Alignment.bottomCenter,
-            //         colors: [Colors.transparent, Colors.black.withOpacity(0.85)],
-            //       ),
-            //     ),
-            //     child: Row(
-            //       children: [
-            //         const Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 14),
-            //         const SizedBox(width: 3),
-            //         Text(item.views, style: text11(color: Colors.white, fontWeight: FontWeight.w700)),
-            //       ],
-            //     ),
-            //   ),
-            // ),
+            content.poster != null
+                ? Image.network(content.poster!, fit: BoxFit.cover)
+                : Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
           ],
         ),
       ),
@@ -471,13 +539,19 @@ class _ContinueCard extends StatelessWidget {
       1.0,
     );
     return GestureDetector(
-      onTap: () => _openMovieAfterSubscription(context),
+      onTap: () {
+        if (item.content != null) {
+          _openMovie(context, item.content!);
+        }
+      },
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Image.asset(item.image, fit: BoxFit.cover),
+            item.image.startsWith('http')
+                ? Image.network(item.image, fit: BoxFit.cover)
+                : Image.asset(item.image, fit: BoxFit.cover),
             Positioned(
               bottom: 0,
               left: 0,
@@ -625,13 +699,16 @@ class _ContinueCard extends StatelessWidget {
 }
 
 class _MoviePosterCard extends StatelessWidget {
-  final ContentItem item;
-  const _MoviePosterCard({required this.item});
+  final Content content;
+  const _MoviePosterCard({required this.content});
 
   @override
   Widget build(BuildContext context) {
+    final watchlistProvider = context.watch<WatchlistProvider>();
+    final isInWatchlist = watchlistProvider.items.any((i) => i.item?.id == content.id);
+
     return GestureDetector(
-      onTap: () => _openMovieAfterSubscription(context),
+      onTap: () => _openMovie(context, content),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -641,7 +718,9 @@ class _MoviePosterCard extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Image.asset(item.image, fit: BoxFit.cover),
+                  content.poster != null
+                      ? Image.network(content.poster!, fit: BoxFit.cover)
+                      : Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -655,7 +734,34 @@ class _MoviePosterCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (item.badge != null)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: GestureDetector(
+                      onTap: () {
+                        if (isInWatchlist) {
+                          final watchlistItem = watchlistProvider.items
+                              .firstWhere((i) => i.item?.id == content.id);
+                          watchlistProvider.removeItem(watchlistItem.id!);
+                        } else {
+                          watchlistProvider.addItem(content.id!);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.4),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          isInWatchlist ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                          color: isInWatchlist ? AppColors.primary : Colors.white,
+                          size: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (content.isPremium == true)
                     Positioned(
                       top: 8,
                       left: 8,
@@ -669,7 +775,7 @@ class _MoviePosterCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          item.badge!,
+                          'PREMIUM',
                           style: text10(
                             color: Colors.white,
                             fontWeight: FontWeight.w800,
@@ -684,14 +790,14 @@ class _MoviePosterCard extends StatelessWidget {
                     child: Row(
                       children: [
                         const Icon(
-                          Icons.play_circle_fill_rounded,
-                          color: Colors.white,
-                          size: 18,
+                          Icons.star_rounded,
+                          color: AppColors.yellow,
+                          size: 14,
                         ),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
-                            item.views,
+                            content.rating?.toString() ?? '0.0',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: text11(
@@ -709,7 +815,7 @@ class _MoviePosterCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            item.title,
+            content.title ?? '',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: text13(
@@ -719,7 +825,7 @@ class _MoviePosterCard extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            item.meta ?? '',
+            content.genre?.join(' • ') ?? '',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: text11(color: AppColors.grey600),

@@ -1,4 +1,6 @@
+import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
 
@@ -9,89 +11,30 @@ class WishListScreen extends StatefulWidget {
   State<WishListScreen> createState() => _WishListScreenState();
 }
 
-class _WishListScreenState extends State<WishListScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
-  final List<Map<String, dynamic>> _movies = [
-    {
-      'title': 'Oppenheimer',
-      'genre': 'Drama • History',
-      'rating': '8.5',
-      'year': '2023',
-      'tag': 'Available',
-    },
-    {
-      'title': 'Dune: Part Two',
-      'genre': 'Sci-Fi • Adventure',
-      'rating': '8.8',
-      'year': '2024',
-      'tag': 'New',
-    },
-    {
-      'title': 'Poor Things',
-      'genre': 'Comedy • Drama',
-      'rating': '8.0',
-      'year': '2023',
-      'tag': 'Available',
-    },
-    {
-      'title': 'Civil War',
-      'genre': 'Action • Drama',
-      'rating': '7.5',
-      'year': '2024',
-      'tag': 'Coming Soon',
-    },
-  ];
-
-  final List<Map<String, dynamic>> _shows = [
-    {
-      'title': 'The Bear',
-      'genre': 'Drama • Comedy',
-      'rating': '8.9',
-      'year': '2023',
-      'tag': 'New Season',
-    },
-    {
-      'title': 'House of the Dragon',
-      'genre': 'Fantasy • Drama',
-      'rating': '8.5',
-      'year': '2024',
-      'tag': 'Available',
-    },
-    {
-      'title': 'Fallout',
-      'genre': 'Sci-Fi • Action',
-      'rating': '8.4',
-      'year': '2024',
-      'tag': 'New',
-    },
-  ];
-
+class _WishListScreenState extends State<WishListScreen> {
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<WatchlistProvider>().fetchWatchlist();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<WatchlistProvider>();
+
     return Scaffold(
       backgroundColor: AppColors.white,
       body: Column(
         children: [
           _buildHeader(context),
           Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [_buildList(_movies), _buildList(_shows)],
-            ),
+            child: provider.isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : provider.error != null
+                    ? Center(child: Text(provider.error!))
+                    : _buildList(provider),
           ),
         ],
       ),
@@ -102,7 +45,7 @@ class _WishListScreenState extends State<WishListScreen>
     return Container(
       padding: EdgeInsets.only(
         top: MediaQuery.of(context).padding.top + 12,
-        bottom: 0,
+        bottom: 15,
         left: 16,
         right: 16,
       ),
@@ -117,46 +60,42 @@ class _WishListScreenState extends State<WishListScreen>
           bottomRight: Radius.circular(28),
         ),
       ),
-      child: Column(
+      child: Row(
         children: [
-          Row(
-            children: [
-              GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.18),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.arrow_back_ios_new_rounded,
-                    color: Colors.white,
-                    size: 16,
-                  ),
-                ),
+          GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.18),
+                borderRadius: BorderRadius.circular(10),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Text(
-                  'Wish List',
-                  style: text18(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+              child: const Icon(
+                Icons.arrow_back_ios_new_rounded,
+                color: Colors.white,
+                size: 16,
               ),
-            ],
+            ),
           ),
-
-          const SizedBox(height: 12),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              'Wish List',
+              style: text18(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildList(List<Map<String, dynamic>> items) {
+  Widget _buildList(WatchlistProvider provider) {
+    final items = provider.items;
+
     if (items.isEmpty) {
       return Center(
         child: Column(
@@ -197,28 +136,13 @@ class _WishListScreenState extends State<WishListScreen>
       padding: const EdgeInsets.all(16),
       itemCount: items.length,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (context, index) =>
-          _buildWishCard(items[index], index, items),
+      itemBuilder: (context, index) => _buildWishCard(items[index], provider),
     );
   }
 
-  Widget _buildWishCard(
-    Map<String, dynamic> item,
-    int index,
-    List<Map<String, dynamic>> list,
-  ) {
-    Color tagColor;
-    switch (item['tag']) {
-      case 'New':
-      case 'New Season':
-        tagColor = AppColors.success;
-        break;
-      case 'Coming Soon':
-        tagColor = AppColors.warning;
-        break;
-      default:
-        tagColor = AppColors.info;
-    }
+  Widget _buildWishCard(dynamic watchlistItem, WatchlistProvider provider) {
+    final item = watchlistItem.item;
+    if (item == null) return const SizedBox();
 
     return Container(
       decoration: BoxDecoration(
@@ -237,17 +161,27 @@ class _WishListScreenState extends State<WishListScreen>
         padding: const EdgeInsets.all(12),
         child: Row(
           children: [
-            Container(
-              width: 60,
-              height: 80,
-              decoration: BoxDecoration(
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                width: 60,
+                height: 80,
                 color: AppColors.grey100,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(
-                Icons.movie_outlined,
-                color: AppColors.grey400,
-                size: 28,
+                child: item.poster != null
+                    ? Image.network(
+                        item.poster!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Icon(
+                          Icons.movie_outlined,
+                          color: AppColors.grey400,
+                          size: 28,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.movie_outlined,
+                        color: AppColors.grey400,
+                        size: 28,
+                      ),
               ),
             ),
             const SizedBox(width: 14),
@@ -255,30 +189,8 @@ class _WishListScreenState extends State<WishListScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: tagColor.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          item['tag'],
-                          style: text10(
-                            color: tagColor,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
                   Text(
-                    item['title'],
+                    item.title ?? 'Untitled',
                     style: text15(
                       color: AppColors.textPrimary,
                       fontWeight: FontWeight.w700,
@@ -286,7 +198,7 @@ class _WishListScreenState extends State<WishListScreen>
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    item['genre'],
+                    item.genre?.join(' • ') ?? 'No Genre',
                     style: text12(color: AppColors.textSecondary),
                   ),
                   const SizedBox(height: 6),
@@ -299,7 +211,7 @@ class _WishListScreenState extends State<WishListScreen>
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        item['rating'],
+                        item.rating?.toString() ?? '0.0',
                         style: text12(
                           color: AppColors.textPrimary,
                           fontWeight: FontWeight.w600,
@@ -307,7 +219,7 @@ class _WishListScreenState extends State<WishListScreen>
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        '• ${item['year']}',
+                        '• ${item.releaseYear ?? ''}',
                         style: text12(color: AppColors.textSecondary),
                       ),
                     ],
@@ -318,7 +230,9 @@ class _WishListScreenState extends State<WishListScreen>
             Column(
               children: [
                 GestureDetector(
-                  onTap: () {},
+                  onTap: () {
+                    // Navigate to player or details
+                  },
                   child: Container(
                     width: 36,
                     height: 36,
@@ -335,7 +249,7 @@ class _WishListScreenState extends State<WishListScreen>
                 ),
                 const SizedBox(height: 8),
                 GestureDetector(
-                  onTap: () => setState(() => list.removeAt(index)),
+                  onTap: () => provider.removeItem(watchlistItem.id),
                   child: Container(
                     width: 36,
                     height: 36,

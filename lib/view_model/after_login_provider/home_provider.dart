@@ -1,3 +1,5 @@
+import 'package:catch_watch/models/content_model.dart';
+import 'package:catch_watch/repository/content_repository.dart';
 import 'package:catch_watch/views/after_login_pages/home_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/profile_screen.dart';
 import 'package:catch_watch/views/after_login_pages/upload_video/reel_upload_screen.dart';
@@ -7,11 +9,31 @@ import 'package:flutter/material.dart';
 import '../../views/after_login_pages/short_video_screen.dart';
 
 class HomeScreenProvider extends ChangeNotifier {
+  final ContentRepository _contentRepository = ContentRepository();
+
   int _pageIndex = 0;
   bool _showButtons = false;
+  bool _isLoading = false;
+  String? _error;
+
+  List<Content> _allContent = [];
+  List<Content> _trending = [];
+  List<Content> _movies = [];
+  List<Content> _banners = [];
 
   int get pageIndex => _pageIndex;
   bool get showButtons => _showButtons;
+  bool get isLoading => _isLoading;
+  String? get error => _error;
+
+  List<Content> get allContent => _allContent;
+  List<Content> get trending => _trending;
+  List<Content> get movies => _movies;
+  List<Content> get bannersList => _banners;
+
+  HomeScreenProvider() {
+    fetchContent();
+  }
 
   List<Widget> get screenPage => [
     HomeScreen(), // Home Tab
@@ -42,180 +64,50 @@ class HomeScreenProvider extends ChangeNotifier {
     'Reality',
   ];
 
-  final List<CarouselItem> banners = const [
-    CarouselItem(
-      image: 'assets/banner/1.jpg',
-      title: 'DHURANDHAR',
-      subtitle: 'The Revenge',
-      meta: '2026  •  Adventure / Spy  •  3h 49m',
-      badge: 'NEW RELEASE',
-    ),
-    CarouselItem(
-      image: 'assets/banner/3.avif',
-      title: 'DHURANDHAR',
-      subtitle: 'The Revenge',
-      meta: '2026  •  Adventure / Spy  •  3h 49m',
-      badge: 'NEW RELEASE',
-    ),
-  ];
+  List<ContentItem> _continueWatching = [];
+  List<ContentItem> get continueWatching => _continueWatching;
 
-  final List<ContentItem> trending = const [
-    ContentItem(
-      image: 'assets/images/1.png',
-      views: '125k',
-      title: 'Dark Realm',
-    ),
-    ContentItem(
-      image: 'assets/images/2.png',
-      views: '89k',
-      title: 'Into the Wild',
-    ),
-    ContentItem(
-      image: 'assets/images/3.png',
-      views: '204k',
-      title: 'Thunder Strike',
-    ),
-    ContentItem(image: 'assets/images/1.png', views: '67k', title: 'The Crown'),
-  ];
+  Future<void> fetchContent() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
 
-  final List<ContentItem> continueWatching = const [
-    ContentItem(
-      image: 'assets/images/2.png',
-      views: '125k',
-      title: 'Dhurandhar',
-      progress: '0.65',
-      remaining: '1h 14m remaining',
-      meta: 'Movie • Spy Thriller',
-      episode: 'Resume from 1:42:18',
-      badge: '4K',
-    ),
-    ContentItem(
-      image: 'assets/images/1.png',
-      views: '89k',
-      title: 'Into the Wild',
-      progress: '0.3',
-      remaining: '2h 10m remaining',
-      meta: 'Series • S1 E4',
-      episode: 'Episode 4: The River Run',
-      badge: 'HD',
-    ),
-    ContentItem(
-      image: 'assets/images/3.png',
-      views: '204k',
-      title: 'Thunder Strike',
-      progress: '0.48',
-      remaining: '42m remaining',
-      meta: 'Movie • Action',
-      episode: 'Resume from 48:02',
-      badge: 'NEW',
-    ),
-    ContentItem(
-      image: 'assets/images/1.png',
-      views: '67k',
-      title: 'The Crown',
-      progress: '0.82',
-      remaining: '12m remaining',
-      meta: 'Series • S2 E7',
-      episode: 'Episode 7: Royal Turn',
-      badge: 'HD',
-    ),
-    ContentItem(
-      image: 'assets/images/2.png',
-      views: '312k',
-      title: 'Midnight Case',
-      progress: '0.18',
-      remaining: '1h 51m remaining',
-      meta: 'Movie • Crime Drama',
-      episode: 'Resume from 22:34',
-      badge: 'TOP 10',
-    ),
-    ContentItem(
-      image: 'assets/images/3.png',
-      views: '45k',
-      title: 'Campus Diaries',
-      progress: '0.57',
-      remaining: '23m remaining',
-      meta: 'Series • S1 E2',
-      episode: 'Episode 2: Fresh Start',
-      badge: 'HD',
-    ),
-  ];
+    try {
+      final response = await _contentRepository.getContent();
+      if (response.success == true) {
+        _allContent = response.content ?? [];
+        _trending = _allContent.where((c) => c.isTrending == true).toList();
+        _movies = _allContent.where((c) => c.type == 'movie').toList();
+        _banners = _allContent.where((c) => c.category?.contains('trending') ?? false).toList();
+        
+        // If banners are empty, use the first few items
+        if (_banners.isEmpty && _allContent.isNotEmpty) {
+          _banners = _allContent.take(3).toList();
+        }
 
-  final List<ContentItem> actionMovies = const [
-    ContentItem(
-      image: 'assets/images/3.png',
-      views: '204k',
-      title: 'Thunder Strike',
-      meta: 'Action • 2h 18m',
-      badge: '4K',
-    ),
-    ContentItem(
-      image: 'assets/images/2.png',
-      views: '312k',
-      title: 'Dhurandhar',
-      meta: 'Spy Action • 3h 49m',
-      badge: 'TOP 10',
-    ),
-    ContentItem(
-      image: 'assets/images/1.png',
-      views: '178k',
-      title: 'Steel Chase',
-      meta: 'Action Thriller • 2h 05m',
-      badge: 'HD',
-    ),
-    ContentItem(
-      image: 'assets/images/3.png',
-      views: '98k',
-      title: 'Red Target',
-      meta: 'Crime Action • 1h 56m',
-      badge: 'NEW',
-    ),
-    ContentItem(
-      image: 'assets/images/2.png',
-      views: '221k',
-      title: 'Final Mission',
-      meta: 'Adventure • 2h 22m',
-      badge: '4K',
-    ),
-  ];
+        // Mock "Continue Watching" from real content if available
+        if (_allContent.isNotEmpty) {
+          _continueWatching = _allContent.take(2).map((c) => ContentItem(
+            image: c.poster ?? '',
+            views: '100k',
+            title: c.title ?? '',
+            progress: '0.4',
+            remaining: '45m remaining',
+            content: c,
+          )).toList();
+        }
+      } else {
+        _error = 'Failed to load content';
+      }
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
 
-  final List<ContentItem> horrorMovies = const [
-    ContentItem(
-      image: 'assets/images/1.png',
-      views: '154k',
-      title: 'Dark Realm',
-      meta: 'Horror • 1h 48m',
-      badge: 'HD',
-    ),
-    ContentItem(
-      image: 'assets/images/3.png',
-      views: '86k',
-      title: 'Night House',
-      meta: 'Supernatural • 1h 52m',
-      badge: 'NEW',
-    ),
-    ContentItem(
-      image: 'assets/images/2.png',
-      views: '119k',
-      title: 'Midnight Case',
-      meta: 'Mystery Horror • 2h 01m',
-      badge: 'TOP 10',
-    ),
-    ContentItem(
-      image: 'assets/images/1.png',
-      views: '73k',
-      title: 'The Last Door',
-      meta: 'Psychological • 1h 44m',
-      badge: 'HD',
-    ),
-    ContentItem(
-      image: 'assets/images/3.png',
-      views: '132k',
-      title: 'Haunted Signal',
-      meta: 'Found Footage • 1h 37m',
-      badge: '4K',
-    ),
-  ];
+  // ... (remove the old const continueWatching)
 
   int get selectedTabIndex => _selectedTabIndex;
   int get currentBannerIndex => _currentBannerIndex;
@@ -256,6 +148,7 @@ class ContentItem {
   final String? episode;
   final String? badge;
   final String title;
+  final Content? content;
 
   const ContentItem({
     required this.image,
@@ -266,5 +159,6 @@ class ContentItem {
     this.meta,
     this.episode,
     this.badge,
+    this.content,
   });
 }

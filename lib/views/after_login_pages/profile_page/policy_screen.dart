@@ -1,83 +1,88 @@
+import 'package:catch_watch/models/legal_model.dart';
+import 'package:catch_watch/view_model/after_login_provider/legal_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
+import 'package:provider/provider.dart';
 
 import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
 
-class PolicyScreen extends StatelessWidget {
-  const PolicyScreen({super.key});
+class PolicyScreen extends StatefulWidget {
+  final String type;
+  const PolicyScreen({super.key, required this.type});
 
-  static const List<Map<String, String>> _sections = [
-    {
-      'title': 'Information We Collect',
-      'body':
-          'We collect account details, profile information, watch activity, search history, and device data needed to run and improve Catch Watch.',
-    },
-    {
-      'title': 'How We Use Information',
-      'body':
-          'Your information helps us personalize recommendations, manage subscriptions, improve playback quality, provide support, and keep the app secure.',
-    },
-    {
-      'title': 'Content & Downloads',
-      'body':
-          'Downloaded content is available for personal use inside the app. Availability may depend on your plan, device, location, and content rights.',
-    },
-    {
-      'title': 'Data Sharing',
-      'body':
-          'We do not sell your personal information. We may share limited data with trusted service providers for payments, analytics, support, and app operations.',
-    },
-    {
-      'title': 'Your Choices',
-      'body':
-          'You can update your profile, manage notifications, review subscriptions, and contact support for account or privacy-related requests.',
-    },
-    {
-      'title': 'Security',
-      'body':
-          'We use reasonable safeguards to protect your data, but no digital service can guarantee complete security at all times.',
-    },
-  ];
+  @override
+  State<PolicyScreen> createState() => _PolicyScreenState();
+}
+
+class _PolicyScreenState extends State<PolicyScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<LegalProvider>().fetchLegalDocuments();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<LegalProvider>();
+    final doc = provider.getDocumentByType(widget.type);
+
     return Scaffold(
       backgroundColor: AppColors.white,
       body: Column(
         children: [
-          _buildHeader(context),
+          _buildHeader(context, doc?.title ?? _getDefaultTitle()),
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildUpdatedCard(),
-                  const SizedBox(height: 18),
-                  ..._sections.map(
-                    (section) => _policySection(
-                      section['title'] ?? '',
-                      section['body'] ?? '',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'For questions about this policy, contact support@catchwatch.com.',
-                    style: text13(
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            child: provider.isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : provider.error != null
+                    ? Center(child: Text(provider.error!))
+                    : doc == null
+                        ? const Center(child: Text('Document not found'))
+                        : SingleChildScrollView(
+                            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildUpdatedCard(doc.updatedAt),
+                                const SizedBox(height: 18),
+                                HtmlWidget(
+                                  doc.content ?? '',
+                                  textStyle: text14(color: AppColors.textSecondary),
+                                ),
+                                const SizedBox(height: 20),
+                                Text(
+                                  'For questions about this policy, contact support@catchwatch.com.',
+                                  style: text13(
+                                    color: AppColors.textSecondary,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  String _getDefaultTitle() {
+    switch (widget.type) {
+      case 'privacy-policy':
+        return 'Privacy Policy';
+      case 'terms-conditions':
+        return 'Terms & Conditions';
+      case 'refund-policy':
+        return 'Refund Policy';
+      default:
+        return 'Legal';
+    }
+  }
+
+  Widget _buildHeader(BuildContext context, String title) {
     return Container(
       width: double.infinity,
       padding: EdgeInsets.only(
@@ -122,8 +127,8 @@ class PolicyScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Privacy Policy',
-                  style: text24(
+                  title,
+                  style: text20(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
                   ),
@@ -141,7 +146,15 @@ class PolicyScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildUpdatedCard() {
+  Widget _buildUpdatedCard(String? updatedAt) {
+    String date = 'Recently';
+    if (updatedAt != null) {
+      try {
+        final dateTime = DateTime.parse(updatedAt);
+        date = "${dateTime.day}/${dateTime.month}/${dateTime.year}";
+      } catch (e) {}
+    }
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -178,48 +191,8 @@ class PolicyScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text('June 2, 2026', style: text12(color: AppColors.grey600)),
+                Text(date, style: text12(color: AppColors.grey600)),
               ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _policySection(String title, String body) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.grey200, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.black.withOpacity(0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: text15(
-              color: AppColors.textPrimary,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            body,
-            style: appTextStyle(
-              fontSize: 13,
-              color: AppColors.textSecondary,
-              height: 1.5,
             ),
           ),
         ],

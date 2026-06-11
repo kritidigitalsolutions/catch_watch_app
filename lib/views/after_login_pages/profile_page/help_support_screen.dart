@@ -1,4 +1,6 @@
+import 'package:catch_watch/view_model/after_login_provider/help_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
 
@@ -10,94 +12,44 @@ class HelpSupportScreen extends StatefulWidget {
 }
 
 class _HelpSupportScreenState extends State<HelpSupportScreen> {
-  final _searchController = TextEditingController();
   int? _expandedFaqIndex;
 
-  final List<Map<String, dynamic>> _faqList = [
-    {
-      'question': 'How do I cancel my subscription?',
-      'answer':
-          'You can cancel your subscription anytime from Profile > Subscription > Cancel Plan. Your access continues until the end of the billing period.',
-    },
-    {
-      'question': 'Why is my video not playing?',
-      'answer':
-          'Check your internet connection. If the issue persists, try clearing the app cache from Settings > App Info > Clear Cache, or reinstall the app.',
-    },
-    {
-      'question': 'Can I download content for offline viewing?',
-      'answer':
-          'Yes! Premium and Standard plan users can download content. Tap the download icon on any movie or episode page to save it offline.',
-    },
-    {
-      'question': 'How many devices can I use simultaneously?',
-      'answer':
-          'Basic plan: 1 device. Standard plan: 2 devices. Premium plan: up to 4 devices at the same time.',
-    },
-    {
-      'question': 'How do I change my password?',
-      'answer':
-          'Go to Profile > Edit Profile > Change Password. You can also reset it from the login screen using "Forgot Password".',
-    },
-    {
-      'question': 'What should I do if a payment fails?',
-      'answer':
-          'Verify your card details and billing address. Make sure your card is not expired or blocked for online transactions. Contact your bank if the issue continues.',
-    },
-  ];
-
-  final List<Map<String, dynamic>> _contactOptions = [
-    {
-      'icon': Icons.chat_bubble_outline_rounded,
-      'title': 'Live Chat',
-      'subtitle': 'Chat with us now',
-      'badge': 'Online',
-      'badgeColor': AppColors.success,
-    },
-    {
-      'icon': Icons.mail_outline_rounded,
-      'title': 'Email Support',
-      'subtitle': 'support@catchwatch.com',
-      'badge': '24h reply',
-      'badgeColor': AppColors.info,
-    },
-    {
-      'icon': Icons.phone_outlined,
-      'title': 'Call Us',
-      'subtitle': '+1 800 000 0000',
-      'badge': '9AM–6PM',
-      'badgeColor': AppColors.warning,
-    },
-  ];
-
   @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<HelpProvider>().fetchHelpData();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<HelpProvider>();
+
     return Scaffold(
       backgroundColor: AppColors.white,
       body: Column(
         children: [
           _buildHeader(context),
           Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 20),
-                  _buildContactRow(),
-                  const SizedBox(height: 24),
-                  // _buildQuickLinks(),
-                  // const SizedBox(height: 24),
-                  _buildFaqSection(),
-                  const SizedBox(height: 32),
-                ],
-              ),
-            ),
+            child: provider.isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : RefreshIndicator(
+                    onRefresh: provider.fetchHelpData,
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 20),
+                          _buildContactRow(provider),
+                          const SizedBox(height: 24),
+                          _buildFaqSection(provider),
+                          const SizedBox(height: 32),
+                        ],
+                      ),
+                    ),
+                  ),
           ),
         ],
       ),
@@ -143,7 +95,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
               ),
             ),
           ),
-          SizedBox(width: 10),
+          const SizedBox(width: 10),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -163,7 +115,40 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     );
   }
 
-  Widget _buildContactRow() {
+  Widget _buildContactRow(HelpProvider provider) {
+    // Manually add Live Chat as instructed not to change it
+    final List<Map<String, dynamic>> staticOptions = [
+      {
+        'icon': Icons.chat_bubble_outline_rounded,
+        'title': 'Live Chat',
+        'badge': 'Online',
+        'badgeColor': AppColors.success,
+        'onTap': () {},
+      },
+    ];
+
+    // Map support items from API
+    final List<Map<String, dynamic>> apiOptions = provider.supportItems.map((item) {
+      bool isEmail = item.question?.toLowerCase().contains('email') ?? false;
+      String contactInfo = isEmail ? (item.answer ?? '') : (item.supportNumber ?? '');
+      
+      return {
+        'icon': isEmail ? Icons.mail_outline_rounded : Icons.phone_outlined,
+        'title': item.question ?? '',
+        'badge': contactInfo, // Show actual email or phone number here
+        'badgeColor': isEmail ? AppColors.info : AppColors.warning,
+        'onTap': () {
+          if (isEmail) {
+            provider.launchEmail(contactInfo);
+          } else {
+            provider.launchPhone(contactInfo);
+          }
+        },
+      };
+    }).toList();
+
+    final allOptions = [...staticOptions, ...apiOptions];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -183,14 +168,14 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             scrollDirection: Axis.horizontal,
-            itemCount: _contactOptions.length,
+            itemCount: allOptions.length,
             separatorBuilder: (_, _) => const SizedBox(width: 12),
             itemBuilder: (context, index) {
-              final item = _contactOptions[index];
+              final item = allOptions[index];
               return GestureDetector(
-                onTap: () {},
+                onTap: item['onTap'],
                 child: Container(
-                  width: 130,
+                  width: 140,
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: AppColors.white,
@@ -215,30 +200,22 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
                       const Spacer(),
                       Text(
                         item['title'],
-                        style: text13(
+                        style: text12(
                           color: AppColors.textPrimary,
                           fontWeight: FontWeight.w700,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 2),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
+                      const SizedBox(height: 4),
+                      Text(
+                        item['badge'],
+                        style: text10(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w500,
                         ),
-                        decoration: BoxDecoration(
-                          color: (item['badgeColor'] as Color).withOpacity(
-                            0.12,
-                          ),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          item['badge'],
-                          style: text10(
-                            color: item['badgeColor'] as Color,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -251,74 +228,9 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     );
   }
 
-  // Widget _buildQuickLinks() {
-  //   final links = [
-  //     {'icon': Icons.receipt_long_outlined, 'label': 'Billing'},
-  //     {'icon': Icons.play_circle_outline_rounded, 'label': 'Playback'},
-  //     {'icon': Icons.account_circle_outlined, 'label': 'Account'},
-  //     {'icon': Icons.security_outlined, 'label': 'Privacy'},
-  //   ];
+  Widget _buildFaqSection(HelpProvider provider) {
+    if (provider.faqItems.isEmpty) return const SizedBox();
 
-  //   return Column(
-  //     crossAxisAlignment: CrossAxisAlignment.start,
-  //     children: [
-  //       Padding(
-  //         padding: const EdgeInsets.symmetric(horizontal: 20),
-  //         child: Text(
-  //           'Browse Topics',
-  //           style: text16(
-  //             color: AppColors.textPrimary,
-  //             fontWeight: FontWeight.w700,
-  //           ),
-  //         ),
-  //       ),
-  //       const SizedBox(height: 12),
-  //       Padding(
-  //         padding: const EdgeInsets.symmetric(horizontal: 20),
-  //         child: Row(
-  //           children: links
-  //               .map(
-  //                 (item) => Expanded(
-  //                   child: GestureDetector(
-  //                     onTap: () {},
-  //                     child: Container(
-  //                       margin: EdgeInsets.only(
-  //                         right: item == links.last ? 0 : 10,
-  //                       ),
-  //                       padding: const EdgeInsets.symmetric(vertical: 14),
-  //                       decoration: BoxDecoration(
-  //                         color: const Color(0xFFFFF5F0),
-  //                         borderRadius: BorderRadius.circular(14),
-  //                       ),
-  //                       child: Column(
-  //                         children: [
-  //                           Icon(
-  //                             item['icon'] as IconData,
-  //                             color: AppColors.primary,
-  //                             size: 22,
-  //                           ),
-  //                           const SizedBox(height: 6),
-  //                           Text(
-  //                             item['label'] as String,
-  //                             style: text11(
-  //                               color: AppColors.textPrimary,
-  //                               fontWeight: FontWeight.w600,
-  //                             ),
-  //                           ),
-  //                         ],
-  //                       ),
-  //                     ),
-  //                   ),
-  //                 ),
-  //               )
-  //               .toList(),
-  //         ),
-  //       ),
-  //     ],
-  //   );
-  // }
-
-  Widget _buildFaqSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -333,8 +245,8 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        ...List.generate(_faqList.length, (index) {
-          final item = _faqList[index];
+        ...List.generate(provider.faqItems.length, (index) {
+          final item = provider.faqItems[index];
           final isExpanded = _expandedFaqIndex == index;
           return GestureDetector(
             onTap: () {
@@ -363,7 +275,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
                       children: [
                         Expanded(
                           child: Text(
-                            item['question'],
+                            item.question ?? '',
                             style: text14(
                               color: AppColors.textPrimary,
                               fontWeight: FontWeight.w600,
@@ -382,7 +294,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
                       const Divider(color: AppColors.grey200, height: 1),
                       const SizedBox(height: 10),
                       Text(
-                        item['answer'],
+                        item.answer ?? '',
                         style: text13(
                           color: AppColors.textSecondary,
                           fontWeight: FontWeight.w400,

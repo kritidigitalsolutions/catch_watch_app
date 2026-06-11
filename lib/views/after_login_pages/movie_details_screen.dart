@@ -1,3 +1,4 @@
+import 'package:catch_watch/models/content_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/text_style.dart';
 import 'package:catch_watch/view_model/after_login_provider/movie_details_provider.dart';
@@ -6,12 +7,13 @@ import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
 class MovieDetailScreen extends StatelessWidget {
-  const MovieDetailScreen({super.key});
+  final Content content;
+  const MovieDetailScreen({super.key, required this.content});
 
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (_) => MovieDetailProvider(),
+      create: (_) => MovieDetailProvider(content),
       child: const _MovieDetailView(),
     );
   }
@@ -144,11 +146,13 @@ class _VideoContent extends StatelessWidget {
       return Stack(
         fit: StackFit.expand,
         children: [
-          Image.network(
-            provider.movie.thumbnailUrl,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => Container(color: Colors.grey[900]),
-          ),
+          provider.content.poster != null
+              ? Image.network(
+                  provider.content.poster!,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Container(color: Colors.grey[900]),
+                )
+              : Container(color: Colors.grey[900]),
           Container(color: Colors.black.withOpacity(0.5)),
           const Center(
             child: SizedBox(
@@ -194,7 +198,7 @@ class _PlayerTopBar extends StatelessWidget {
             const SizedBox(width: 4),
             Expanded(
               child: Text(
-                provider.movie.title,
+                provider.content.title ?? '',
                 style: text14(
                   color: AppColors.white,
                   fontWeight: FontWeight.w600,
@@ -439,12 +443,12 @@ class _MovieInfoHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final movie = context.read<MovieDetailProvider>().movie;
+    final content = context.read<MovieDetailProvider>().content;
     final infoStr = [
-      movie.year,
-      movie.duration,
-      ...movie.languages,
-    ].join(' · ');
+      content.releaseYear?.toString(),
+      content.duration,
+      content.language,
+    ].where((e) => e != null).join(' · ');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -454,7 +458,7 @@ class _MovieInfoHeader extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                movie.title,
+                content.title ?? '',
                 style: text20(fontWeight: FontWeight.bold),
               ),
             ),
@@ -474,7 +478,7 @@ class _MovieInfoHeader extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    movie.rating.toString(),
+                    content.rating?.toString() ?? '0.0',
                     style: text13(
                       color: AppColors.warning,
                       fontWeight: FontWeight.w700,
@@ -487,31 +491,33 @@ class _MovieInfoHeader extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(infoStr, style: text12(color: AppColors.textSecondary)),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          children: movie.genres
-              .map(
-                (g) => Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.grey100,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    g,
-                    style: text11(
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w600,
+        if (content.genre != null) ...[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            children: content.genre!
+                .map(
+                  (g) => Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.grey100,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      g,
+                      style: text11(
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                ),
-              )
-              .toList(),
-        ),
+                )
+                .toList(),
+          ),
+        ],
       ],
     );
   }
@@ -635,7 +641,9 @@ class _DescriptionSectionState extends State<_DescriptionSection> {
 
   @override
   Widget build(BuildContext context) {
-    final desc = context.read<MovieDetailProvider>().movie.description;
+    final desc = context.read<MovieDetailProvider>().content.description;
+    if (desc == null || desc.isEmpty) return const SizedBox();
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -678,7 +686,9 @@ class _CastSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cast = context.read<MovieDetailProvider>().movie.cast;
+    final cast = context.read<MovieDetailProvider>().content.cast;
+    if (cast == null || cast.isEmpty) return const SizedBox();
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -690,7 +700,7 @@ class _CastSection extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             itemCount: cast.length,
             separatorBuilder: (_, _) => const SizedBox(width: 14),
-            itemBuilder: (_, i) => _CastCard(member: cast[i]),
+            itemBuilder: (_, i) => _CastCard(name: cast[i]),
           ),
         ),
       ],
@@ -699,8 +709,8 @@ class _CastSection extends StatelessWidget {
 }
 
 class _CastCard extends StatelessWidget {
-  final CastMember member;
-  const _CastCard({required this.member});
+  final String name;
+  const _CastCard({required this.name});
 
   @override
   Widget build(BuildContext context) {
@@ -716,22 +726,15 @@ class _CastCard extends StatelessWidget {
               width: 2,
             ),
           ),
-          child: ClipOval(
-            child: Image.network(
-              member.imageUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => Container(
-                color: AppColors.grey200,
-                child: const Icon(Icons.person, color: AppColors.grey400),
-              ),
-            ),
+          child: const ClipOval(
+            child: Icon(Icons.person, color: AppColors.grey400, size: 30),
           ),
         ),
         const SizedBox(height: 6),
         SizedBox(
           width: 64,
           child: Text(
-            member.name,
+            name,
             style: text10(color: AppColors.textSecondary),
             textAlign: TextAlign.center,
             maxLines: 2,
@@ -748,109 +751,9 @@ class _MoreLikeThisSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final movies = context.read<MovieDetailProvider>().movie.moreLikeThis;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('More like this', style: text16(fontWeight: FontWeight.w700)),
-            GestureDetector(
-              onTap: () {},
-              child: Text(
-                'View More',
-                style: text13(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 160,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: movies.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 12),
-            itemBuilder: (_, i) => _MovieThumbCard(movie: movies[i]),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MovieThumbCard extends StatelessWidget {
-  final MovieModel movie;
-  const _MovieThumbCard({required this.movie});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {},
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Stack(
-          children: [
-            Image.network(
-              movie.thumbnailUrl,
-              width: 110,
-              height: 160,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) =>
-                  Container(width: 110, height: 160, color: AppColors.grey200),
-            ),
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(8, 20, 8, 8),
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [Colors.black87, Colors.transparent],
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      movie.title,
-                      style: text11(
-                        color: AppColors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.star_rounded,
-                          color: AppColors.warning,
-                          size: 10,
-                        ),
-                        const SizedBox(width: 2),
-                        Text(
-                          movie.rating.toString(),
-                          style: text10(color: Colors.white70),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    // For now, we can use trending content as "more like this" or similar
+    // Since we don't have a direct field for it in Content model
+    return const SizedBox();
   }
 }
 
