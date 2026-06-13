@@ -1,5 +1,6 @@
 import 'package:catch_watch/models/content_model.dart';
 import 'package:catch_watch/repository/content_repository.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/views/after_login_pages/home_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/profile_screen.dart';
 import 'package:catch_watch/views/after_login_pages/upload_video/reel_upload_screen.dart';
@@ -33,6 +34,25 @@ class HomeScreenProvider extends ChangeNotifier {
 
   HomeScreenProvider() {
     fetchContent();
+    _loadWatchHistory();
+  }
+
+  void _loadWatchHistory() {
+    final history = HiveService.getWatchHistory();
+    if (history.isNotEmpty) {
+      _continueWatching = history.values.map((data) {
+        final Map<String, dynamic> itemData = Map<String, dynamic>.from(data);
+        return ContentItem(
+          image: itemData['image'],
+          views: itemData['views'] ?? '100k',
+          title: itemData['title'],
+          progress: itemData['progress'],
+          remaining: itemData['remaining'],
+          content: itemData['content'] != null ? Content.fromJson(Map<String, dynamic>.from(itemData['content'])) : null,
+        );
+      }).toList();
+      notifyListeners();
+    }
   }
 
   List<Widget> get screenPage => [
@@ -67,6 +87,41 @@ class HomeScreenProvider extends ChangeNotifier {
   List<ContentItem> _continueWatching = [];
   List<ContentItem> get continueWatching => _continueWatching;
 
+  void addToContinueWatching(Content content, Duration position, Duration total) {
+    if (total.inMilliseconds == 0) return;
+    final progress = position.inMilliseconds / total.inMilliseconds;
+    final remaining = total - position;
+    
+    final newItem = ContentItem(
+      image: content.poster ?? '',
+      views: '100k',
+      title: content.title ?? '',
+      progress: progress.toStringAsFixed(2),
+      remaining: '${remaining.inMinutes}m remaining',
+      content: content,
+    );
+
+    // Save to Hive
+    HiveService.saveWatchHistory(content.id!, {
+      'image': newItem.image,
+      'title': newItem.title,
+      'progress': newItem.progress,
+      'remaining': newItem.remaining,
+      'content': content.toJson(),
+    });
+
+    // Remove if already exists to move it to the front
+    _continueWatching.removeWhere((item) => item.content?.id == content.id);
+    _continueWatching.insert(0, newItem);
+    
+    // Keep only last 10
+    if (_continueWatching.length > 10) {
+      _continueWatching.removeLast();
+    }
+    
+    notifyListeners();
+  }
+
   Future<void> fetchContent() async {
     _isLoading = true;
     _error = null;
@@ -85,17 +140,17 @@ class HomeScreenProvider extends ChangeNotifier {
           _banners = _allContent.take(3).toList();
         }
 
-        // Mock "Continue Watching" from real content if available
-        if (_allContent.isNotEmpty) {
-          _continueWatching = _allContent.take(2).map((c) => ContentItem(
-            image: c.poster ?? '',
-            views: '100k',
-            title: c.title ?? '',
-            progress: '0.4',
-            remaining: '45m remaining',
-            content: c,
-          )).toList();
-        }
+        // Remove dummy data from fetchContent
+        // if (_allContent.isNotEmpty) {
+        //   _continueWatching = _allContent.take(2).map((c) => ContentItem(
+        //     image: c.poster ?? '',
+        //     views: '100k',
+        //     title: c.title ?? '',
+        //     progress: '0.4',
+        //     remaining: '45m remaining',
+        //     content: c,
+        //   )).toList();
+        // }
       } else {
         _error = 'Failed to load content';
       }

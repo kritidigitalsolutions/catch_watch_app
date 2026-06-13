@@ -1,3 +1,5 @@
+import 'package:catch_watch/res/appUrl.dart';
+
 class UserModel {
   String? id;
   String? phone;
@@ -11,6 +13,9 @@ class UserModel {
   String? status;
   String? fcmToken;
   String? username;
+  int? followersCount;
+  int? followingCount;
+  int? reelsCount;
   String? createdAt;
   String? updatedAt;
 
@@ -27,6 +32,9 @@ class UserModel {
     this.status,
     this.fcmToken,
     this.username,
+    this.followersCount,
+    this.followingCount,
+    this.reelsCount,
     this.createdAt,
     this.updatedAt,
   });
@@ -35,7 +43,16 @@ class UserModel {
     id = json['id'] ?? json['_id'];
     phone = json['phone'];
     name = json['name'];
-    profileImage = json['profileImage'];
+    
+    String fixUrl(String? url) {
+      if (url == null || url.isEmpty) return '';
+      if (url.startsWith('http')) {
+        return url.replaceAll('http://localhost:5000', AppUrl.serverUrl);
+      }
+      return '${AppUrl.serverUrl}/$url';
+    }
+    
+    profileImage = fixUrl(json['profileImage']);
     bio = json['bio'];
     genres = json['genres'] != null ? List<String>.from(json['genres']) : null;
     authProvider = json['authProvider'];
@@ -44,6 +61,9 @@ class UserModel {
     status = json['status'];
     fcmToken = json['fcmToken'];
     username = json['username'];
+    followersCount = json['followersCount'];
+    followingCount = json['followingCount'];
+    reelsCount = json['reelsCount'];
     createdAt = json['createdAt'];
     updatedAt = json['updatedAt'];
   }
@@ -62,6 +82,9 @@ class UserModel {
     data['status'] = status;
     data['fcmToken'] = fcmToken;
     data['username'] = username;
+    data['followersCount'] = followersCount;
+    data['followingCount'] = followingCount;
+    data['reelsCount'] = reelsCount;
     data['createdAt'] = createdAt;
     data['updatedAt'] = updatedAt;
     return data;

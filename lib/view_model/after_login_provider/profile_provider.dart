@@ -1,5 +1,10 @@
+import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/models/user_model.dart';
+import 'package:catch_watch/models/watchlist_model.dart';
 import 'package:catch_watch/repository/auth_repository.dart';
+import 'package:catch_watch/repository/reels_repository.dart';
+import 'package:catch_watch/repository/watchlist_repository.dart';
+import 'package:catch_watch/repository/interaction_repository.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/utils/hive_service/userdetail.dart';
 import 'package:dio/dio.dart' as dio;
@@ -8,14 +13,11 @@ import 'package:image_picker/image_picker.dart';
 
 enum ProfileTab { videos, cuts, saved, liked }
 
-class VideoItem {
-  final String image;
-  final String views;
-  const VideoItem({required this.image, required this.views});
-}
-
 class ProfileProvider extends ChangeNotifier {
   final AuthRepository _authRepository = AuthRepository();
+  final ReelsRepository _reelsRepository = ReelsRepository();
+  final WatchlistRepository _watchlistRepository = WatchlistRepository();
+
   ProfileTab _activeTab = ProfileTab.videos;
 
   UserModel? _user;
@@ -23,10 +25,17 @@ class ProfileProvider extends ChangeNotifier {
   String? _error;
   String? _selectedImagePath;
 
+  List<ReelModel> _myReels = [];
+  List<ReelModel> _bookmarkedReels = [];
+  List<WatchlistItem> _watchlist = [];
+
   UserModel? get user => _user;
   bool get isLoading => _isLoading;
   String? get error => _error;
   String? get selectedImagePath => _selectedImagePath;
+  List<ReelModel> get myReels => _myReels;
+  List<ReelModel> get bookmarkedReels => _bookmarkedReels;
+  List<WatchlistItem> get watchlist => _watchlist;
 
   ProfileProvider() {
     _loadUserFromHive();
@@ -62,6 +71,11 @@ class ProfileProvider extends ChangeNotifier {
           currentHiveUser.image = _user?.profileImage;
           await HiveService.saveUser(currentHiveUser);
         }
+
+        // Fetch reels and watchlist too
+        await fetchMyReels();
+        await fetchWatchlist();
+        await fetchBookmarkedReels();
       } else {
         _error = response['message'] ?? 'Failed to fetch profile';
       }
@@ -71,6 +85,47 @@ class ProfileProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> fetchMyReels() async {
+    try {
+      final response = await _reelsRepository.getMyReels();
+      if (response['success'] == true) {
+        _myReels = (response['reels'] as List)
+            .map((e) => ReelModel.fromJson(e))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('Error fetching my reels: $e');
+    }
+    notifyListeners();
+  }
+
+  Future<void> fetchWatchlist() async {
+    try {
+      final response = await _watchlistRepository.getWatchlist();
+      if (response.success == true) {
+        _watchlist = response.data ?? [];
+      }
+    } catch (e) {
+      debugPrint('Error fetching watchlist: $e');
+    }
+    notifyListeners();
+  }
+
+  Future<void> fetchBookmarkedReels() async {
+    try {
+      final response = await InteractionRepository().getBookmarks();
+      if (response['success'] == true) {
+        _bookmarkedReels = (response['bookmarks'] as List)
+            .where((e) => e['contentType'] == 'reel' && e['contentDetails'] != null)
+            .map((e) => ReelModel.fromJson(e['contentDetails']))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('Error fetching bookmarked reels: $e');
+    }
+    notifyListeners();
   }
 
   Future<void> logout(BuildContext context) async {
@@ -142,25 +197,36 @@ class ProfileProvider extends ChangeNotifier {
   String get name => _user?.name ?? 'Guest User';
   String get handle => _user?.username ?? '@guest';
   String get avatarAsset => _user?.profileImage ?? 'assets/images/logo.jpg';
-  String get videosCount => '0';
-  String get followers => '0';
-  String get following => '0';
-
-  final List<VideoItem> videos = const [
-    VideoItem(image: 'assets/images/1.png', views: '125k'),
-    VideoItem(image: 'assets/images/2.png', views: '89k'),
-    VideoItem(image: 'assets/images/3.png', views: '204k'),
-    VideoItem(image: 'assets/images/1.png', views: '67k'),
-    VideoItem(image: 'assets/images/2.png', views: '312k'),
-    VideoItem(image: 'assets/images/3.png', views: '45k'),
-    VideoItem(image: 'assets/images/1.png', views: '178k'),
-    VideoItem(image: 'assets/images/2.png', views: '92k'),
-    VideoItem(image: 'assets/images/3.png', views: '561k'),
-  ];
+  String get videosCount => _myReels.length.toString();
+  String get followers => _user?.followersCount?.toString() ?? '0';
+  String get following => _user?.followingCount?.toString() ?? '0';
 
   ProfileTab get activeTab => _activeTab;
 
-  List<VideoItem> get currentTabItems => videos; // extend for cuts/saved/liked tabs
+  List<dynamic> get currentTabItems {
+    switch (_activeTab) {
+      case ProfileTab.videos:
+        return _myReels;
+      case ProfileTab.cuts:
+        return []; // cuts ko empty rakho
+      case ProfileTab.saved:
+        return _bookmarkedReels; // saved show bookmark reels
+      default:
+        return [];
+    }
+  }
+
+  Future<void> deleteReel(String reelId) async {
+    try {
+      final response = await _reelsRepository.deleteReel(reelId);
+      if (response['success'] == true) {
+        _myReels.removeWhere((r) => r.id == reelId);
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error deleting reel: $e');
+    }
+  }
 
   void setTab(ProfileTab tab) {
     _activeTab = tab;

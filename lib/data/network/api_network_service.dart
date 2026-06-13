@@ -79,6 +79,21 @@ class NetworkApiService extends BaseApiService {
     }
   }
 
+  Future<dynamic> postApiWithProgress(String url, dynamic data, {Function(int, int)? onSendProgress}) async {
+    try {
+      debugPrint("POST API CALL (Progress) => $url");
+      final response = await _dio.post(
+        url,
+        data: data,
+        onSendProgress: onSendProgress,
+      );
+      return returnResponse(response);
+    } on DioException catch (e) {
+      debugPrint("POST API ERROR => ${e.message}");
+      throw _handleDioError(e);
+    }
+  }
+
   @override
   Future<dynamic> patchApi(String url, dynamic data) async {
     try {

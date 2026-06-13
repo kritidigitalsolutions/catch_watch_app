@@ -202,7 +202,7 @@ class _FilePreview extends StatelessWidget {
           width: 80,
           height: 80,
           decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.12),
+            color: AppColors.primary.withValues(alpha: 0.12),
             shape: BoxShape.circle,
           ),
           child: const Icon(
@@ -240,49 +240,8 @@ class _FilePreview extends StatelessWidget {
         ),
         const SizedBox(height: 24),
 
-        // Upload progress
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    provider.uploadComplete ? 'Upload complete' : 'Uploading…',
-                    style: text12(
-                      color: provider.uploadComplete
-                          ? AppColors.success
-                          : AppColors.textSecondary,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  Text(
-                    '${provider.uploadPercent}%',
-                    style: text12(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: provider.uploadProgress,
-                  backgroundColor: AppColors.grey300,
-                  valueColor: const AlwaysStoppedAnimation(AppColors.primary),
-                  minHeight: 6,
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 20),
-
         // Change file
+        if (!provider.isUploading)
         GestureDetector(
           onTap: () => provider.pickVideo(),
           child: Text(

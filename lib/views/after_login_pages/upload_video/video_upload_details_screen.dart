@@ -44,15 +44,15 @@ class _VideoDetailView extends StatelessWidget {
           children: [
             _UploadProgressCard(),
             const SizedBox(height: 24),
-            _TitleField(),
-            const SizedBox(height: 20),
+            // _TitleField(),
+            // const SizedBox(height: 20),
             _CaptionField(),
             const SizedBox(height: 20),
-            _CommentsField(),
-            const SizedBox(height: 20),
+            // _CommentsField(),
+            // const SizedBox(height: 20),
             _HashtagsField(),
             const SizedBox(height: 20),
-            _VisibilitySection(),
+            // _VisibilitySection(),
             const SizedBox(height: 32),
             _PublishButton(),
             const SizedBox(height: 24),
@@ -130,9 +130,14 @@ class _UploadProgressCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
-                if (provider.isUploading) ...[
+                if (provider.uploadError != null)
                   Text(
-                    'Uploading your video in just 5 minutes',
+                    provider.uploadError!,
+                    style: text11(color: AppColors.error),
+                  )
+                else if (provider.isUploading) ...[
+                  Text(
+                    'Uploading your video...',
                     style: text11(color: AppColors.textSecondary),
                   ),
                   const SizedBox(height: 8),
@@ -161,7 +166,7 @@ class _UploadProgressCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                ] else ...[
+                ] else if (provider.uploadComplete) ...[
                   Row(
                     children: [
                       const Icon(
@@ -179,7 +184,11 @@ class _UploadProgressCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                ],
+                ] else
+                   Text(
+                    'Ready to upload',
+                    style: text11(color: AppColors.textSecondary),
+                  ),
                 const SizedBox(height: 4),
                 Text(
                   '${provider.fileSizeMB} MB',
@@ -390,7 +399,21 @@ class _PublishButton extends StatelessWidget {
       width: double.infinity,
       height: 52,
       child: ElevatedButton(
-        onPressed: provider.isFormValid ? provider.publish : null,
+        onPressed: (provider.isFormValid && !provider.isUploading)
+            ? () async {
+                final success = await provider.publish();
+                if (success && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Reel uploaded successfully!')),
+                  );
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                } else if (provider.uploadError != null && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(provider.uploadError!)),
+                  );
+                }
+              }
+            : null,
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primary,
           disabledBackgroundColor: AppColors.grey300,
@@ -399,10 +422,19 @@ class _PublishButton extends StatelessWidget {
           ),
           elevation: 0,
         ),
-        child: Text(
-          'Publish',
-          style: text16(fontWeight: FontWeight.w600, color: AppColors.white),
-        ),
+        child: provider.isUploading
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
+              )
+            : Text(
+                'Publish',
+                style: text16(fontWeight: FontWeight.w600, color: AppColors.white),
+              ),
       ),
     );
   }

@@ -1,7 +1,9 @@
 import 'package:catch_watch/models/plan_model.dart';
+import 'package:catch_watch/view_model/after_login_provider/profile_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
 
@@ -14,14 +16,172 @@ class SubscriptionScreen extends StatefulWidget {
 
 class _SubscriptionScreenState extends State<SubscriptionScreen> {
   String? _expandedPlanId;
+  late Razorpay _razorpay;
+  String? _pendingPlanId;
 
   @override
   void initState() {
     super.initState();
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<SubscriptionProvider>().fetchPlans();
       context.read<SubscriptionProvider>().fetchSubscriptionStatus();
     });
+  }
+
+  @override
+  void dispose() {
+    _razorpay.clear();
+    super.dispose();
+  }
+
+  void _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    final provider = context.read<SubscriptionProvider>();
+    if (_pendingPlanId == null) return;
+
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final success = await provider.verifyPayment({
+      "razorpay_order_id": response.orderId,
+      "razorpay_payment_id": response.paymentId,
+      "razorpay_signature": response.signature,
+      "planId": _pendingPlanId,
+    });
+
+    if (mounted) Navigator.pop(context); // Close loading dialog
+
+    if (success && mounted) {
+      _showSuccessPopup();
+    } else if (mounted) {
+      _showErrorPopup(provider.error ?? 'Payment verification failed', true);
+    }
+    _pendingPlanId = null;
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    if (mounted) {
+      _showErrorPopup('Payment Failed: ${response.message}', true);
+    }
+  }
+
+  void _showSuccessPopup() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 64),
+            const SizedBox(height: 16),
+            Text('Payment Successful!', style: text18(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 12),
+            Text(
+              'Great! Your plan is purchased. It will be activated in 5 to 10 minutes.',
+              textAlign: TextAlign.center,
+              style: text14(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: Text('Done', style: text14(color: Colors.white, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showErrorPopup(String message, bool showTryAgain) {
+    final plan = context.read<SubscriptionProvider>().plans.firstWhere((p) => p.id == _pendingPlanId, orElse: () => Plan());
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Payment Status', style: text18(fontWeight: FontWeight.w800)),
+        content: Text(message, style: text14(color: AppColors.textSecondary)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: text14(color: AppColors.textSecondary)),
+          ),
+          if (showTryAgain && plan.id != null)
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _startPayment(plan);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: Text('Try Again', style: text14(color: Colors.white)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    debugPrint("External Wallet: ${response.walletName}");
+  }
+
+  Future<void> _startPayment(Plan plan) async {
+    final provider = context.read<SubscriptionProvider>();
+    final user = context.read<ProfileProvider>().user;
+
+    _pendingPlanId = plan.id;
+    final response = await provider.createOrder(plan.id!);
+
+    if (response != null && response['order'] != null) {
+      final order = response['order'];
+      final razorpayKey = response['key'];
+
+      var options = {
+        'key': razorpayKey ?? 'rzp_test_SztpB3DjlEhcKW',
+        'amount': order['amount'],
+        'name': 'Catch Watch',
+        'order_id': order['id'],
+        'description': plan.name,
+        'prefill': {
+          'contact': user?.phone ?? '',
+          'email': '',
+        },
+        'external': {
+          'wallets': ['paytm']
+        }
+      };
+
+      try {
+        _razorpay.open(options);
+      } catch (e) {
+        debugPrint('Error: $e');
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(provider.error ?? 'Failed to create order')),
+        );
+      }
+    }
   }
 
   @override
@@ -283,13 +443,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             child: ElevatedButton(
               onPressed: isCurrent || provider.isLoading
                   ? null
-                  : () async {
-                      final success = await provider.subscribe(plan.id!);
-                      if (success && mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Subscribed Successfully!')));
-                      }
-                    },
+                  : () => _startPayment(plan),
               style: ElevatedButton.styleFrom(
                 backgroundColor: isCurrent ? AppColors.grey400 : AppColors.primary,
                 foregroundColor: Colors.white,

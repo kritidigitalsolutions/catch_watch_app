@@ -1,4 +1,5 @@
 import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
+import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../res/app_colors.dart';
@@ -144,129 +145,144 @@ class _WishListScreenState extends State<WishListScreen> {
     final item = watchlistItem.item;
     if (item == null) return const SizedBox();
 
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.grey200, width: 0.8),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => MovieDetailScreen(content: item),
           ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Container(
-                width: 60,
-                height: 80,
-                color: AppColors.grey100,
-                child: item.poster != null
-                    ? Image.network(
-                        item.poster!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(
+        );
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.grey200, width: 0.8),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  width: 60,
+                  height: 80,
+                  color: AppColors.grey100,
+                  child: item.poster != null
+                      ? Image.network(
+                          item.poster!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Icon(
+                            Icons.movie_outlined,
+                            color: AppColors.grey400,
+                            size: 28,
+                          ),
+                        )
+                      : const Icon(
                           Icons.movie_outlined,
                           color: AppColors.grey400,
                           size: 28,
                         ),
-                      )
-                    : const Icon(
-                        Icons.movie_outlined,
-                        color: AppColors.grey400,
-                        size: 28,
-                      ),
+                ),
               ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.title ?? 'Untitled',
+                      style: text15(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      item.genre?.join(' • ') ?? 'No Genre',
+                      style: text12(color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.star_rounded,
+                          color: AppColors.yellow,
+                          size: 14,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          item.rating?.toString() ?? '0.0',
+                          style: text12(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '• ${item.releaseYear ?? ''}',
+                          style: text12(color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Column(
                 children: [
-                  Text(
-                    item.title ?? 'Untitled',
-                    style: text15(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w700,
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => MovieDetailScreen(content: item),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF0E8),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.play_arrow_rounded,
+                        color: AppColors.primary,
+                        size: 20,
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    item.genre?.join(' • ') ?? 'No Genre',
-                    style: text12(color: AppColors.textSecondary),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.star_rounded,
-                        color: AppColors.yellow,
-                        size: 14,
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: () => provider.removeItem(watchlistItem.id),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF0F0),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        item.rating?.toString() ?? '0.0',
-                        style: text12(
-                          color: AppColors.textPrimary,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      child: const Icon(
+                        Icons.favorite_rounded,
+                        color: AppColors.error,
+                        size: 18,
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '• ${item.releaseYear ?? ''}',
-                        style: text12(color: AppColors.textSecondary),
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),
-            ),
-            Column(
-              children: [
-                GestureDetector(
-                  onTap: () {
-                    // Navigate to player or details
-                  },
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFF0E8),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(
-                      Icons.play_arrow_rounded,
-                      color: AppColors.primary,
-                      size: 20,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                GestureDetector(
-                  onTap: () => provider.removeItem(watchlistItem.id),
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFEF0F0),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(
-                      Icons.favorite_rounded,
-                      color: AppColors.error,
-                      size: 18,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

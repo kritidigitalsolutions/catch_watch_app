@@ -84,6 +84,51 @@ class SubscriptionProvider extends ChangeNotifier {
     }
   }
 
+  Future<Map<String, dynamic>?> createOrder(String planId, {String? promoCode}) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final response = await _planRepository.createOrder(planId, promoCode: promoCode);
+      if (response['success'] == true) {
+        return response;
+      } else {
+        _error = response['message'] ?? 'Failed to create order';
+        return null;
+      }
+    } catch (e) {
+      _error = e.toString();
+      return null;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> verifyPayment(Map<String, dynamic> paymentData) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final response = await _planRepository.verifyPayment(paymentData);
+      if (response['success'] == true) {
+        await fetchSubscriptionStatus();
+        return true;
+      } else {
+        _error = response['message'] ?? 'Payment verification failed';
+        return false;
+      }
+    } catch (e) {
+      _error = e.toString();
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<bool> cancelSubscription() async {
     if (_currentSubscription == null) {
       _error = "No active subscription";

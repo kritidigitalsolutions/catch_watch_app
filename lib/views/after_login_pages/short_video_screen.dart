@@ -1,7 +1,11 @@
+import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
+import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../res/appUrl.dart' show AppUrl;
 import '../../utils/text_style.dart';
 
 class ShortVideoPlayerScreen extends StatefulWidget {
@@ -15,8 +19,38 @@ class ShortVideoPlayerScreen extends StatefulWidget {
 
 class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
   final PageController _pageController = PageController();
-  final List<_ShortVideo> _shorts = _dummyShorts;
   int _currentIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final reelsProvider = context.read<ReelsProvider>();
+      reelsProvider.fetchReelsFeed().then((_) {
+        if (reelsProvider.targetReelId != null) {
+          _handleTargetReel();
+        }
+      });
+    });
+  }
+
+  Future<void> _handleTargetReel() async {
+    final reelsProvider = context.read<ReelsProvider>();
+    final targetId = reelsProvider.targetReelId;
+    if (targetId == null) return;
+
+    // Ensure the reel is in the list (fetch if missing)
+    await reelsProvider.ensureReelVisible(targetId);
+    
+    final index = reelsProvider.reels.indexWhere((r) => r.id == targetId);
+    if (index != -1 && mounted) {
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(index);
+        setState(() => _currentIndex = index);
+        reelsProvider.setTargetReelId(null);
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -28,97 +62,160 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
     setState(() => _currentIndex = index);
   }
 
-  void _toggleLike(int index) {
-    setState(() {
-      final short = _shorts[index];
-      short.isLiked = !short.isLiked;
-      short.likes += short.isLiked ? 1 : -1;
-    });
-  }
+  void _showComments(ReelModel reel) {
+    final provider = context.read<ReelsProvider>();
+    provider.fetchComments(reel.id!);
+    final TextEditingController commentController = TextEditingController();
 
-  void _toggleSave(int index) {
-    setState(() {
-      _shorts[index].isSaved = !_shorts[index].isSaved;
-    });
-  }
-
-  void _showComments(_ShortVideo short) {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF141414),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder: (context) {
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 38,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(99),
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: SafeArea(
+            top: false,
+            child: Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.7,
+              ),
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 38,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.24),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 18),
-                Text(
-                  '${short.comments} comments',
-                  style: text18(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Text(
+                        'Comments',
+                        style: text18(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${reel.commentsCount ?? 0}',
+                        style: text14(color: Colors.white70),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 16),
-                ...short.sampleComments.map(
-                  (comment) => Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: Consumer<ReelsProvider>(
+                      builder: (context, p, _) {
+                        if (p.isCommentsLoading) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+                        if (p.currentComments.isEmpty) {
+                          return const Center(
+                            child: Text('No comments yet', style: TextStyle(color: Colors.white70)),
+                          );
+                        }
+                        return ListView.builder(
+                          itemCount: p.currentComments.length,
+                          itemBuilder: (context, index) {
+                            final comment = p.currentComments[index];
+                            final user = comment['user'];
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  CircleAvatar(
+                                    radius: 16,
+                                    backgroundImage: user?['profileImage'] != null && user['profileImage'].toString().isNotEmpty
+                                        ? NetworkImage(user['profileImage'].toString().startsWith('http') 
+                                            ? user['profileImage'] 
+                                            : '${AppUrl.serverUrl}/${user['profileImage']}')
+                                        : null,
+                                    child: user?['profileImage'] == null || user!['profileImage'].toString().isEmpty
+                                        ? Text(user?['name']?[0] ?? '?')
+                                        : null,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          user?['username'] ?? 'User',
+                                          style: text12(color: Colors.white70, fontWeight: FontWeight.bold),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          comment['text'] ?? '',
+                                          style: text14(color: Colors.white),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  const Divider(color: Colors.white12),
+                  Container(
+                    margin: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                    ),
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CircleAvatar(
-                          radius: 18,
-                          backgroundColor: comment.color,
-                          child: Text(
-                            comment.name[0],
-                            style: text14(
-                              color: AppColors.white,
-                              fontWeight: FontWeight.w700,
+                        Expanded(
+                          child: TextField(
+                            controller: commentController,
+                            style: const TextStyle(color: Colors.white, fontSize: 14),
+                            decoration: const InputDecoration(
+                              hintText: 'Add a comment...',
+                              hintStyle: TextStyle(color: Colors.white54, fontSize: 14),
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(horizontal: 8),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                comment.name,
-                                style: text14(
-                                  color: AppColors.white,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                comment.message,
-                                style: text14(color: AppColors.white70),
-                              ),
-                            ],
-                          ),
+                        IconButton(
+                          icon: const Icon(Icons.send_rounded, color: AppColors.primary, size: 20),
+                          onPressed: () async {
+                            if (commentController.text.trim().isNotEmpty) {
+                              final text = commentController.text.trim();
+                              commentController.clear();
+                              final success = await provider.postComment(reel.id!, text);
+                              if (!success) {
+                                // Maybe show a toast
+                              }
+                            }
+                          },
                         ),
                       ],
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -128,22 +225,44 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<ReelsProvider>();
+
+    // Listen for targetReelId even after initState (if already on this screen)
+    if (widget.isVisible && provider.targetReelId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _handleTargetReel());
+    }
+
+    if (provider.isLoading && provider.reels.isEmpty) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+      );
+    }
+
+    if (provider.reels.isEmpty) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: Text('No reels available', style: TextStyle(color: Colors.white))),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: PageView.builder(
         controller: _pageController,
         scrollDirection: Axis.vertical,
-        itemCount: _shorts.length,
+        itemCount: provider.reels.length,
         onPageChanged: _onPageChanged,
-        physics: const BouncingScrollPhysics(), // ✅ ADD
+        physics: const BouncingScrollPhysics(),
         itemBuilder: (context, index) {
+          final reel = provider.reels[index];
           return _ShortVideoPage(
-            key: ValueKey(_shorts[index].videoUrl),
-            short: _shorts[index],
+            key: ValueKey(reel.id),
+            reel: reel,
             isActive: widget.isVisible && index == _currentIndex,
-            onLike: () => _toggleLike(index),
-            onSave: () => _toggleSave(index),
-            onComment: () => _showComments(_shorts[index]),
+            onLike: () => provider.toggleLike(reel.id!),
+            onSave: () => provider.toggleBookmark(reel.id!),
+            onComment: () => _showComments(reel),
           );
         },
       ),
@@ -152,7 +271,7 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
 }
 
 class _ShortVideoPage extends StatefulWidget {
-  final _ShortVideo short;
+  final ReelModel reel;
   final bool isActive;
   final VoidCallback onLike;
   final VoidCallback onSave;
@@ -160,7 +279,7 @@ class _ShortVideoPage extends StatefulWidget {
 
   const _ShortVideoPage({
     super.key,
-    required this.short,
+    required this.reel,
     required this.isActive,
     required this.onLike,
     required this.onSave,
@@ -180,7 +299,7 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   void initState() {
     super.initState();
     _controller = VideoPlayerController.networkUrl(
-      Uri.parse(widget.short.videoUrl),
+      Uri.parse(widget.reel.videoUrl ?? ''),
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
     );
     _initializeVideo();
@@ -192,7 +311,7 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
       await _controller.setLooping(true);
       if (!mounted) return;
       setState(() {});
-      _syncPlayback(); // ✅ YAHAN ADD KARO — pehle yeh missing tha
+      _syncPlayback();
     } catch (_) {
       if (mounted) setState(() {});
     }
@@ -255,7 +374,7 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
         children: [
           _VideoBackground(
             controller: _controller,
-            short: widget.short,
+            reel: widget.reel,
             hasStarted: _hasStarted,
           ),
           const _ShortGradient(),
@@ -275,7 +394,9 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
                 const Spacer(),
                 IconButton(
                   tooltip: 'Search',
-                  onPressed: () {},
+                  onPressed: () {
+                    // Implement search
+                  },
                   icon: const Icon(Icons.search, color: Colors.white),
                 ),
                 IconButton(
@@ -290,7 +411,7 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
             right: 12,
             bottom: 112,
             child: _ShortActions(
-              short: widget.short,
+              reel: widget.reel,
               onLike: widget.onLike,
               onSave: widget.onSave,
               onComment: widget.onComment,
@@ -300,12 +421,12 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
             left: 16,
             right: 82,
             bottom: 34,
-            child: _ShortInfo(short: widget.short),
+            child: _ShortInfo(reel: widget.reel),
           ),
           Positioned(
             right: 18,
             bottom: 40,
-            child: _MusicDisc(image: widget.short.posterAsset),
+            child: _MusicDisc(image: widget.reel.thumbnail),
           ),
           if (!_controller.value.isInitialized)
             const Center(
@@ -320,7 +441,7 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
                 width: 74,
                 height: 74,
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.45),
+                  color: Colors.black.withValues(alpha: 0.45),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -338,19 +459,21 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
 
 class _VideoBackground extends StatelessWidget {
   final VideoPlayerController controller;
-  final _ShortVideo short;
+  final ReelModel reel;
   final bool hasStarted;
 
   const _VideoBackground({
     required this.controller,
-    required this.short,
+    required this.reel,
     required this.hasStarted,
   });
 
   @override
   Widget build(BuildContext context) {
     if (!controller.value.isInitialized) {
-      return Image.asset(short.posterAsset, fit: BoxFit.cover);
+      return reel.thumbnail != null && reel.thumbnail!.isNotEmpty
+          ? Image.network(reel.thumbnail!, fit: BoxFit.cover)
+          : Container(color: Colors.black);
     }
 
     return FittedBox(
@@ -375,10 +498,10 @@ class _ShortGradient extends StatelessWidget {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Colors.black.withOpacity(0.42),
+            Colors.black.withValues(alpha: 0.42),
             Colors.transparent,
             Colors.transparent,
-            Colors.black.withOpacity(0.9),
+            Colors.black.withValues(alpha: 0.9),
           ],
           stops: const [0, 0.26, 0.55, 1],
         ),
@@ -388,43 +511,45 @@ class _ShortGradient extends StatelessWidget {
 }
 
 class _ShortActions extends StatelessWidget {
-  final _ShortVideo short;
+  final ReelModel reel;
   final VoidCallback onLike;
   final VoidCallback onSave;
   final VoidCallback onComment;
 
   const _ShortActions({
-    required this.short,
+    required this.reel,
     required this.onLike,
     required this.onSave,
     required this.onComment,
   });
+
+  bool get _isLiked => reel.userInteraction?.toUpperCase() == 'LIKE';
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         _ActionButton(
-          icon: short.isLiked
-              ? Icons.favorite_rounded
+          icon: _isLiked 
+              ? Icons.favorite_rounded 
               : Icons.favorite_border_rounded,
-          label: _compactCount(short.likes),
-          color: short.isLiked ? const Color(0xFFFF3D57) : Colors.white,
+          label: _compactCount(reel.likesCount ?? 0),
+          color: _isLiked ? AppColors.primary : Colors.white,
           onTap: onLike,
         ),
         const SizedBox(height: 18),
         _ActionButton(
           icon: Icons.mode_comment_outlined,
-          label: _compactCount(short.comments),
+          label: _compactCount(reel.commentsCount ?? 0),
           onTap: onComment,
         ),
         const SizedBox(height: 18),
         _ActionButton(
-          icon: short.isSaved
-              ? Icons.bookmark_rounded
+          icon: reel.isBookmarked == true 
+              ? Icons.bookmark_rounded 
               : Icons.bookmark_border_rounded,
-          label: short.isSaved ? 'Saved' : 'Save',
-          color: short.isSaved ? const Color(0xFFFFC145) : Colors.white,
+          label: reel.isBookmarked == true ? 'Saved' : 'Save',
+          color: reel.isBookmarked == true ? Colors.amber : Colors.white,
           onTap: onSave,
         ),
         const SizedBox(height: 18),
@@ -432,12 +557,8 @@ class _ShortActions extends StatelessWidget {
           icon: Icons.share_rounded,
           label: 'Share',
           onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Share ${short.title}'),
-                duration: const Duration(milliseconds: 900),
-              ),
-            );
+            // Placeholder for share
+            debugPrint('Sharing reel: ${reel.id}');
           },
         ),
       ],
@@ -469,7 +590,7 @@ class _ActionButton extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.38),
+              color: Colors.black.withValues(alpha: 0.38),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: color, size: 29),
@@ -492,9 +613,9 @@ class _ActionButton extends StatelessWidget {
 }
 
 class _ShortInfo extends StatelessWidget {
-  final _ShortVideo short;
+  final ReelModel reel;
 
-  const _ShortInfo({required this.short});
+  const _ShortInfo({required this.reel});
 
   @override
   Widget build(BuildContext context) {
@@ -506,60 +627,58 @@ class _ShortInfo extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 22,
-              backgroundColor: short.avatarColor,
-              child: Text(
-                short.creator[0],
-                style: text18(color: Colors.white, fontWeight: FontWeight.w800),
-              ),
+              backgroundImage: reel.user?.profileImage != null && reel.user!.profileImage!.isNotEmpty
+                  ? NetworkImage(reel.user!.profileImage!)
+                  : null,
+              backgroundColor: AppColors.primary,
+              child: reel.user?.profileImage == null || reel.user!.profileImage!.isEmpty
+                  ? Text(
+                      reel.user?.name?[0] ?? '?',
+                      style: text18(color: Colors.white, fontWeight: FontWeight.w800),
+                    )
+                  : null,
             ),
             const SizedBox(width: 10),
             Flexible(
               child: Text(
-                '@${short.creator}',
+                reel.user?.username ?? '@unknown',
                 overflow: TextOverflow.ellipsis,
                 style: text16(color: Colors.white, fontWeight: FontWeight.w800),
               ),
             ),
-            const SizedBox(width: 10),
-            Container(
-              height: 30,
-              padding: const EdgeInsets.symmetric(horizontal: 13),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                'Follow',
-                style: text12(color: Colors.black, fontWeight: FontWeight.w800),
-              ),
-            ),
+            // const SizedBox(width: 10),
+            // Container(
+            //   height: 30,
+            //   padding: const EdgeInsets.symmetric(horizontal: 13),
+            //   alignment: Alignment.center,
+            //   decoration: BoxDecoration(
+            //     color: Colors.white,
+            //     borderRadius: BorderRadius.circular(20),
+            //   ),
+            //   child: Text(
+            //     'Follow',
+            //     style: text12(color: Colors.black, fontWeight: FontWeight.w800),
+            //   ),
+            // ),
           ],
         ),
         const SizedBox(height: 12),
         Text(
-          short.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: text16(color: Colors.white, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 5),
-        Text(
-          short.caption,
+          reel.caption ?? '',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: text14(color: Colors.white.withOpacity(0.86)),
+          style: text14(color: Colors.white.withValues(alpha: 0.86)),
         ),
         const SizedBox(height: 9),
         Row(
           children: [
             const Icon(Icons.music_note, color: Colors.white, size: 16),
             const SizedBox(width: 5),
-            Expanded(
+            const Expanded(
               child: Text(
-                short.sound,
+                'Original Audio',
                 overflow: TextOverflow.ellipsis,
-                style: text12(color: Colors.white, fontWeight: FontWeight.w600),
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12),
               ),
             ),
           ],
@@ -570,7 +689,7 @@ class _ShortInfo extends StatelessWidget {
 }
 
 class _MusicDisc extends StatelessWidget {
-  final String image;
+  final String? image;
 
   const _MusicDisc({required this.image});
 
@@ -581,7 +700,9 @@ class _MusicDisc extends StatelessWidget {
       height: 48,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        image: DecorationImage(image: AssetImage(image), fit: BoxFit.cover),
+        image: image != null && image!.isNotEmpty
+            ? DecorationImage(image: NetworkImage(image!), fit: BoxFit.cover)
+            : const DecorationImage(image: AssetImage('assets/images/logo.jpg'), fit: BoxFit.cover),
         border: Border.all(color: Colors.white, width: 2),
         boxShadow: const [
           BoxShadow(
@@ -605,48 +726,6 @@ class _MusicDisc extends StatelessWidget {
   }
 }
 
-class _ShortVideo {
-  final String creator;
-  final String title;
-  final String caption;
-  final String sound;
-  final String videoUrl;
-  final String posterAsset;
-  final Color avatarColor;
-  final List<_Comment> sampleComments;
-  int likes;
-  int comments;
-  bool isLiked;
-  bool isSaved;
-
-  _ShortVideo({
-    required this.creator,
-    required this.title,
-    required this.caption,
-    required this.sound,
-    required this.videoUrl,
-    required this.posterAsset,
-    required this.avatarColor,
-    required this.sampleComments,
-    required this.likes,
-    required this.comments,
-    this.isLiked = false,
-    this.isSaved = false,
-  });
-}
-
-class _Comment {
-  final String name;
-  final String message;
-  final Color color;
-
-  const _Comment({
-    required this.name,
-    required this.message,
-    required this.color,
-  });
-}
-
 String _compactCount(int value) {
   if (value >= 1000000) {
     return '${(value / 1000000).toStringAsFixed(1)}M';
@@ -656,102 +735,3 @@ String _compactCount(int value) {
   }
   return '$value';
 }
-
-final List<_ShortVideo> _dummyShorts = [
-  _ShortVideo(
-    creator: 'kimvastavik',
-    title: 'Morning chase',
-    caption: 'A tiny city moment with full movie energy.',
-    sound: 'Original audio - Catch Watch',
-    videoUrl:
-        'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4',
-    posterAsset: 'assets/images/1.png',
-    avatarColor: const Color(0xFFFF5F00),
-    likes: 12400,
-    comments: 248,
-    sampleComments: const [
-      _Comment(
-        name: 'Aarav',
-        message: 'This shot is so clean.',
-        color: Color(0xFF7C4DFF),
-      ),
-      _Comment(
-        name: 'Neha',
-        message: 'Need the full short film now.',
-        color: Color(0xFF009688),
-      ),
-    ],
-  ),
-  _ShortVideo(
-    creator: 'storycuts',
-    title: 'Late night reveal',
-    caption: 'When the final clue changes everything.',
-    sound: 'Suspense beat - Studio Mix',
-    videoUrl:
-        'https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4',
-    posterAsset: 'assets/images/2.png',
-    avatarColor: const Color(0xFF1565C0),
-    likes: 8700,
-    comments: 119,
-    sampleComments: const [
-      _Comment(
-        name: 'Riya',
-        message: 'The ending hook got me.',
-        color: Color(0xFFD81B60),
-      ),
-      _Comment(
-        name: 'Kabir',
-        message: 'This needs part two.',
-        color: Color(0xFF5D4037),
-      ),
-    ],
-  ),
-  _ShortVideo(
-    creator: 'framepilot',
-    title: 'Behind the stunt',
-    caption: 'No budget, just timing, teamwork and a fearless camera move.',
-    sound: 'Action loop - Creators Pack',
-    videoUrl:
-        'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4',
-    posterAsset: 'assets/images/3.png',
-    avatarColor: const Color(0xFF2E7D32),
-    likes: 20300,
-    comments: 412,
-    sampleComments: const [
-      _Comment(
-        name: 'Ishaan',
-        message: 'Camera movement is fire.',
-        color: Color(0xFFEF6C00),
-      ),
-      _Comment(
-        name: 'Tara',
-        message: 'Loved the practical setup.',
-        color: Color(0xFF00838F),
-      ),
-    ],
-  ),
-  _ShortVideo(
-    creator: 'reelcraft',
-    title: 'Golden hour magic',
-    caption: 'One shot, no edit, pure light.',
-    sound: 'Chill vibes - Reel Pack',
-    videoUrl:
-        'https://flutter.github.io/assets-for-api-docs/assets/videos/hummingbird.mp4',
-    posterAsset: 'assets/images/1.png',
-    avatarColor: const Color(0xFF6A1B9A),
-    likes: 31500,
-    comments: 674,
-    sampleComments: const [
-      _Comment(
-        name: 'Priya',
-        message: 'This light is unreal!',
-        color: Color(0xFFFDD835),
-      ),
-      _Comment(
-        name: 'Aryan',
-        message: 'Shot on what?',
-        color: Color(0xFF1E88E5),
-      ),
-    ],
-  ),
-];

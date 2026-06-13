@@ -14,9 +14,12 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import 'package:catch_watch/view_model/after_login_provider/help_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/download_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/notification_provider.dart';
-import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
+import 'package:catch_watch/view_model/before_login_provider/auth_providers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -43,6 +46,8 @@ void main() async {
         ChangeNotifierProvider(create: (_) => WatchlistProvider()),
         ChangeNotifierProvider(create: (_) => SubscriptionProvider()),
         ChangeNotifierProvider(create: (_) => NotificationProvider()),
+        ChangeNotifierProvider(create: (_) => ReelsProvider()),
+        ChangeNotifierProvider(create: (_) => DownloadProvider()),
       ],
       child: const MyApp(),
     ),

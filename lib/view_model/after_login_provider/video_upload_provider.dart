@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'package:catch_watch/repository/reels_repository.dart';
+import 'package:dio/dio.dart' as dio;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -7,16 +9,19 @@ enum VisibilityOption { public, private }
 enum PickError { none, tooLarge, cancelled, unsupported }
 
 class VideoUploadProvider extends ChangeNotifier {
+  final ReelsRepository _reelsRepository = ReelsRepository();
+
   // ── Picked file ──────────────────────────────────────────────────────────
   XFile? _pickedFile;
   double _fileSizeMB = 0;
   bool _isPicking = false;
   PickError _pickError = PickError.none;
 
-  // ── Upload simulation ────────────────────────────────────────────────────
+  // ── Upload ───────────────────────────────────────────────────────
   double _uploadProgress = 0;
   bool _isUploading = false;
   bool _uploadComplete = false;
+  String? _uploadError;
 
   // ── Form ─────────────────────────────────────────────────────────────────
   final TextEditingController titleController = TextEditingController();
@@ -39,19 +44,19 @@ class VideoUploadProvider extends ChangeNotifier {
   double get uploadProgress => _uploadProgress;
   bool get isUploading => _isUploading;
   bool get uploadComplete => _uploadComplete;
+  String? get uploadError => _uploadError;
 
   // Backwards-compat helpers used in card widget
   String get fileName => _pickedFile?.name ?? '';
   int get uploadPercent => (_uploadProgress * 100).toInt();
 
   VisibilityOption get visibility => _visibility;
-  bool get isFormValid => _title.trim().isNotEmpty && hasFile;
+  bool get isFormValid => hasFile;
 
   static const double maxFileMB = 100;
 
   VideoUploadProvider() {
-    titleController.addListener(() {
-      _title = titleController.text;
+    captionController.addListener(() {
       notifyListeners();
     });
   }
@@ -60,6 +65,7 @@ class VideoUploadProvider extends ChangeNotifier {
   Future<void> pickVideo() async {
     _isPicking = true;
     _pickError = PickError.none;
+    _uploadError = null;
     notifyListeners();
 
     try {
@@ -93,9 +99,6 @@ class VideoUploadProvider extends ChangeNotifier {
       _uploadComplete = false;
       _isPicking = false;
       notifyListeners();
-
-      // Auto-start upload simulation once file is picked
-      _simulateUpload();
     } catch (e) {
       _pickError = PickError.unsupported;
       _isPicking = false;
@@ -103,35 +106,55 @@ class VideoUploadProvider extends ChangeNotifier {
     }
   }
 
-  // ── Upload simulation (replace with real HTTP multipart in production) ────
-  Future<void> _simulateUpload() async {
-    _isUploading = true;
-    _uploadProgress = 0;
-    notifyListeners();
-
-    // Simulate speed proportional to file size
-    final delayMs = ((_fileSizeMB / maxFileMB) * 200 + 80).toInt();
-
-    for (int i = 1; i <= 100; i++) {
-      await Future.delayed(Duration(milliseconds: delayMs));
-      _uploadProgress = i / 100;
-      notifyListeners();
-    }
-
-    _isUploading = false;
-    _uploadComplete = true;
-    notifyListeners();
-  }
-
   void setVisibility(VisibilityOption option) {
     _visibility = option;
     notifyListeners();
   }
 
-  void publish() {
-    if (!isFormValid) return;
-    // TODO: wire to real API
+  Future<bool> publish() async {
+    if (_pickedFile == null) return false;
+    
+    _isUploading = true;
+    _uploadError = null;
+    _uploadProgress = 0.0;
     notifyListeners();
+
+    try {
+      dio.FormData formData = dio.FormData.fromMap({
+        'caption': captionController.text, // Use captionController
+        'hashtags': hashtagsController.text.split(' ').where((h) => h.startsWith('#')).toList(),
+        'video': await dio.MultipartFile.fromFile(
+          _pickedFile!.path,
+          filename: _pickedFile!.name,
+        ),
+      });
+
+      final response = await _reelsRepository.uploadReel(
+        formData,
+        onSendProgress: (sent, total) {
+          _uploadProgress = sent / total;
+          notifyListeners();
+        },
+      );
+
+      if (response['success'] == true) {
+        _uploadProgress = 1.0;
+        _uploadComplete = true;
+        _isUploading = false;
+        notifyListeners();
+        return true;
+      } else {
+        _uploadError = response['message'] ?? 'Failed to upload reel';
+        _isUploading = false;
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      _uploadError = e.toString();
+      _isUploading = false;
+      notifyListeners();
+      return false;
+    }
   }
 
   String? get pickErrorMessage {

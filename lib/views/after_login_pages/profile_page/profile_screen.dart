@@ -1,12 +1,18 @@
+import 'package:catch_watch/models/reel_model.dart';
+import 'package:catch_watch/models/watchlist_model.dart';
 import 'package:catch_watch/utils/custom_button.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/edit_profile_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/menu_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:video_player/video_player.dart';
+import '../../../models/content_model.dart';
 import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
 import '../../../view_model/after_login_provider/profile_provider.dart';
+import '../../../view_model/after_login_provider/reels_provider.dart';
+import '../movie_details_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -96,7 +102,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildTabRow(ProfileProvider provider) {
     final tabs = [
       (ProfileTab.videos, Icons.play_circle_outline_rounded, 'VIDEOS'),
-      (ProfileTab.cuts, Icons.content_cut_rounded, 'CUTS'),
+      (ProfileTab.cuts, Icons.cut_rounded, 'CUTS'),
       (ProfileTab.saved, Icons.bookmark_border_rounded, 'SAVED'),
     ];
 
@@ -188,7 +194,7 @@ class _ExpandedHeader extends StatelessWidget {
         ),
       ),
       child: Stack(
-        alignment: Alignment.center,
+        alignment: Alignment.topLeft,
         children: [
           // Decorative circles
           Positioned(
@@ -199,7 +205,7 @@ class _ExpandedHeader extends StatelessWidget {
               height: 130,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.06),
+                color: Colors.white.withValues(alpha: 0.06),
               ),
             ),
           ),
@@ -211,18 +217,18 @@ class _ExpandedHeader extends StatelessWidget {
               height: 90,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.black.withOpacity(0.08),
+                color: Colors.black.withValues(alpha: 0.08),
               ),
             ),
           ),
 
-          // ── Menu button top-right (always visible in expanded state) ──
+          // ── Menu button top-right (always visible) ──
           Positioned(
             top: 0,
             right: 16,
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
+                color: Colors.white.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: CustomIconButton(
@@ -238,54 +244,107 @@ class _ExpandedHeader extends StatelessWidget {
             ),
           ),
 
-          // ── Center content ──
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 36),
-              Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white.withOpacity(0.3),
-                    width: 3,
-                  ),
-                ),
-                child: provider.user?.profileImage != null && provider.user!.profileImage!.isNotEmpty
-                    ? CircleAvatar(
-                        radius: 42,
-                        backgroundImage: NetworkImage(provider.user!.profileImage!),
-                        backgroundColor: Colors.white,
-                      )
-                    : const CircleAvatar(
-                        radius: 42,
-                        backgroundImage: AssetImage('assets/images/logo.jpg'),
-                        backgroundColor: Colors.white,
+          // ── Profile Content ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.3),
+                          width: 3,
+                        ),
                       ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                provider.name,
-                style: text20(color: Colors.white, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 2),
-              Text(provider.handle, style: text14(color: Colors.white70)),
-              const SizedBox(height: 14),
-              _pill(context, Icons.edit_rounded, 'Edit Profile'),
-            ],
+                      child: provider.user?.profileImage != null &&
+                              provider.user!.profileImage!.isNotEmpty
+                          ? CircleAvatar(
+                              radius: 42,
+                              backgroundImage:
+                                  NetworkImage(provider.user!.profileImage!),
+                              backgroundColor: Colors.white,
+                            )
+                          : CircleAvatar(
+                              radius: 42,
+                              backgroundColor: Colors.white,
+                              child: Icon(Icons.person_rounded, 
+                                  size: 48, color: AppColors.primary),
+                            ),
+                    ),
+                    const SizedBox(width: 20),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            provider.name,
+                            style: text20(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w900),
+                          ),
+                          Text(provider.handle,
+                              style: text14(color: Colors.white70)),
+                          const SizedBox(height: 12),
+                          _pill(context, Icons.edit_rounded, 'Edit Profile'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                // const SizedBox(height: 24),
+                // // Stats Row
+                // Row(
+                //   mainAxisAlignment: MainAxisAlignment.spaceAround,
+                //   children: [
+                //     _statItem(provider.videosCount, 'Videos'),
+                //     _statDivider(),
+                //     _statItem(provider.followers, 'Followers'),
+                //     _statDivider(),
+                //     _statItem(provider.following, 'Following'),
+                //   ],
+                // ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
+  Widget _statItem(String count, String label) {
+    return Column(
+      children: [
+        Text(
+          count,
+          style: text18(color: Colors.white, fontWeight: FontWeight.w800),
+        ),
+        Text(
+          label,
+          style: text12(color: Colors.white70, fontWeight: FontWeight.w500),
+        ),
+      ],
+    );
+  }
+
+  Widget _statDivider() {
+    return Container(
+      height: 24,
+      width: 1,
+      color: Colors.white24,
+    );
+  }
+
   Widget _pill(BuildContext context, IconData icon, String label) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.15),
+        color: Colors.white.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.2)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
       ),
       child: Material(
         color: Colors.transparent,
@@ -361,7 +420,7 @@ class _CollapsedBar extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                color: Colors.white.withOpacity(0.3),
+                color: Colors.white.withValues(alpha: 0.3),
                 width: 2,
               ),
             ),
@@ -371,10 +430,14 @@ class _CollapsedBar extends StatelessWidget {
                     backgroundImage: NetworkImage(provider.user!.profileImage!),
                     backgroundColor: Colors.white,
                   )
-                : const CircleAvatar(
-                    radius: 18,
-                    backgroundImage: AssetImage('assets/images/logo.jpg'),
-                    backgroundColor: Colors.white,
+                : Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.person_rounded, size: 20, color: AppColors.primary),
                   ),
           ),
           const SizedBox(width: 10),
@@ -392,6 +455,10 @@ class _CollapsedBar extends StatelessWidget {
                     fontWeight: FontWeight.w800,
                   ),
                 ),
+                // Text(
+                //   '${provider.followers} Followers • ${provider.following} Following',
+                //   style: text11(color: Colors.white70),
+                // ),
                 Text(provider.handle, style: text11(color: Colors.white70)),
               ],
             ),
@@ -400,9 +467,9 @@ class _CollapsedBar extends StatelessWidget {
           // Edit pill
           Container(
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
+              color: Colors.white.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withOpacity(0.2)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
             ),
             child: Material(
               color: Colors.transparent,
@@ -447,7 +514,7 @@ class _CollapsedBar extends StatelessWidget {
           // Menu button
           Container(
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
+              color: Colors.white.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(12),
             ),
             child: CustomIconButton(
@@ -469,22 +536,56 @@ class _CollapsedBar extends StatelessWidget {
 
 // ─── Grid card ──────────────────────────────────────────────────────────────
 class _GridCard extends StatelessWidget {
-  final VideoItem item;
+  final dynamic item;
   const _GridCard({required this.item});
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<HomeScreenProvider>();
+    final homeProvider = context.watch<HomeScreenProvider>();
+    final profileProvider = context.read<ProfileProvider>();
+    final reelsProvider = context.read<ReelsProvider>();
+    String? imageUrl;
+    String? overlayText;
+
+    if (item is ReelModel) {
+      imageUrl = (item as ReelModel).thumbnail;
+      overlayText = (item as ReelModel).viewsCount?.toString() ?? '0';
+    } else if (item is WatchlistItem) {
+      imageUrl = (item as WatchlistItem).item?.poster;
+      overlayText = (item as WatchlistItem).item?.rating?.toString() ?? '0.0';
+    } else if (item is Content) {
+      imageUrl = (item as Content).poster;
+      overlayText = (item as Content).rating?.toString() ?? '0.0';
+    }
+
     return GestureDetector(
       onTap: () {
-        provider.changePage(1);
+        if (item is ReelModel) {
+          reelsProvider.setTargetReelId(item.id);
+          homeProvider.changePage(1);
+        } else if (item is WatchlistItem) {
+          final content = (item as WatchlistItem).item;
+          if (content != null) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => MovieDetailScreen(content: content)),
+            );
+          }
+        } else if (item is Content) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) => MovieDetailScreen(content: item as Content)),
+          );
+        }
       },
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Image.asset(item.image, fit: BoxFit.cover),
+            _buildThumbnail(imageUrl, item),
             Positioned(
               bottom: 0,
               left: 0,
@@ -497,20 +598,24 @@ class _GridCard extends StatelessWidget {
                     end: Alignment.bottomCenter,
                     colors: [
                       Colors.transparent,
-                      Colors.black.withOpacity(0.82),
+                      Colors.black.withValues(alpha: 0.82),
                     ],
                   ),
                 ),
                 child: Row(
                   children: [
-                    const Icon(
-                      Icons.play_circle_fill_rounded,
-                      color: Colors.white,
+                    Icon(
+                      item is ReelModel
+                          ? Icons.play_circle_fill_rounded
+                          : Icons.star_rounded,
+                      color: item is WatchlistItem
+                          ? AppColors.warning
+                          : Colors.white,
                       size: 12,
                     ),
                     const SizedBox(width: 3),
                     Text(
-                      item.views,
+                      overlayText ?? '',
                       style: text8(
                         color: Colors.white,
                         fontWeight: FontWeight.w700,
@@ -520,9 +625,125 @@ class _GridCard extends StatelessWidget {
                 ),
               ),
             ),
+            if (item is ReelModel &&
+                profileProvider.activeTab == ProfileTab.videos)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: GestureDetector(
+                  onTap: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Delete Video'),
+                        content: const Text(
+                            'Are you sure you want to delete this video?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Cancel'),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.pop(context);
+                              profileProvider.deleteReel(item.id!);
+                            },
+                            child: const Text('Delete',
+                                style: TextStyle(color: Colors.red)),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.5),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.delete_outline,
+                        color: Colors.white, size: 16),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildThumbnail(String? imageUrl, dynamic item) {
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      return imageUrl.startsWith('http')
+          ? Image.network(imageUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _errorPlaceholder())
+          : Image.asset(imageUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _errorPlaceholder());
+    }
+
+    if (item is ReelModel &&
+        item.videoUrl != null &&
+        item.videoUrl!.isNotEmpty) {
+      return _VideoPreviewThumbnail(videoUrl: item.videoUrl!);
+    }
+
+    return _errorPlaceholder();
+  }
+
+  Widget _errorPlaceholder() {
+    return Container(
+      color: AppColors.grey200,
+      child: Center(
+        child: Icon(Icons.image_not_supported_outlined, color: AppColors.grey400),
+      ),
+    );
+  }
+}
+
+class _VideoPreviewThumbnail extends StatefulWidget {
+  final String videoUrl;
+  const _VideoPreviewThumbnail({required this.videoUrl});
+
+  @override
+  State<_VideoPreviewThumbnail> createState() => _VideoPreviewThumbnailState();
+}
+
+class _VideoPreviewThumbnailState extends State<_VideoPreviewThumbnail> {
+  VideoPlayerController? _controller;
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
+      ..initialize().then((_) {
+        if (mounted) {
+          setState(() => _isInitialized = true);
+          _controller!.seekTo(const Duration(seconds: 1));
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isInitialized) {
+      return Container(
+        color: Colors.black12,
+        child: const Center(
+            child: SizedBox(
+                width: 15,
+                height: 15,
+                child: CircularProgressIndicator(strokeWidth: 2))),
+      );
+    }
+    return VideoPlayer(_controller!);
   }
 }

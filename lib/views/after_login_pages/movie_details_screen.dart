@@ -2,9 +2,12 @@ import 'package:catch_watch/models/content_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/text_style.dart';
 import 'package:catch_watch/view_model/after_login_provider/movie_details_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
+
+import '../../view_model/after_login_provider/download_provider.dart';
 
 class MovieDetailScreen extends StatelessWidget {
   final Content content;
@@ -12,8 +15,13 @@ class MovieDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Refresh watchlist when details are opened to ensure "Saved" status is up to date
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<WatchlistProvider>().fetchWatchlist();
+    });
+
     return ChangeNotifierProvider(
-      create: (_) => MovieDetailProvider(content),
+      create: (_) => MovieDetailProvider(content, context: context),
       child: const _MovieDetailView(),
     );
   }
@@ -43,8 +51,6 @@ class _MovieDetailView extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: const [
                           _MovieInfoHeader(),
-                          SizedBox(height: 20),
-                          _ActionButtons(),
                           SizedBox(height: 20),
                           _DescriptionSection(),
                           SizedBox(height: 24),
@@ -443,7 +449,8 @@ class _MovieInfoHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final content = context.read<MovieDetailProvider>().content;
+    final provider = context.watch<MovieDetailProvider>();
+    final content = provider.content;
     final infoStr = [
       content.releaseYear?.toString(),
       content.duration,
@@ -460,33 +467,12 @@ class _MovieInfoHeader extends StatelessWidget {
               child: Text(
                 content.title ?? '',
                 style: text20(fontWeight: FontWeight.bold),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            const SizedBox(width: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF0E8),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.star_rounded,
-                    color: AppColors.warning,
-                    size: 14,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    content.rating?.toString() ?? '0.0',
-                    style: text13(
-                      color: AppColors.warning,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            const SizedBox(width: 8),
+            const _HeaderActions(),
           ],
         ),
         const SizedBox(height: 6),
@@ -523,58 +509,75 @@ class _MovieInfoHeader extends StatelessWidget {
   }
 }
 
-class _ActionButtons extends StatelessWidget {
-  const _ActionButtons();
+class _HeaderActions extends StatelessWidget {
+  const _HeaderActions();
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<MovieDetailProvider>();
 
     return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: provider.togglePlay,
-            icon: Icon(
-              provider.isPlaying
-                  ? Icons.pause_rounded
-                  : Icons.play_arrow_rounded,
-              size: 18,
-            ),
-            label: Text(
-              provider.isPlaying ? 'Pause' : 'Watch Now',
-              style: text14(
-                color: AppColors.white,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: AppColors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              elevation: 0,
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        _SmallActionBtn(
-          icon: Icons.download_outlined,
-          label: 'Download',
-          onTap: () {},
+        Consumer<DownloadProvider>(
+          builder: (context, downloadProvider, _) {
+            final contentId = provider.content.id!;
+            final isDownloaded = downloadProvider.isDownloaded(contentId);
+            final progress = downloadProvider.downloadProgress[contentId];
+
+            return _SmallActionBtn(
+              icon: progress != null
+                  ? Icons.downloading_rounded
+                  : (isDownloaded
+                      ? Icons.download_done_rounded
+                      : Icons.download_outlined),
+              label: progress != null
+                  ? '${(progress * 100).toInt()}%'
+                  : (isDownloaded ? 'Offline' : 'Download'),
+              onTap: () {
+                if (!isDownloaded && progress == null) {
+                  downloadProvider.downloadVideo(provider.content);
+                }
+              },
+              iconColor:
+                  isDownloaded ? AppColors.primary : AppColors.textPrimary,
+              overlay: progress != null
+                  ? SizedBox(
+                      width: 46,
+                      height: 46,
+                      child: CircularProgressIndicator(
+                        value: progress,
+                        strokeWidth: 2,
+                        color: AppColors.primary,
+                      ),
+                    )
+                  : null,
+            );
+          },
         ),
         const SizedBox(width: 8),
-        _SmallActionBtn(
-          icon: provider.isWishlisted
-              ? Icons.favorite_rounded
-              : Icons.favorite_border_rounded,
-          label: 'Wishlist',
-          onTap: provider.toggleWishlist,
-          iconColor: provider.isWishlisted
-              ? AppColors.error
-              : AppColors.textPrimary,
+        Consumer<WatchlistProvider>(
+          builder: (context, watchlistProvider, _) {
+            final isInWatchlist = watchlistProvider.items
+                .any((i) => i.item?.id == provider.content.id);
+            return _SmallActionBtn(
+              icon: isInWatchlist
+                  ? Icons.favorite_rounded
+                  : Icons.favorite_border_rounded,
+              label: 'Wishlist',
+              onTap: () {
+                if (isInWatchlist) {
+                  final item = watchlistProvider.items
+                      .firstWhere((i) => i.item?.id == provider.content.id);
+                  watchlistProvider.removeItem(item.id!);
+                } else {
+                  watchlistProvider.addItem(provider.content.id!);
+                }
+              },
+              iconColor: isInWatchlist ? AppColors.error : AppColors.textPrimary,
+            );
+          },
         ),
         const SizedBox(width: 8),
         _SmallActionBtn(
@@ -592,12 +595,14 @@ class _SmallActionBtn extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
   final Color iconColor;
+  final Widget? overlay;
 
   const _SmallActionBtn({
     required this.icon,
     required this.label,
     required this.onTap,
     this.iconColor = AppColors.textPrimary,
+    this.overlay,
   });
 
   @override
@@ -606,14 +611,20 @@ class _SmallActionBtn extends StatelessWidget {
       onTap: onTap,
       child: Column(
         children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: AppColors.grey100,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: iconColor, size: 20),
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: AppColors.grey100,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: iconColor, size: 20),
+              ),
+              if (overlay != null) overlay!,
+            ],
           ),
           const SizedBox(height: 5),
           Text(
@@ -628,6 +639,7 @@ class _SmallActionBtn extends StatelessWidget {
     );
   }
 }
+
 
 class _DescriptionSection extends StatefulWidget {
   const _DescriptionSection();

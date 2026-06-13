@@ -44,4 +44,26 @@ class PlanRepository {
       rethrow;
     }
   }
+
+  Future<dynamic> createOrder(String planId, {String? promoCode}) async {
+    try {
+      final body = {
+        'planId': planId,
+        if (promoCode != null) 'promoCode': promoCode,
+      };
+      dynamic response = await _apiService.postApi(AppUrl.createOrder, body);
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> verifyPayment(Map<String, dynamic> data) async {
+    try {
+      dynamic response = await _apiService.postApi(AppUrl.verifyPayment, data);
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
 }

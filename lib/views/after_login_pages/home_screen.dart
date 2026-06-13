@@ -232,19 +232,19 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildCarousel(HomeScreenProvider provider, BuildContext context) {
     if (provider.bannersList.isEmpty) return const SizedBox();
 
-    return GestureDetector(
-      onTap: () {}, // Handled by individual buttons inside
-      child: CarouselSlider(
-        options: CarouselOptions(
-          height: 220,
-          viewportFraction: 1.0,
-          autoPlay: true,
-          autoPlayInterval: const Duration(seconds: 5),
-          autoPlayAnimationDuration: const Duration(milliseconds: 700),
-          onPageChanged: (i, _) => provider.updateBannerIndex(i),
-        ),
-        items: provider.bannersList.map((item) {
-          return Stack(
+    return CarouselSlider(
+      options: CarouselOptions(
+        height: 220,
+        viewportFraction: 1.0,
+        autoPlay: true,
+        autoPlayInterval: const Duration(seconds: 5),
+        autoPlayAnimationDuration: const Duration(milliseconds: 700),
+        onPageChanged: (i, _) => provider.updateBannerIndex(i),
+      ),
+      items: provider.bannersList.map((item) {
+        return GestureDetector(
+          onTap: () => _openMovie(context, item),
+          child: Stack(
             fit: StackFit.expand,
             children: [
               item.banner != null
@@ -264,61 +264,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-              // Badge + info
-              Positioned(
-                bottom: 16,
-                left: 16,
-                right: 16,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (item.isTrending == true)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          'TRENDING',
-                          style: text10(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 6),
-                    Text(
-                      item.title ?? '',
-                      style: text30(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                        '${item.releaseYear}  •  ${item.genre?.join(' / ')}  •  ${item.duration}',
-                        style: text12(color: AppColors.grey400)),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        _playButton(context, item),
-                        const SizedBox(width: 8),
-                        _watchlistIcon(context, item),
-                        const SizedBox(width: 8),
-                        _iconCircle(Icons.share_rounded),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
             ],
-          );
-        }).toList(),
-      ),
+          ),
+        );
+      }).toList(),
     );
   }
 

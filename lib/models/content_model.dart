@@ -1,3 +1,5 @@
+import 'package:catch_watch/res/appUrl.dart';
+
 class ContentModel {
   bool? success;
   int? moviesCount;
@@ -93,8 +95,11 @@ class Content {
     
     // Fix localhost in URLs if necessary
     String fixUrl(String? url) {
-      if (url == null) return '';
-      return url.replaceAll('http://localhost:5000', 'http://192.168.1.16:5000');
+      if (url == null || url.isEmpty) return '';
+      if (url.startsWith('http')) {
+        return url.replaceAll('http://localhost:5000', AppUrl.serverUrl);
+      }
+      return '${AppUrl.serverUrl}/$url';
     }
     
     poster = fixUrl(json['poster']);
@@ -105,8 +110,6 @@ class Content {
     isComingSoon = json['isComingSoon'];
     releaseDate = json['releaseDate'];
     priority = json['priority'];
-    videoUrl = json['videoUrl'];
-    trailerUrl = json['trailerUrl'];
     isPremium = json['isPremium'];
     rating = (json['rating'] as num?)?.toDouble();
     cast = json['cast'] != null ? List<String>.from(json['cast']) : null;
@@ -118,5 +121,35 @@ class Content {
     slug = json['slug'];
     type = json['type'];
     isTrending = json['isTrending'];
+  }
+
+  Map<String, dynamic> toJson() {
+    final Map<String, dynamic> data = <String, dynamic>{};
+    data['_id'] = id;
+    data['title'] = title;
+    data['description'] = description;
+    data['genre'] = genre;
+    data['releaseYear'] = releaseYear;
+    data['duration'] = duration;
+    data['language'] = language;
+    data['poster'] = poster;
+    data['banner'] = banner;
+    data['isComingSoon'] = isComingSoon;
+    data['releaseDate'] = releaseDate;
+    data['priority'] = priority;
+    data['videoUrl'] = videoUrl;
+    data['trailerUrl'] = trailerUrl;
+    data['isPremium'] = isPremium;
+    data['rating'] = rating;
+    data['cast'] = cast;
+    data['category'] = category;
+    data['likes'] = likes;
+    data['dislikes'] = dislikes;
+    data['createdAt'] = createdAt;
+    data['updatedAt'] = updatedAt;
+    data['slug'] = slug;
+    data['type'] = type;
+    data['isTrending'] = isTrending;
+    return data;
   }
 }

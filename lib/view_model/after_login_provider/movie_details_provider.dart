@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:catch_watch/models/content_model.dart';
+import 'package:catch_watch/view_model/after_login_provider/download_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -10,6 +14,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 class MovieDetailProvider extends ChangeNotifier {
   // ── Data ──────────────────────────────────────────────────────────────────
   final Content content;
+  final BuildContext? context;
 
   // ── Video Player ──────────────────────────────────────────────────────────
   VideoPlayerController? _videoController;
@@ -56,14 +61,25 @@ class MovieDetailProvider extends ChangeNotifier {
 
   // ─────────────────────────────────────────────────────────────────────────
 
-  MovieDetailProvider(this.content) {
+  MovieDetailProvider(this.content, {this.context}) {
     _initPlayer();
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
   Future<void> _initPlayer() async {
-    if (content.videoUrl == null || content.videoUrl!.isEmpty) {
+    String? finalUrl = content.videoUrl;
+    
+    // Check if downloaded
+    if (context != null) {
+      final downloadProvider = context!.read<DownloadProvider>();
+      final localPath = downloadProvider.getLocalVideoPath(content.id!);
+      if (localPath != null && File(localPath).existsSync()) {
+        finalUrl = localPath;
+      }
+    }
+
+    if (finalUrl == null || finalUrl.isEmpty) {
       _hasError = true;
       _errorMessage = 'Video URL is not available.';
       notifyListeners();
@@ -71,13 +87,21 @@ class MovieDetailProvider extends ChangeNotifier {
     }
 
     try {
-      _videoController = VideoPlayerController.networkUrl(
-        Uri.parse(content.videoUrl!),
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
-      );
+      if (finalUrl.startsWith('http')) {
+        _videoController = VideoPlayerController.networkUrl(
+          Uri.parse(finalUrl),
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+        );
+      } else {
+        _videoController = VideoPlayerController.file(
+          File(finalUrl),
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+        );
+      }
 
       await _videoController!.initialize();
       _videoController!.addListener(_onVideoUpdate);
+      _videoController!.play(); // Auto-play when screen opens
       _isInitialized = true;
       WakelockPlus.enable();
       _resetHideTimer();
@@ -97,6 +121,15 @@ class MovieDetailProvider extends ChangeNotifier {
     if (isBuffering != _isBuffering) {
       _isBuffering = isBuffering;
       notifyListeners();
+    }
+
+    // Update continue watching in HomeProvider
+    if (ctrl.value.isPlaying && context != null) {
+      context!.read<HomeScreenProvider>().addToContinueWatching(
+        content,
+        ctrl.value.position,
+        ctrl.value.duration,
+      );
     }
 
     // Auto-hide controls while playing

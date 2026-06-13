@@ -1,5 +1,5 @@
 class AppUrl {
-  static const String serverUrl = 'http://192.168.1.16:5000';
+  static const String serverUrl = 'http://192.168.1.18:5000';
   static const String baseUrl = '$serverUrl/api';
 
   // Auth Endpoints
@@ -19,7 +19,28 @@ class AppUrl {
   static const String cancelSubscription = '$baseUrl/subscription/cancel';
   static const String subscriptionStatus = '$baseUrl/subscription/status';
   static const String getContent = '$baseUrl/content';
-  //
+
+  /// reels
+  static const String uploadReel = '$baseUrl/reels/upload';
+  static const String reelsFeed = '$baseUrl/reels/feed';
+  static String reelById(String id) => '$baseUrl/reels/$id';
+  static String deleteReel(String id) => '$baseUrl/reels/$id';
+  static String viewReel(String id) => '$baseUrl/reels/$id/view';
+  static String shareReel(String id) => '$baseUrl/reels/$id/share';
+  static const String myReels = '$baseUrl/reels/my-reels';
+  static const String searchReels = '$baseUrl/reels/search';
+  // intrection
+  static String toggleFollow(String userId) => '$baseUrl/interaction/toggle/follow/$userId';
+  static String interactionStats(String contentId) => '$baseUrl/interaction/stats/$contentId';
+  static String followStatus(String userId) => '$baseUrl/interaction/follow/$userId';
+  static String toggleDislike(String contentId) => '$baseUrl/interaction/toggle/dislike/$contentId';
+  static String toggleLike(String contentId) => '$baseUrl/interaction/toggle/like/$contentId';
+  static String toggleBookmark(String contentId) => '$baseUrl/interaction/toggle/bookmark/$contentId';
+  static const String getBookmarks = '$baseUrl/interaction/bookmarks';
+
+  /// comments
+  static String reelComments(String reelId) => '$baseUrl/comments/$reelId';
+  static String deleteComment(String commentId) => '$baseUrl/comments/$commentId';
   // /// fcm
   // static const String updateFcmToken = '$baseUrl/notifications/fcm-token';
   //
@@ -50,15 +71,14 @@ class AppUrl {
   // static const String getShortDramas = '$baseUrl/shortdramas';
   // static String getShortEpisodes(String dramaId) => '$baseUrl/drama-episodes/$dramaId';
   //
-  // /// payment
-  // static const String createOrder = '$baseUrl/payment/create-order';
-  // static const String verifyPayment = '$baseUrl/payment/verify';
-  //
-  // /// watchlist
+  /// payment
+  static const String createOrder = '$baseUrl/payment/create-order';
+  static const String verifyPayment = '$baseUrl/payment/verify';
+
+  /// watchlist
   // static const String addWatchlist = '$baseUrl/watchlist';
   // static const String getWatchlist = '$baseUrl/watchlist';
   // static const String removeWatchlist = '$baseUrl/watchlist';
-  //
   // /// interaction
   // static const String toggleInteraction = '$baseUrl/interaction/toggle';
   // static const String interactionStats = '$baseUrl/interaction/stats';
