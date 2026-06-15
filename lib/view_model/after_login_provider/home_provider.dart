@@ -20,6 +20,8 @@ class HomeScreenProvider extends ChangeNotifier {
   List<Content> _allContent = [];
   List<Content> _trending = [];
   List<Content> _movies = [];
+  List<Content> _tvShows = [];
+  List<Content> _shortFilms = [];
   List<Content> _banners = [];
 
   int get pageIndex => _pageIndex;
@@ -30,10 +32,12 @@ class HomeScreenProvider extends ChangeNotifier {
   List<Content> get allContent => _allContent;
   List<Content> get trending => _trending;
   List<Content> get movies => _movies;
+  List<Content> get tvShows => _tvShows;
+  List<Content> get shortFilms => _shortFilms;
   List<Content> get bannersList => _banners;
 
   HomeScreenProvider() {
-    fetchContent();
+    fetchAllContent();
     _loadWatchHistory();
   }
 
@@ -81,7 +85,6 @@ class HomeScreenProvider extends ChangeNotifier {
     'Movies',
     'Short Films',
     'TV Shows',
-    'Reality',
   ];
 
   List<ContentItem> _continueWatching = [];
@@ -122,37 +125,30 @@ class HomeScreenProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> fetchContent() async {
+  Future<void> fetchAllContent() async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final response = await _contentRepository.getContent();
-      if (response.success == true) {
-        _allContent = response.content ?? [];
-        _trending = _allContent.where((c) => c.isTrending == true).toList();
-        _movies = _allContent.where((c) => c.type == 'movie').toList();
-        _banners = _allContent.where((c) => c.category?.contains('trending') ?? false).toList();
-        
-        // If banners are empty, use the first few items
-        if (_banners.isEmpty && _allContent.isNotEmpty) {
-          _banners = _allContent.take(3).toList();
-        }
+      final results = await Future.wait([
+        _contentRepository.getMovies(),
+        _contentRepository.getTvShows(),
+        _contentRepository.getShortFilms(),
+      ]);
 
-        // Remove dummy data from fetchContent
-        // if (_allContent.isNotEmpty) {
-        //   _continueWatching = _allContent.take(2).map((c) => ContentItem(
-        //     image: c.poster ?? '',
-        //     views: '100k',
-        //     title: c.title ?? '',
-        //     progress: '0.4',
-        //     remaining: '45m remaining',
-        //     content: c,
-        //   )).toList();
-        // }
-      } else {
-        _error = 'Failed to load content';
+      _movies = results[0];
+      _tvShows = results[1];
+      _shortFilms = results[2];
+
+      _allContent = [..._movies, ..._tvShows, ..._shortFilms];
+      _allContent.shuffle(); // Mix them for "All Shows"
+
+      _trending = _allContent.where((c) => c.category?.contains('trending') ?? false).toList();
+      _banners = _allContent.where((c) => c.category?.contains('trending') ?? false).toList();
+
+      if (_banners.isEmpty && _allContent.isNotEmpty) {
+        _banners = _allContent.take(5).toList();
       }
     } catch (e) {
       _error = e.toString();
@@ -162,6 +158,10 @@ class HomeScreenProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> fetchContent() async {
+    await fetchAllContent();
+  }
+
   // ... (remove the old const continueWatching)
 
   int get selectedTabIndex => _selectedTabIndex;
@@ -169,6 +169,7 @@ class HomeScreenProvider extends ChangeNotifier {
 
   void selectTab(int index) {
     _selectedTabIndex = index;
+    _currentBannerIndex = 0; // Reset index when switching tabs
     notifyListeners();
   }
 

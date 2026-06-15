@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:catch_watch/models/content_model.dart';
 import 'package:catch_watch/view_model/after_login_provider/download_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
+import 'package:catch_watch/repository/content_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -15,6 +16,13 @@ class MovieDetailProvider extends ChangeNotifier {
   // ── Data ──────────────────────────────────────────────────────────────────
   final Content content;
   final BuildContext? context;
+  final ContentRepository _contentRepository = ContentRepository();
+
+  List<Content> _episodes = [];
+  List<Content> get episodes => _episodes;
+
+  bool _isLoadingEpisodes = false;
+  bool get isLoadingEpisodes => _isLoadingEpisodes;
 
   // ── Video Player ──────────────────────────────────────────────────────────
   VideoPlayerController? _videoController;
@@ -63,12 +71,47 @@ class MovieDetailProvider extends ChangeNotifier {
 
   MovieDetailProvider(this.content, {this.context}) {
     _initPlayer();
+    if (content.type == 'tvshow') {
+      _fetchEpisodes();
+    }
+  }
+
+  Future<void> _fetchEpisodes() async {
+    _isLoadingEpisodes = true;
+    notifyListeners();
+    try {
+      _episodes = await _contentRepository.getTvShowEpisodes(content.id!);
+      // Sort episodes by number
+      _episodes.sort((a, b) => (a.episodeNumber ?? 0).compareTo(b.episodeNumber ?? 0));
+    } catch (e) {
+      debugPrint('Error fetching episodes: $e');
+    } finally {
+      _isLoadingEpisodes = false;
+      notifyListeners();
+    }
+  }
+
+  void playEpisode(Content episode) async {
+    // If already playing this episode, do nothing
+    if (_videoController != null && _videoController!.dataSource.contains(episode.videoUrl ?? '')) {
+      return;
+    }
+
+    _isInitialized = false;
+    _hasError = false;
+    notifyListeners();
+
+    if (_videoController != null) {
+      await _videoController!.dispose();
+    }
+
+    _initPlayer(url: episode.videoUrl);
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
-  Future<void> _initPlayer() async {
-    String? finalUrl = content.videoUrl;
+  Future<void> _initPlayer({String? url}) async {
+    String? finalUrl = url ?? content.videoUrl;
     
     // Check if downloaded
     if (context != null) {

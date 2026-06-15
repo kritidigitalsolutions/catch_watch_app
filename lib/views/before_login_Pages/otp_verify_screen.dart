@@ -262,7 +262,7 @@ class _OtpScreenState extends State<OtpScreen> {
                             _clearAndResetControllers(
                               context.read<AuthProvider>(),
                             );
-                            context.read<AuthProvider>().resendOtp();
+                            context.read<AuthProvider>().resendOtp(context);
                           }
                         : null,
                     child: Text(

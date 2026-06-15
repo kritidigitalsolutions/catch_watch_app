@@ -55,6 +55,15 @@ class Content {
   String? slug;
   String? type;
   bool? isTrending;
+  int? totalEpisodes;
+  int? totalViews;
+  String? status;
+  int? episodeNumber;
+  String? tvShowId;
+  String? thumbnail;
+  bool? isLocked;
+  bool? isVertical;
+  int? views;
 
   Content({
     this.id,
@@ -82,6 +91,15 @@ class Content {
     this.slug,
     this.type,
     this.isTrending,
+    this.totalEpisodes,
+    this.totalViews,
+    this.status,
+    this.episodeNumber,
+    this.tvShowId,
+    this.thumbnail,
+    this.isLocked,
+    this.isVertical,
+    this.views,
   });
 
   Content.fromJson(Map<String, dynamic> json) {
@@ -106,13 +124,18 @@ class Content {
     banner = fixUrl(json['banner']);
     videoUrl = fixUrl(json['videoUrl']);
     trailerUrl = fixUrl(json['trailerUrl']);
+    thumbnail = fixUrl(json['thumbnail']);
 
     isComingSoon = json['isComingSoon'];
     releaseDate = json['releaseDate'];
     priority = json['priority'];
     isPremium = json['isPremium'];
     rating = (json['rating'] as num?)?.toDouble();
-    cast = json['cast'] != null ? List<String>.from(json['cast']) : null;
+    cast = json['cast'] != null 
+        ? (json['cast'] is List && json['cast'].isNotEmpty && json['cast'][0] is Map)
+            ? List<String>.from(json['cast'].map((e) => e['name']?.toString() ?? ''))
+            : List<String>.from(json['cast'])
+        : null;
     category = json['category'] != null ? List<String>.from(json['category']) : null;
     likes = json['likes'] != null ? List<String>.from(json['likes']) : null;
     dislikes = json['dislikes'] != null ? List<String>.from(json['dislikes']) : null;
@@ -121,6 +144,14 @@ class Content {
     slug = json['slug'];
     type = json['type'];
     isTrending = json['isTrending'];
+    totalEpisodes = json['totalEpisodes'];
+    totalViews = json['totalViews'];
+    status = json['status'];
+    episodeNumber = json['episodeNumber'];
+    tvShowId = json['tvShowId'];
+    isLocked = json['isLocked'];
+    isVertical = json['isVertical'];
+    views = json['views'];
   }
 
   Map<String, dynamic> toJson() {
@@ -150,6 +181,15 @@ class Content {
     data['slug'] = slug;
     data['type'] = type;
     data['isTrending'] = isTrending;
+    data['totalEpisodes'] = totalEpisodes;
+    data['totalViews'] = totalViews;
+    data['status'] = status;
+    data['episodeNumber'] = episodeNumber;
+    data['tvShowId'] = tvShowId;
+    data['thumbnail'] = thumbnail;
+    data['isLocked'] = isLocked;
+    data['isVertical'] = isVertical;
+    data['views'] = views;
     return data;
   }
 }

@@ -1,3 +1,6 @@
+import 'package:catch_watch/data/network/notification_service.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/custom_nav_bar.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
@@ -19,11 +22,14 @@ import 'package:catch_watch/view_model/after_login_provider/notification_provide
 import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
-import 'package:catch_watch/view_model/before_login_provider/auth_providers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   await HiveService.init();
+  await NotificationService.init();
+
+  FirebaseMessaging.onBackgroundMessage(NotificationService.backgroundHandler);
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(

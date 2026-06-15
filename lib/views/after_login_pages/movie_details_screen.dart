@@ -52,6 +52,8 @@ class _MovieDetailView extends StatelessWidget {
                         children: const [
                           _MovieInfoHeader(),
                           SizedBox(height: 20),
+                          _EpisodeSection(),
+                          SizedBox(height: 20),
                           _DescriptionSection(),
                           SizedBox(height: 24),
                           _CastSection(),
@@ -640,6 +642,102 @@ class _SmallActionBtn extends StatelessWidget {
   }
 }
 
+
+class _EpisodeSection extends StatelessWidget {
+  const _EpisodeSection();
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<MovieDetailProvider>();
+    if (provider.content.type != 'tvshow') return const SizedBox();
+    
+    if (provider.isLoadingEpisodes) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (provider.episodes.isEmpty) return const SizedBox();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Episodes', style: text16(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 12),
+        ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: provider.episodes.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            final episode = provider.episodes[index];
+            final isPlaying = provider.videoController?.dataSource.contains(episode.videoUrl ?? '') ?? false;
+
+            return GestureDetector(
+              onTap: () => provider.playEpisode(episode),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isPlaying ? AppColors.primary.withOpacity(0.05) : AppColors.grey100,
+                  borderRadius: BorderRadius.circular(12),
+                  border: isPlaying ? Border.all(color: AppColors.primary.withOpacity(0.3)) : null,
+                ),
+                child: Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: SizedBox(
+                        width: 100,
+                        height: 60,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.network(
+                              episode.thumbnail ?? episode.poster ?? '',
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(color: AppColors.grey300),
+                            ),
+                            if (isPlaying)
+                              Container(
+                                color: Colors.black.withOpacity(0.4),
+                                child: const Icon(Icons.play_arrow_rounded, color: Colors.white),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Episode ${episode.episodeNumber}: ${episode.title}',
+                            style: text14(
+                              fontWeight: isPlaying ? FontWeight.w700 : FontWeight.w600,
+                              color: isPlaying ? AppColors.primary : AppColors.textPrimary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            episode.duration ?? '',
+                            style: text12(color: AppColors.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (episode.isLocked == true)
+                      const Icon(Icons.lock_outline, size: 18, color: AppColors.grey600),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
 
 class _DescriptionSection extends StatefulWidget {
   const _DescriptionSection();

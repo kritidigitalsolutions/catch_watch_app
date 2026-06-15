@@ -150,6 +150,18 @@ class AuthProvider extends ChangeNotifier {
         _otpSent = true;
         _startResendTimer();
         _step = AuthStep.otp;
+
+        if (response.otp != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Your OTP is: ${response.otp}'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 10),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+
         Navigator.push(
           context,
           MaterialPageRoute(builder: (context) => const OtpScreen()),
@@ -212,14 +224,45 @@ class AuthProvider extends ChangeNotifier {
     });
   }
 
-  Future<void> resendOtp() async {
+  Future<void> resendOtp([BuildContext? context]) async {
     if (!_canResend) return;
     _isLoading = true;
     notifyListeners();
-    await Future.delayed(const Duration(seconds: 1));
-    _isLoading = false;
-    clearOtp();
-    _startResendTimer();
+
+    try {
+      final data = {'phone': _phoneNumber};
+      final response = await _authRepository.sendOtp(data);
+
+      _isLoading = false;
+      if (response.success == true) {
+        clearOtp();
+        _startResendTimer();
+
+        if (response.otp != null && context != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Your OTP is: ${response.otp}'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 10),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } else {
+        if (context != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(response.message ?? 'Failed to resend OTP')),
+          );
+        }
+      }
+    } catch (e) {
+      _isLoading = false;
+      if (context != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+    }
     notifyListeners();
   }
 

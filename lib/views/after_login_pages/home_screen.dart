@@ -5,6 +5,7 @@ import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.d
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:catch_watch/utils/custom_button.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
+import 'package:catch_watch/views/after_login_pages/content_grid_screen.dart';
 import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/notification_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
@@ -58,7 +59,7 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<SubscriptionProvider>().fetchSubscriptionStatus();
       context.read<WatchlistProvider>().fetchWatchlist();
-      context.read<HomeScreenProvider>().fetchContent();
+      context.read<HomeScreenProvider>().fetchAllContent();
       context.read<NotificationProvider>().fetchNotifications();
     });
   }
@@ -78,43 +79,289 @@ class _HomeScreenState extends State<HomeScreen> {
                   _buildTabBar(provider),
                   Expanded(
                     child: RefreshIndicator(
-                      onRefresh: provider.fetchContent,
-                      child: ListView(
-                        padding: EdgeInsets.zero,
-                        children: [
-                          _buildCarousel(provider, context),
-                          _buildDotIndicator(provider),
-                          const SizedBox(height: 24),
-                          if (provider.trending.isNotEmpty) ...[
-                            _buildSectionHeader('🔥 Trending Now'),
-                            const SizedBox(height: 10),
-                            _buildTrendingRow(provider),
-                            const SizedBox(height: 24),
-                          ],
-                            if (provider.continueWatching.isNotEmpty) ...[
-                              _buildSectionHeader('▶ Continue Watching'),
-                              const SizedBox(height: 10),
-                              _buildContinueRow(provider),
-                              const SizedBox(height: 24),
-                            ],
-                          if (provider.movies.isNotEmpty) ...[
-                            _buildSectionHeader('Recommended Movies'),
-                            const SizedBox(height: 10),
-                            _buildMovieRow(provider.movies),
-                            const SizedBox(height: 24),
-                          ],
-                          _buildSectionHeader('Action Movies'),
-                          const SizedBox(height: 10),
-                          _buildMovieRow(provider.movies
-                              .where((m) => m.genre?.contains('Action') ?? false)
-                              .toList()),
-                          const SizedBox(height: 100),
-                        ],
-                      ),
+                      onRefresh: provider.fetchAllContent,
+                      child: _buildTabContent(provider),
                     ),
                   ),
                 ],
               );
+  }
+
+  Widget _buildTabContent(HomeScreenProvider provider) {
+    switch (provider.selectedTabIndex) {
+      case 0: // All Shows
+        return _buildAllShowsTab(provider);
+      case 1: // Movies
+        return _buildMoviesTab(provider);
+      case 2: // Short Films
+        return _buildShortFilmsTab(provider);
+      case 3: // TV Shows
+        return _buildTvShowsTab(provider);
+      default:
+        return _buildAllShowsTab(provider);
+    }
+  }
+
+  Widget _buildAllShowsTab(HomeScreenProvider provider) {
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        _buildCarousel(provider, context),
+        _buildDotIndicator(provider),
+        const SizedBox(height: 24),
+        if (provider.trending.isNotEmpty) ...[
+          _buildSectionHeader('🔥 Trending Now', onMore: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ContentGridScreen(
+                  title: 'Trending Now',
+                  contentList: provider.trending,
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 10),
+          _buildTrendingRow(provider),
+          const SizedBox(height: 24),
+        ],
+        if (provider.continueWatching.isNotEmpty) ...[
+          _buildSectionHeader('▶ Continue Watching'),
+          const SizedBox(height: 10),
+          _buildContinueRow(provider),
+          const SizedBox(height: 24),
+        ],
+        if (provider.movies.isNotEmpty) ...[
+          _buildSectionHeader('Recommended Movies', onMore: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ContentGridScreen(
+                  title: 'Recommended Movies',
+                  contentList: provider.movies,
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 10),
+          _buildMovieRow(provider.movies),
+          const SizedBox(height: 24),
+        ],
+        if (provider.tvShows.isNotEmpty) ...[
+          _buildSectionHeader('Popular TV Shows', onMore: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ContentGridScreen(
+                  title: 'Popular TV Shows',
+                  contentList: provider.tvShows,
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 10),
+          _buildMovieRow(provider.tvShows),
+          const SizedBox(height: 24),
+        ],
+        if (provider.shortFilms.isNotEmpty) ...[
+          _buildSectionHeader('Must Watch Short Films', onMore: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ContentGridScreen(
+                  title: 'Short Films',
+                  contentList: provider.shortFilms,
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 10),
+          _buildMovieRow(provider.shortFilms),
+          const SizedBox(height: 24),
+        ],
+        const SizedBox(height: 100),
+      ],
+    );
+  }
+
+  Widget _buildMoviesTab(HomeScreenProvider provider) {
+    final movieBanners = provider.movies.where((m) => m.category?.contains('trending') ?? false).toList();
+    final actionMovies = provider.movies.where((m) => m.genre?.contains('Action') ?? m.genre?.contains('Thriller') ?? false).toList();
+    final romanceMovies = provider.movies.where((m) => m.genre?.contains('Romance') ?? false).toList();
+
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        if (movieBanners.isNotEmpty) ...[
+          _buildCategoryCarousel(movieBanners),
+          _buildDotIndicator(provider),
+          const SizedBox(height: 24),
+        ],
+        _buildSectionHeader('Latest Movies', onMore: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ContentGridScreen(
+                title: 'Latest Movies',
+                contentList: provider.movies,
+              ),
+            ),
+          );
+        }),
+        const SizedBox(height: 10),
+        _buildMovieRow(provider.movies),
+        const SizedBox(height: 24),
+        if (actionMovies.isNotEmpty) ...[
+          _buildSectionHeader('Action & Thriller', onMore: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ContentGridScreen(
+                  title: 'Action & Thriller',
+                  contentList: actionMovies,
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 10),
+          _buildMovieRow(actionMovies),
+          const SizedBox(height: 24),
+        ],
+        if (romanceMovies.isNotEmpty) ...[
+          _buildSectionHeader('Romance', onMore: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ContentGridScreen(
+                  title: 'Romance Movies',
+                  contentList: romanceMovies,
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 10),
+          _buildMovieRow(romanceMovies),
+        ],
+        const SizedBox(height: 100),
+      ],
+    );
+  }
+
+  Widget _buildShortFilmsTab(HomeScreenProvider provider) {
+    final shortBanners = provider.shortFilms.where((m) => m.category?.contains('trending') ?? false).toList();
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        if (shortBanners.isNotEmpty) ...[
+          _buildCategoryCarousel(shortBanners),
+          _buildDotIndicator(provider),
+          const SizedBox(height: 24),
+        ],
+        _buildSectionHeader('Short & Sweet', onMore: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ContentGridScreen(
+                title: 'Short Films',
+                contentList: provider.shortFilms,
+              ),
+            ),
+          );
+        }),
+        const SizedBox(height: 10),
+        _buildMovieRow(provider.shortFilms),
+        const SizedBox(height: 24),
+        _buildSectionHeader('Trending Shorts'),
+        const SizedBox(height: 10),
+        _buildTrendingRow(provider),
+        const SizedBox(height: 100),
+      ],
+    );
+  }
+
+  Widget _buildTvShowsTab(HomeScreenProvider provider) {
+    final tvBanners = provider.tvShows.where((m) => m.category?.contains('trending') ?? false).toList();
+    final ongoingShows = provider.tvShows.where((s) => s.status == 'ongoing').toList();
+
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        if (tvBanners.isNotEmpty) ...[
+          _buildCategoryCarousel(tvBanners),
+          _buildDotIndicator(provider),
+          const SizedBox(height: 24),
+        ],
+        _buildSectionHeader('Bingeworthy Series', onMore: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ContentGridScreen(
+                title: 'TV Series',
+                contentList: provider.tvShows,
+              ),
+            ),
+          );
+        }),
+        const SizedBox(height: 10),
+        _buildMovieRow(provider.tvShows),
+        const SizedBox(height: 24),
+        if (ongoingShows.isNotEmpty) ...[
+          _buildSectionHeader('New Episodes', onMore: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ContentGridScreen(
+                  title: 'Ongoing Series',
+                  contentList: ongoingShows,
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 10),
+          _buildMovieRow(ongoingShows),
+        ],
+        const SizedBox(height: 100),
+      ],
+    );
+  }
+
+  Widget _buildCategoryCarousel(List<Content> banners) {
+    return CarouselSlider(
+      options: CarouselOptions(
+        height: 220,
+        viewportFraction: 1.0,
+        enlargeCenterPage: false,
+        autoPlay: true,
+        autoPlayInterval: const Duration(seconds: 5),
+        onPageChanged: (i, _) => context.read<HomeScreenProvider>().updateBannerIndex(i),
+      ),
+      items: banners.map((item) {
+        return GestureDetector(
+          onTap: () => _openMovie(context, item),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              item.banner != null
+                  ? Image.network(item.banner!, fit: BoxFit.cover)
+                  : Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.95),
+                    ],
+                    stops: const [0.3, 1.0],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
   }
 
   Widget _buildTopBar(BuildContext context, HomeScreenProvider provider) {
@@ -353,10 +600,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDotIndicator(HomeScreenProvider provider) {
-    if (provider.bannersList.isEmpty) return const SizedBox();
+    List<Content> currentBanners = [];
+    switch (provider.selectedTabIndex) {
+      case 0: currentBanners = provider.bannersList; break;
+      case 1: currentBanners = provider.movies.where((m) => m.category?.contains('trending') ?? false).toList(); break;
+      case 2: currentBanners = provider.shortFilms.where((m) => m.category?.contains('trending') ?? false).toList(); break;
+      case 3: currentBanners = provider.tvShows.where((m) => m.category?.contains('trending') ?? false).toList(); break;
+    }
+
+    if (currentBanners.isEmpty) return const SizedBox();
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(provider.bannersList.length, (i) {
+      children: List.generate(currentBanners.length, (i) {
         final active = i == provider.currentBannerIndex;
         return AnimatedContainer(
           duration: const Duration(milliseconds: 300),
@@ -372,7 +627,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildSectionHeader(String title) {
+  Widget _buildSectionHeader(String title, {VoidCallback? onMore}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
@@ -385,11 +640,14 @@ class _HomeScreenState extends State<HomeScreen> {
               fontWeight: FontWeight.w800,
             ),
           ),
-          Text(
-            'More →',
-            style: text13(
-              color: AppColors.primary,
-              fontWeight: FontWeight.w700,
+          GestureDetector(
+            onTap: onMore,
+            child: Text(
+              'More →',
+              style: text13(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ],
