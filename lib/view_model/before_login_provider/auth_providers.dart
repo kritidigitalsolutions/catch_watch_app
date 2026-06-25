@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:catch_watch/data/network/notification_service.dart';
 import 'package:catch_watch/main.dart';
 import 'package:catch_watch/models/auth_models.dart';
 import 'package:catch_watch/repository/auth_repository.dart';
@@ -305,6 +306,7 @@ class AuthProvider extends ChangeNotifier {
               isNewUser: false,
             );
             await HiveService.saveUser(userDetail);
+            NotificationService.syncTokenToServer(null); // Sync FCM token after login
           }
           _otpVerifying = false;
           Navigator.pushAndRemoveUntil(
@@ -482,6 +484,7 @@ class AuthProvider extends ChangeNotifier {
           isNewUser: false,
         );
         await HiveService.saveUser(userDetail);
+        NotificationService.syncTokenToServer(null); // Sync FCM token after profile complete
 
         _profileSaving = false;
         _step = AuthStep.done;

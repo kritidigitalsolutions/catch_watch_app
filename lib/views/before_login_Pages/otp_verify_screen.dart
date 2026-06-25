@@ -204,33 +204,6 @@ class _OtpScreenState extends State<OtpScreen> {
                         style: text12(color: AppColors.error),
                       ),
                     ],
-
-                    // Demo hint
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.info.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.info_outline,
-                            size: 14,
-                            color: AppColors.info,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Demo OTP: 123456',
-                            style: text12(color: AppColors.info),
-                          ),
-                        ],
-                      ),
-                    ),
                   ],
                 ),
               ),

@@ -1,9 +1,15 @@
+import 'dart:io';
+
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/models/watchlist_model.dart';
 import 'package:catch_watch/utils/custom_button.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/video_upload_provider.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/edit_profile_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/menu_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
+import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
@@ -102,7 +108,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildTabRow(ProfileProvider provider) {
     final tabs = [
       (ProfileTab.videos, Icons.play_circle_outline_rounded, 'VIDEOS'),
-      (ProfileTab.cuts, Icons.cut_rounded, 'CUTS'),
+      // (ProfileTab.cuts, Icons.cut_rounded, 'CUTS'),
       (ProfileTab.saved, Icons.bookmark_border_rounded, 'SAVED'),
     ];
 
@@ -152,7 +158,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildGrid(ProfileProvider provider) {
-    final items = provider.currentTabItems;
+    final uploadProvider = context.watch<VideoUploadProvider>();
+    List<dynamic> items = List.from(provider.currentTabItems);
+
+    // Add current uploading video to CUTS tab (drafts)
+    if (provider.activeTab == ProfileTab.cuts && uploadProvider.isUploading) {
+      items.insert(0, uploadProvider);
+    }
+
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
       sliver: SliverGrid(
@@ -429,6 +442,7 @@ class _CollapsedBar extends StatelessWidget {
                     radius: 18,
                     backgroundImage: NetworkImage(provider.user!.profileImage!),
                     backgroundColor: Colors.white,
+                    onBackgroundImageError: (_, __) {},
                   )
                 : Container(
                     width: 36,
@@ -560,23 +574,55 @@ class _GridCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: () {
+        if (item is VideoUploadProvider) return;
+
         if (item is ReelModel) {
-          reelsProvider.setTargetReelId(item.id);
-          homeProvider.changePage(1);
-        } else if (item is WatchlistItem) {
-          final content = (item as WatchlistItem).item;
-          if (content != null) {
+          if (profileProvider.activeTab == ProfileTab.cuts) {
             Navigator.push(
               context,
               MaterialPageRoute(
-                  builder: (_) => MovieDetailScreen(content: content)),
+                builder: (_) => ShortVideoPlayerScreen(
+                  isVisible: true,
+                  initialReels: [item],
+                ),
+              ),
             );
+          } else {
+            reelsProvider.setTargetReelId(item.id);
+            homeProvider.changePage(1);
           }
-        } else if (item is Content) {
+        } else if (item is WatchlistItem || item is Content) {
+          final content = item is WatchlistItem ? item.item : item as Content;
+          if (content == null) return;
+
+          if (content.type == 'shortfilm') {
+            final subProvider = context.read<SubscriptionProvider>();
+            bool canWatch = content.isPremium != true || subProvider.currentSubscription != null;
+
+            if (!canWatch) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+              );
+              return;
+            }
+
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ShortVideoPlayerScreen(
+                  isVisible: true,
+                  initialReels: [ReelModel.fromContent(content)],
+                ),
+              ),
+            );
+            return;
+          }
+
           Navigator.push(
             context,
             MaterialPageRoute(
-                builder: (_) => MovieDetailScreen(content: item as Content)),
+                builder: (_) => MovieDetailScreen(content: content)),
           );
         }
       },
@@ -626,7 +672,7 @@ class _GridCard extends StatelessWidget {
               ),
             ),
             if (item is ReelModel &&
-                profileProvider.activeTab == ProfileTab.videos)
+                (profileProvider.activeTab == ProfileTab.videos || profileProvider.activeTab == ProfileTab.cuts))
               Positioned(
                 top: 4,
                 right: 4,
@@ -675,12 +721,16 @@ class _GridCard extends StatelessWidget {
   Widget _buildThumbnail(String? imageUrl, dynamic item) {
     if (imageUrl != null && imageUrl.isNotEmpty) {
       return imageUrl.startsWith('http')
-          ? Image.network(imageUrl,
+          ? Image.network(
+              imageUrl,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _errorPlaceholder())
-          : Image.asset(imageUrl,
+              errorBuilder: (_, __, ___) => _errorPlaceholder(),
+            )
+          : Image.asset(
+              imageUrl,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _errorPlaceholder());
+              errorBuilder: (_, __, ___) => _errorPlaceholder(),
+            );
     }
 
     if (item is ReelModel &&
@@ -717,13 +767,18 @@ class _VideoPreviewThumbnailState extends State<_VideoPreviewThumbnail> {
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..initialize().then((_) {
-        if (mounted) {
-          setState(() => _isInitialized = true);
-          _controller!.seekTo(const Duration(seconds: 1));
-        }
-      });
+    if (widget.videoUrl.startsWith('http')) {
+      _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
+    } else {
+      _controller = VideoPlayerController.file(File(widget.videoUrl));
+    }
+    
+    _controller!.initialize().then((_) {
+      if (mounted) {
+        setState(() => _isInitialized = true);
+        _controller!.seekTo(const Duration(seconds: 1));
+      }
+    });
   }
 
   @override

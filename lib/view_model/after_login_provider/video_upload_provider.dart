@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:catch_watch/repository/reels_repository.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:dio/dio.dart' as dio;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';

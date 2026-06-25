@@ -1,5 +1,5 @@
 class AppUrl {
-  static const String serverUrl = 'http://192.168.1.18:5000';
+  static const String serverUrl = 'http://192.168.1.27:5000';
   static const String baseUrl = '$serverUrl/api';
 
   // Auth Endpoints

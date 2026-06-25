@@ -1,5 +1,6 @@
-import 'package:catch_watch/models/content_model.dart';
+import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/view_model/after_login_provider/notification_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
@@ -9,16 +10,48 @@ import 'package:catch_watch/views/after_login_pages/content_grid_screen.dart';
 import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/notification_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
+import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../models/content_model.dart';
 import '../../res/app_colors.dart';
 import '../../utils/text_style.dart';
 
+void _openShortFilm(BuildContext context, Content content) {
+  // Check if premium and needs subscription
+  final subProvider = context.read<SubscriptionProvider>();
+  bool canWatch = content.isPremium != true || subProvider.currentSubscription != null;
+
+  if (!canWatch) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+    );
+    return;
+  }
+
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => ShortVideoPlayerScreen(
+        isVisible: true,
+        initialReels: [ReelModel.fromContent(content)],
+      ),
+    ),
+  );
+}
+
 Future<void> _openMovie(BuildContext context, Content content) async {
+  if (content.type == 'shortfilm') {
+    _openShortFilm(context, content);
+    return;
+  }
+
   final subProvider = context.read<SubscriptionProvider>();
 
   // Check if content is free or user has an active subscription
-  bool canWatch = content.isPremium != true || subProvider.currentSubscription != null;
+  bool canWatch =
+      content.isPremium != true || subProvider.currentSubscription != null;
 
   if (canWatch) {
     Navigator.push(
@@ -495,7 +528,12 @@ class _HomeScreenState extends State<HomeScreen> {
             fit: StackFit.expand,
             children: [
               item.banner != null
-                  ? Image.network(item.banner!, fit: BoxFit.cover)
+                  ? Image.network(
+                      item.banner!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) =>
+                          Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
+                    )
                   : Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
               // Dark gradient
               Container(
@@ -726,7 +764,12 @@ class _ContentCard extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             content.poster != null
-                ? Image.network(content.poster!, fit: BoxFit.cover)
+                ? Image.network(
+                    content.poster!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) =>
+                        Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
+                  )
                 : Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
           ],
         ),
@@ -756,9 +799,15 @@ class _ContinueCard extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            item.image.startsWith('http')
-                ? Image.network(item.image, fit: BoxFit.cover)
-                : Image.asset(item.image, fit: BoxFit.cover),
+            item.image != null && item.image!.startsWith('http')
+                ? Image.network(
+                    item.image!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) =>
+                        Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
+                  )
+                : Image.asset(item.image ?? 'assets/images/logo.jpg',
+                    fit: BoxFit.cover),
             Positioned(
               bottom: 0,
               left: 0,
@@ -926,8 +975,15 @@ class _MoviePosterCard extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   content.poster != null
-                      ? Image.network(content.poster!, fit: BoxFit.cover)
-                      : Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
+                      ? Image.network(
+                          content.poster!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              Image.asset('assets/images/logo.jpg',
+                                  fit: BoxFit.cover),
+                        )
+                      : Image.asset('assets/images/logo.jpg',
+                          fit: BoxFit.cover),
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(

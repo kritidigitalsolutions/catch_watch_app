@@ -50,7 +50,6 @@ class NotificationService {
               AndroidFlutterLocalNotificationsPlugin>();
 
       await androidImplementation?.requestNotificationsPermission();
-      await androidImplementation?.requestExactAlarmsPermission();
     }
 
     // ✅ Channel
@@ -115,7 +114,7 @@ class NotificationService {
         String? fcmToken = token ?? await _messaging.getToken();
         if (fcmToken != null) {
           debugPrint("🔥 Syncing FCM Token: $fcmToken");
-          await _apiService.postApi(AppUrl.updateFcmToken, {
+          await _apiService.patchApi(AppUrl.updateFcmToken, {
             'fcmToken': fcmToken
           });
         }

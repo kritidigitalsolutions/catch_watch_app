@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
@@ -10,27 +12,44 @@ import '../../utils/text_style.dart';
 
 class ShortVideoPlayerScreen extends StatefulWidget {
   final bool isVisible;
+  final List<ReelModel>? initialReels;
+  final int initialIndex;
 
-  const ShortVideoPlayerScreen({super.key, required this.isVisible});
+  const ShortVideoPlayerScreen({
+    super.key,
+    required this.isVisible,
+    this.initialReels,
+    this.initialIndex = 0,
+  });
 
   @override
   State<ShortVideoPlayerScreen> createState() => _ShortVideoPlayerScreenState();
 }
 
 class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
-  final PageController _pageController = PageController();
-  int _currentIndex = 0;
+  late final PageController _pageController;
+  late int _currentIndex;
+  List<ReelModel> _localReels = [];
 
   @override
   void initState() {
     super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+    
+    if (widget.initialReels != null) {
+      _localReels = widget.initialReels!;
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final reelsProvider = context.read<ReelsProvider>();
-      reelsProvider.fetchReelsFeed().then((_) {
-        if (reelsProvider.targetReelId != null) {
-          _handleTargetReel();
-        }
-      });
+      if (widget.initialReels == null) {
+        reelsProvider.fetchReelsFeed().then((_) {
+          if (reelsProvider.targetReelId != null) {
+            _handleTargetReel();
+          }
+        });
+      }
     });
   }
 
@@ -226,20 +245,21 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<ReelsProvider>();
+    final reels = widget.initialReels ?? provider.reels;
 
     // Listen for targetReelId even after initState (if already on this screen)
-    if (widget.isVisible && provider.targetReelId != null) {
+    if (widget.isVisible && provider.targetReelId != null && widget.initialReels == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _handleTargetReel());
     }
 
-    if (provider.isLoading && provider.reels.isEmpty) {
+    if (provider.isLoading && reels.isEmpty) {
       return const Scaffold(
         backgroundColor: Colors.black,
         body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
       );
     }
 
-    if (provider.reels.isEmpty) {
+    if (reels.isEmpty) {
       return const Scaffold(
         backgroundColor: Colors.black,
         body: Center(child: Text('No reels available', style: TextStyle(color: Colors.white))),
@@ -251,11 +271,11 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
       body: PageView.builder(
         controller: _pageController,
         scrollDirection: Axis.vertical,
-        itemCount: provider.reels.length,
+        itemCount: reels.length,
         onPageChanged: _onPageChanged,
         physics: const BouncingScrollPhysics(),
         itemBuilder: (context, index) {
-          final reel = provider.reels[index];
+          final reel = reels[index];
           return _ShortVideoPage(
             key: ValueKey(reel.id),
             reel: reel,
@@ -298,10 +318,18 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(
-      Uri.parse(widget.reel.videoUrl ?? ''),
-      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
-    );
+    final videoUrl = widget.reel.videoUrl ?? '';
+    if (videoUrl.startsWith('http')) {
+      _controller = VideoPlayerController.networkUrl(
+        Uri.parse(videoUrl),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+      );
+    } else {
+      _controller = VideoPlayerController.file(
+        File(videoUrl),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+      );
+    }
     _initializeVideo();
   }
 

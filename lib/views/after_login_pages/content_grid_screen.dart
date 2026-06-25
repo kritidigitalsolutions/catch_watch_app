@@ -1,8 +1,13 @@
 import 'package:catch_watch/models/content_model.dart';
+import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/text_style.dart';
+import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
+import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 class ContentGridScreen extends StatelessWidget {
   final String title;
@@ -54,17 +59,43 @@ class _GridItem extends StatelessWidget {
   final Content content;
   const _GridItem({required this.content});
 
+  void _handleTap(BuildContext context) {
+    if (content.type == 'shortfilm') {
+      final subProvider = context.read<SubscriptionProvider>();
+      bool canWatch = content.isPremium != true || subProvider.currentSubscription != null;
+
+      if (!canWatch) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+        );
+        return;
+      }
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ShortVideoPlayerScreen(
+            isVisible: true,
+            initialReels: [ReelModel.fromContent(content)],
+          ),
+        ),
+      );
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MovieDetailScreen(content: content),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => MovieDetailScreen(content: content),
-          ),
-        );
-      },
+      onTap: () => _handleTap(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

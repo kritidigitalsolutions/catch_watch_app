@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/models/user_model.dart';
 import 'package:catch_watch/models/watchlist_model.dart';
@@ -28,6 +30,7 @@ class ProfileProvider extends ChangeNotifier {
   List<ReelModel> _myReels = [];
   List<ReelModel> _bookmarkedReels = [];
   List<WatchlistItem> _watchlist = [];
+  List<ReelModel> _localDrafts = [];
 
   UserModel? get user => _user;
   bool get isLoading => _isLoading;
@@ -36,6 +39,7 @@ class ProfileProvider extends ChangeNotifier {
   List<ReelModel> get myReels => _myReels;
   List<ReelModel> get bookmarkedReels => _bookmarkedReels;
   List<WatchlistItem> get watchlist => _watchlist;
+  List<ReelModel> get localDrafts => _localDrafts;
 
   ProfileProvider() {
     _loadUserFromHive();
@@ -207,8 +211,8 @@ class ProfileProvider extends ChangeNotifier {
     switch (_activeTab) {
       case ProfileTab.videos:
         return _myReels;
-      case ProfileTab.cuts:
-        return []; // cuts ko empty rakho
+      // case ProfileTab.cuts:
+      //   return []; // cuts ko empty rakho
       case ProfileTab.saved:
         return _bookmarkedReels; // saved show bookmark reels
       default:

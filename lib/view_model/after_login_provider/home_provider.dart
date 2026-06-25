@@ -196,7 +196,7 @@ class CarouselItem {
 }
 
 class ContentItem {
-  final String image;
+  final String? image;
   final String views;
   final String? progress; // 0.0 - 1.0 as string, null if not started
   final String? remaining;
@@ -207,7 +207,7 @@ class ContentItem {
   final Content? content;
 
   const ContentItem({
-    required this.image,
+    this.image,
     required this.views,
     required this.title,
     this.progress,

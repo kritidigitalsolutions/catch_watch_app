@@ -1,3 +1,4 @@
+import 'package:catch_watch/models/content_model.dart';
 import 'package:catch_watch/res/appUrl.dart';
 
 class ReelModel {
@@ -32,6 +33,18 @@ class ReelModel {
     this.status,
     this.createdAt,
   });
+
+  factory ReelModel.fromContent(Content content) {
+    return ReelModel(
+      id: content.id,
+      videoUrl: content.videoUrl,
+      thumbnail: content.poster,
+      caption: content.title,
+      likesCount: content.likes?.length ?? 0,
+      isBookmarked: false, // content doesn't have this field directly
+      status: 'published',
+    );
+  }
 
   ReelModel.fromJson(Map<String, dynamic> json) {
     id = json['_id'];
