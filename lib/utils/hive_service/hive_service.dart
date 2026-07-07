@@ -7,6 +7,7 @@ class HiveService {
   static const String userKey = 'user';
   static const String historyBoxName = 'historyBox';
   static const String downloadsBoxName = 'downloadsBox';
+  static const String likesBoxName = 'likesBox';
 
   static Future<void> init() async {
     await Hive.initFlutter();
@@ -16,6 +17,7 @@ class HiveService {
     await Hive.openBox<UserDetails>(boxName);
     await Hive.openBox(historyBoxName);
     await Hive.openBox(downloadsBoxName);
+    await Hive.openBox(likesBoxName);
   }
 
   static Box<UserDetails> get _box {
@@ -27,9 +29,23 @@ class HiveService {
 
   static Box get _historyBox => Hive.box(historyBoxName);
   static Box get _downloadsBox => Hive.box(downloadsBoxName);
+  static Box get _likesBox => Hive.box(likesBoxName);
 
   static Future<void> saveUser(UserDetails user) async {
     await _box.put(userKey, user);
+  }
+
+  // --- Likes ---
+  static Future<void> toggleLikeLocal(String contentId, bool isLiked) async {
+    if (isLiked) {
+      await _likesBox.put(contentId, true);
+    } else {
+      await _likesBox.delete(contentId);
+    }
+  }
+
+  static Set<String> getLikedIds() {
+    return _likesBox.keys.map((e) => e.toString()).toSet();
   }
 
   // --- Watch History ---
@@ -64,6 +80,8 @@ class HiveService {
 
   static Future<void> logout() async {
     await _box.clear();
+    await _historyBox.clear();
+    await _likesBox.clear();
   }
 
   static bool isLogin() {

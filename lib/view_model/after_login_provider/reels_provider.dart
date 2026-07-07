@@ -1,11 +1,16 @@
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/repository/reels_repository.dart';
 import 'package:catch_watch/repository/interaction_repository.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:flutter/material.dart';
 
 class ReelsProvider extends ChangeNotifier {
   final ReelsRepository _reelsRepository = ReelsRepository();
   final InteractionRepository _interactionRepository = InteractionRepository();
+
+  ReelsProvider() {
+    _fetchInitialInteractions();
+  }
 
   List<ReelModel> _reels = [];
   bool _isLoading = false;
@@ -26,6 +31,14 @@ class ReelsProvider extends ChangeNotifier {
   final Set<String> _likedIds = {};
   final Set<String> _bookmarkedIds = {};
   bool _hasFetchedInitialInteractions = false;
+
+  Future<void> applyInteractionsTo(List<ReelModel> reelList) async {
+    if (!_hasFetchedInitialInteractions) {
+      await _fetchInitialInteractions();
+    }
+    _applyLocalInteractions(reelList);
+    notifyListeners();
+  }
 
   void _applyLocalInteractions(List<ReelModel> reelList) {
     for (var reel in reelList) {
@@ -64,7 +77,10 @@ class ReelsProvider extends ChangeNotifier {
 
         // Also update local sets from fetched data
         for (var reel in fetchedReels) {
-          if (reel.userInteraction == 'LIKE') _likedIds.add(reel.id!);
+          if (reel.userInteraction == 'LIKE') {
+            _likedIds.add(reel.id!);
+            HiveService.toggleLikeLocal(reel.id!, true);
+          }
           if (reel.isBookmarked == true) _bookmarkedIds.add(reel.id!);
         }
 
@@ -82,6 +98,10 @@ class ReelsProvider extends ChangeNotifier {
 
   Future<void> _fetchInitialInteractions() async {
     try {
+      // Load local likes from Hive
+      final localLikes = HiveService.getLikedIds();
+      _likedIds.addAll(localLikes);
+
       final response = await _interactionRepository.getBookmarks();
       if (response['success'] == true) {
         final bookmarks = response['bookmarks'] as List;
@@ -93,7 +113,7 @@ class ReelsProvider extends ChangeNotifier {
         _hasFetchedInitialInteractions = true;
       }
     } catch (e) {
-      debugPrint('Error fetching initial bookmarks: $e');
+      debugPrint('Error fetching initial interactions: $e');
     }
   }
 
@@ -146,57 +166,103 @@ class ReelsProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> toggleLike(String reelId) async {
-    final index = _reels.indexWhere((r) => r.id == reelId);
-    if (index == -1) return;
+  Future<void> toggleLike(String reelId, {ReelModel? reel}) async {
+    // Find all instances of this reel in our provider and the one passed from UI
+    final List<ReelModel> targetReels = [];
+    if (reel != null) targetReels.add(reel);
+    
+    final mainIndex = _reels.indexWhere((r) => r.id == reelId);
+    if (mainIndex != -1) targetReels.add(_reels[mainIndex]);
 
-    final reel = _reels[index];
-    final originalInteraction = reel.userInteraction;
-    final originalLikes = reel.likesCount ?? 0;
-
-    if (originalInteraction == 'LIKE') {
-      _reels[index].userInteraction = null;
-      _reels[index].likesCount = originalLikes - 1;
-      _likedIds.remove(reelId);
-    } else {
-      _reels[index].userInteraction = 'LIKE';
-      _reels[index].likesCount = originalLikes + 1;
-      _likedIds.add(reelId);
+    if (targetReels.isEmpty && !_likedIds.contains(reelId)) {
+      // If we don't have the object, we can't update counts optimistically
+      // but we still proceed to toggle the API
     }
 
-    _reels = List.from(_reels); // New list instance
+    final bool wasLiked = _likedIds.contains(reelId);
+    
+    // Optimistic Update
+    if (wasLiked) {
+      _likedIds.remove(reelId);
+      await HiveService.toggleLikeLocal(reelId, false);
+      for (var r in targetReels) {
+        r.userInteraction = null;
+        r.likesCount = (r.likesCount ?? 1) - 1;
+      }
+    } else {
+      _likedIds.add(reelId);
+      await HiveService.toggleLikeLocal(reelId, true);
+      for (var r in targetReels) {
+        r.userInteraction = 'LIKE';
+        r.likesCount = (r.likesCount ?? 0) + 1;
+      }
+    }
+
+    _reels = List.from(_reels);
     notifyListeners();
 
     try {
       final response = await _interactionRepository.toggleLike(reelId);
       if (response['success'] != true) {
         // Rollback on failure
-        _reels[index].userInteraction = originalInteraction;
-        _reels[index].likesCount = originalLikes;
-        if (originalInteraction == 'LIKE') _likedIds.add(reelId); else _likedIds.remove(reelId);
+        if (wasLiked) {
+          _likedIds.add(reelId);
+          await HiveService.toggleLikeLocal(reelId, true);
+          for (var r in targetReels) {
+            r.userInteraction = 'LIKE';
+            r.likesCount = (r.likesCount ?? 0) + 1;
+          }
+        } else {
+          _likedIds.remove(reelId);
+          await HiveService.toggleLikeLocal(reelId, false);
+          for (var r in targetReels) {
+            r.userInteraction = null;
+            r.likesCount = (r.likesCount ?? 1) - 1;
+          }
+        }
         _reels = List.from(_reels);
         notifyListeners();
       }
     } catch (e) {
       // Rollback on error
-      _reels[index].userInteraction = originalInteraction;
-      _reels[index].likesCount = originalLikes;
-      if (originalInteraction == 'LIKE') _likedIds.add(reelId); else _likedIds.remove(reelId);
+      if (wasLiked) {
+        _likedIds.add(reelId);
+        await HiveService.toggleLikeLocal(reelId, true);
+        for (var r in targetReels) {
+          r.userInteraction = 'LIKE';
+          r.likesCount = (r.likesCount ?? 0) + 1;
+        }
+      } else {
+        _likedIds.remove(reelId);
+        await HiveService.toggleLikeLocal(reelId, false);
+        for (var r in targetReels) {
+          r.userInteraction = null;
+          r.likesCount = (r.likesCount ?? 1) - 1;
+        }
+      }
       _reels = List.from(_reels);
       notifyListeners();
       debugPrint('Error toggling like: $e');
     }
   }
 
-  Future<void> toggleBookmark(String reelId) async {
-    final index = _reels.indexWhere((r) => r.id == reelId);
-    if (index == -1) return;
+  Future<void> toggleBookmark(String reelId, {ReelModel? reel}) async {
+    final List<ReelModel> targetReels = [];
+    if (reel != null) targetReels.add(reel);
+    
+    final mainIndex = _reels.indexWhere((r) => r.id == reelId);
+    if (mainIndex != -1) targetReels.add(_reels[mainIndex]);
 
-    final originalBookmark = _reels[index].isBookmarked ?? false;
+    final bool wasBookmarked = _bookmarkedIds.contains(reelId);
 
     // Optimistic UI update
-    _reels[index].isBookmarked = !originalBookmark;
-    if (_reels[index].isBookmarked!) _bookmarkedIds.add(reelId); else _bookmarkedIds.remove(reelId);
+    if (wasBookmarked) {
+      _bookmarkedIds.remove(reelId);
+      for (var r in targetReels) r.isBookmarked = false;
+    } else {
+      _bookmarkedIds.add(reelId);
+      for (var r in targetReels) r.isBookmarked = true;
+    }
 
     _reels = List.from(_reels);
     notifyListeners();
@@ -204,14 +270,26 @@ class ReelsProvider extends ChangeNotifier {
     try {
       final response = await _interactionRepository.toggleBookmark(reelId);
       if (response['success'] != true) {
-        _reels[index].isBookmarked = originalBookmark;
-        if (originalBookmark) _bookmarkedIds.add(reelId); else _bookmarkedIds.remove(reelId);
+        // Rollback
+        if (wasBookmarked) {
+          _bookmarkedIds.add(reelId);
+          for (var r in targetReels) r.isBookmarked = true;
+        } else {
+          _bookmarkedIds.remove(reelId);
+          for (var r in targetReels) r.isBookmarked = false;
+        }
         _reels = List.from(_reels);
         notifyListeners();
       }
     } catch (e) {
-      _reels[index].isBookmarked = originalBookmark;
-      if (originalBookmark) _bookmarkedIds.add(reelId); else _bookmarkedIds.remove(reelId);
+      // Rollback
+      if (wasBookmarked) {
+        _bookmarkedIds.add(reelId);
+        for (var r in targetReels) r.isBookmarked = true;
+      } else {
+        _bookmarkedIds.remove(reelId);
+        for (var r in targetReels) r.isBookmarked = false;
+      }
       _reels = List.from(_reels);
       notifyListeners();
       debugPrint('Error toggling bookmark: $e');
@@ -241,16 +319,20 @@ class ReelsProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> postComment(String reelId, String text) async {
+  Future<bool> postComment(String reelId, String text, {ReelModel? reel}) async {
     try {
       final response = await _interactionRepository.postComment(reelId, text);
       if (response['success'] == true) {
-        // Update local count
+        // Update local counts
+        if (reel != null) {
+          reel.commentsCount = (reel.commentsCount ?? 0) + 1;
+        }
         final index = _reels.indexWhere((r) => r.id == reelId);
         if (index != -1) {
           _reels[index].commentsCount = (_reels[index].commentsCount ?? 0) + 1;
-          _reels = List.from(_reels);
         }
+        _reels = List.from(_reels);
+
         // Add to list if current
         _currentComments.insert(0, response['comment']);
         notifyListeners();

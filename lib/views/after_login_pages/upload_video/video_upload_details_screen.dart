@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/text_style.dart';
 import 'package:catch_watch/view_model/after_login_provider/video_upload_provider.dart';
@@ -44,15 +46,14 @@ class _VideoDetailView extends StatelessWidget {
           children: [
             _UploadProgressCard(),
             const SizedBox(height: 24),
-            // _TitleField(),
-            // const SizedBox(height: 20),
+            _ThumbnailPicker(),
+            const SizedBox(height: 24),
+            _TitleField(),
+            const SizedBox(height: 20),
             _CaptionField(),
             const SizedBox(height: 20),
-            // _CommentsField(),
-            // const SizedBox(height: 20),
             _HashtagsField(),
             const SizedBox(height: 20),
-            // _VisibilitySection(),
             const SizedBox(height: 32),
             _PublishButton(),
             const SizedBox(height: 24),
@@ -226,6 +227,54 @@ InputDecoration _inputDecoration({required String hint, Widget? suffixIcon}) {
     ),
     suffixIcon: suffixIcon,
   );
+}
+
+// ─── Thumbnail Picker ──────────────────────────────────────────────────────────
+
+class _ThumbnailPicker extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<VideoUploadProvider>();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Reel Thumbnail', style: text14(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 10),
+        GestureDetector(
+          onTap: provider.isUploading ? null : () => provider.pickThumbnail(),
+          child: Container(
+            width: 120,
+            height: 160,
+            decoration: BoxDecoration(
+              color: AppColors.grey100,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.grey300),
+            ),
+            child: provider.thumbnailFile != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.file(
+                      File(provider.thumbnailFile!.path),
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                : const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.add_photo_alternate_outlined, color: AppColors.grey600),
+                      SizedBox(height: 8),
+                      Text(
+                        'Add Cover',
+                        style: TextStyle(fontSize: 12, color: AppColors.grey600),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 // ─── Title Field ───────────────────────────────────────────────────────────────

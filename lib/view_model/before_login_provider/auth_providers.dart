@@ -12,6 +12,7 @@ import 'package:catch_watch/views/before_login_Pages/profile_setup_screen.dart';
 import 'package:dio/dio.dart' as dio;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:sms_autofill/sms_autofill.dart';
 
 import '../../views/before_login_Pages/otp_verify_screen.dart';
 
@@ -83,8 +84,18 @@ class OnboardingItem {
 
 enum AuthStep { login, otp, categories, profile, done }
 
-class AuthProvider extends ChangeNotifier {
+class AuthProvider extends ChangeNotifier with CodeAutoFill {
   final AuthRepository _authRepository = AuthRepository();
+
+  @override
+  void codeUpdated() {
+    if (code != null && code!.length == 6) {
+      for (int i = 0; i < 6; i++) {
+        _otpDigits[i] = code![i];
+      }
+      notifyListeners();
+    }
+  }
 
   // ─── Navigation State ──────────────────────────────────────
   AuthStep _step = AuthStep.login;
@@ -151,6 +162,7 @@ class AuthProvider extends ChangeNotifier {
         _otpSent = true;
         _startResendTimer();
         _step = AuthStep.otp;
+        listenForCode();
 
         if (response.otp != null) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -238,6 +250,7 @@ class AuthProvider extends ChangeNotifier {
       if (response.success == true) {
         clearOtp();
         _startResendTimer();
+        listenForCode();
 
         if (response.otp != null && context != null) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -330,6 +343,14 @@ class AuthProvider extends ChangeNotifier {
     _step = AuthStep.login;
     clearOtp();
     notifyListeners();
+  }
+
+  Future<void> verifyFromAutoFill(String code, BuildContext context) async {
+    for (int i = 0; i < 6; i++) {
+      _otpDigits[i] = code[i];
+    }
+    notifyListeners();
+    await verifyOtp(context);
   }
 
   // ─── Categories State ───────────────────────────────────────
@@ -512,6 +533,7 @@ class AuthProvider extends ChangeNotifier {
   @override
   void dispose() {
     _resendTimer?.cancel();
+    unregisterListener();
     super.dispose();
   }
 }

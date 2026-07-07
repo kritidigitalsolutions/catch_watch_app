@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pinput/pinput.dart';
 import 'package:provider/provider.dart';
+import 'package:sms_autofill/sms_autofill.dart';
 import '../../res/app_colors.dart';
 import '../../utils/custom_button.dart';
 import '../../utils/text_style.dart';
@@ -13,51 +15,79 @@ class OtpScreen extends StatefulWidget {
   State<OtpScreen> createState() => _OtpScreenState();
 }
 
-class _OtpScreenState extends State<OtpScreen> {
-  final List<TextEditingController> _controllers = List.generate(
-    6,
-    (_) => TextEditingController(),
-  );
-  final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
+class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
+  final TextEditingController _pinController = TextEditingController();
+  final FocusNode _pinFocusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    listenForCode(); // Removed await as it's a void function
+    _printAppSignature();
+    // Ensure focus on the first box
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pinFocusNode.requestFocus();
+    });
+  }
+
+  @override
+  void codeUpdated() {
+    if (code != null && code!.length == 6) {
+      setState(() {
+        _pinController.text = code!;
+      });
+      // Automatically verify once filled
+      context.read<AuthProvider>().verifyFromAutoFill(code!, context);
+    }
+  }
+
+  void _printAppSignature() async {
+    String signature = await SmsAutoFill().getAppSignature;
+    debugPrint("App Signature for SMS: $signature");
+  }
 
   @override
   void dispose() {
-    for (final c in _controllers) {
-      c.dispose();
-    }
-    for (final f in _focusNodes) {
-      f.dispose();
-    }
+    unregisterListener();
+    _pinController.dispose();
+    _pinFocusNode.dispose();
     super.dispose();
   }
 
-  void _onDigitChanged(String value, int index, AuthProvider auth) {
-    if (value.isNotEmpty) {
-      auth.setOtpDigit(index, value);
-      if (index < 5) {
-        _focusNodes[index + 1].requestFocus();
-      } else {
-        _focusNodes[index].unfocus();
-      }
-    } else {
-      auth.setOtpDigit(index, '');
-      if (index > 0) {
-        _focusNodes[index - 1].requestFocus();
-      }
-    }
-  }
-
   void _clearAndResetControllers(AuthProvider auth) {
-    for (int i = 0; i < 6; i++) {
-      _controllers[i].clear();
-    }
-    _focusNodes[0].requestFocus();
+    _pinController.clear();
+    _pinFocusNode.requestFocus();
     auth.clearOtp();
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+
+    // Update controller if OTP is auto-filled in provider
+    if (auth.otpCode.length == 6 && _pinController.text != auth.otpCode) {
+      _pinController.text = auth.otpCode;
+    }
+
+    final defaultPinTheme = PinTheme(
+      width: 44,
+      height: 52,
+      textStyle: text18(fontWeight: FontWeight.bold),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.grey300),
+      ),
+    );
+
+    final focusedPinTheme = defaultPinTheme.copyDecorationWith(
+      border: Border.all(color: AppColors.primary, width: 2),
+    );
+
+    final submittedPinTheme = defaultPinTheme.copyDecorationWith(
+      color: AppColors.primary.withOpacity(0.08),
+      border: Border.all(color: AppColors.primary),
+    );
 
     return Scaffold(
       backgroundColor: AppColors.white,
@@ -134,67 +164,28 @@ class _OtpScreenState extends State<OtpScreen> {
                     ),
                     const SizedBox(height: 20),
 
-                    // OTP boxes
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: List.generate(6, (i) {
-                        final isFilled = auth.otpDigits[i].isNotEmpty;
-                        return SizedBox(
-                          width: 44,
-                          height: 52,
-                          child: TextField(
-                            controller: _controllers[i],
-                            focusNode: _focusNodes[i],
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.center,
-                            maxLength: 1,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                            ],
-                            style: text18(fontWeight: FontWeight.bold),
-                            decoration: InputDecoration(
-                              counterText: '',
-                              filled: true,
-                              fillColor: isFilled
-                                  ? AppColors.primary.withOpacity(0.08)
-                                  : Colors.white,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                  color: AppColors.grey300,
-                                ),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(
-                                  color: isFilled
-                                      ? AppColors.primary
-                                      : AppColors.grey300,
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                  color: AppColors.primary,
-                                  width: 2,
-                                ),
-                              ),
-                              errorBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                  color: AppColors.error,
-                                ),
-                              ),
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                            onChanged: (val) => _onDigitChanged(
-                              val,
+                    // OTP boxes using Pinput
+                    Center(
+                      child: Pinput(
+                        length: 6,
+                        controller: _pinController,
+                        focusNode: _pinFocusNode,
+                        defaultPinTheme: defaultPinTheme,
+                        focusedPinTheme: focusedPinTheme,
+                        submittedPinTheme: submittedPinTheme,
+                        keyboardType: TextInputType.number,
+                        onChanged: (value) {
+                          for (int i = 0; i < 6; i++) {
+                            auth.setOtpDigit(
                               i,
-                              context.read<AuthProvider>(),
-                            ),
-                          ),
-                        );
-                      }),
+                              i < value.length ? value[i] : '',
+                            );
+                          }
+                        },
+                        onCompleted: (pin) {
+                          auth.verifyOtp(context);
+                        },
+                      ),
                     ),
 
                     if (auth.otpError != null) ...[

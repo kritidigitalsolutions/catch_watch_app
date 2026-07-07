@@ -264,7 +264,14 @@ class _WishListScreenState extends State<WishListScreen> {
                   ),
                   const SizedBox(height: 8),
                   GestureDetector(
-                    onTap: () => provider.removeItem(watchlistItem.id),
+                    onTap: () async {
+                      final success = await provider.removeItem(watchlistItem.id);
+                      if (success && mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Removed from Wishlist')),
+                        );
+                      }
+                    },
                     child: Container(
                       width: 36,
                       height: 36,

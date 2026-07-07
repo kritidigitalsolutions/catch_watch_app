@@ -10,9 +10,9 @@ class NetworkApiService extends BaseApiService {
   NetworkApiService() {
     _dio = Dio(
       BaseOptions(
-        connectTimeout: const Duration(seconds: 20),
-        receiveTimeout: const Duration(seconds: 20),
-        // headers: {"Content-Type": "application/json"},
+        connectTimeout: const Duration(seconds: 120),
+        receiveTimeout: const Duration(seconds: 120),
+        sendTimeout: const Duration(seconds: 600), // Increased send timeout for large uploads
       ),
     );
 
@@ -82,10 +82,18 @@ class NetworkApiService extends BaseApiService {
   Future<dynamic> postApiWithProgress(String url, dynamic data, {Function(int, int)? onSendProgress}) async {
     try {
       debugPrint("POST API CALL (Progress) => $url");
+      
+      // Ensure we don't have a conflicting Content-Type header for multipart
+      final options = Options(
+        sendTimeout: const Duration(minutes: 20), // 20 minutes for video
+        receiveTimeout: const Duration(minutes: 20),
+      );
+
       final response = await _dio.post(
         url,
         data: data,
         onSendProgress: onSendProgress,
+        options: options,
       );
       return returnResponse(response);
     } on DioException catch (e) {
@@ -177,6 +185,8 @@ dynamic returnResponse(Response response) {
   switch (response.statusCode) {
     case 200:
     case 201:
+    case 202:
+    case 204:
       return response.data;
 
     case 400:

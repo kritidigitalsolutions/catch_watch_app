@@ -33,22 +33,36 @@ class WatchlistProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> addItem(String itemId) async {
+  Future<bool> addItem(String itemId) async {
+    _isLoading = true;
+    notifyListeners();
     try {
-      await _watchlistRepository.addToWatchlist(itemId);
+      final response = await _watchlistRepository.addToWatchlist(itemId);
+      // Wait for fetchWatchlist to complete so _items is updated
       await fetchWatchlist();
+      return true;
     } catch (e) {
       debugPrint('Error adding to watchlist: $e');
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
   }
 
-  Future<void> removeItem(String id) async {
+  Future<bool> removeItem(String id) async {
+    _isLoading = true;
+    notifyListeners();
     try {
-      await _watchlistRepository.removeFromWatchlist(id);
+      final response = await _watchlistRepository.removeFromWatchlist(id);
       _items.removeWhere((element) => element.id == id);
-      notifyListeners();
+      return true;
     } catch (e) {
       debugPrint('Error removing from watchlist: $e');
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
   }
 }

@@ -11,6 +11,8 @@ import 'package:catch_watch/view_model/before_login_provider/auth_providers.dart
 import 'package:catch_watch/views/before_login_Pages/onboarding_screen.dart';
 import 'package:catch_watch/views/before_login_Pages/splash_screen.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
+import 'package:catch_watch/utils/text_style.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -112,35 +114,77 @@ class MyHomePage extends StatelessWidget {
             systemNavigationBarColor: AppColors.white,
             systemNavigationBarIconBrightness: Brightness.dark,
           ),
-          child: Scaffold(
-            appBar: AppBar(
-              toolbarHeight: 0,
+          child: PopScope(
+            canPop: false,
+            onPopInvokedWithResult: (didPop, result) async {
+              if (didPop) return;
+              
+              if (ctr.pageIndex != 0) {
+                ctr.changePage(0);
+              } else {
+                final bool shouldExit = await _showExitDialog(context) ?? false;
+                if (shouldExit) {
+                  SystemNavigator.pop();
+                }
+              }
+            },
+            child: Scaffold(
+              appBar: AppBar(
+                toolbarHeight: 0,
+                backgroundColor: AppColors.white,
+                automaticallyImplyLeading: false,
+              ),
               backgroundColor: AppColors.white,
-              automaticallyImplyLeading: false,
-            ),
-            backgroundColor: AppColors.white,
-
-            // Separate Bottom Navigation
-            bottomNavigationBar: BottomNavBar(
-              currentIndex: ctr.pageIndex,
-              onTap: (index) {
-                ctr.changePage(index);
-              },
-            ),
-
-            body: Consumer<HomeScreenProvider>(
-              builder: (context, p, child) {
-                return Stack(
-                  children: [
-                    // Main Content using IndexedStack
-                    IndexedStack(index: p.pageIndex, children: p.screenPage),
-                  ],
-                );
-              },
+  
+              // Separate Bottom Navigation
+              bottomNavigationBar: BottomNavBar(
+                currentIndex: ctr.pageIndex,
+                onTap: (index) {
+                  ctr.changePage(index);
+                },
+              ),
+  
+              body: Consumer<HomeScreenProvider>(
+                builder: (context, p, child) {
+                  return Stack(
+                    children: [
+                      // Main Content using IndexedStack
+                      IndexedStack(index: p.pageIndex, children: p.screenPage),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         );
       },
+    );
+  }
+
+  Future<bool?> _showExitDialog(BuildContext context) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Exit App'),
+        content: const Text('Are you want to close the app?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              'No',
+              style: text14(color: AppColors.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(
+              'Yes',
+              style: text14(color: AppColors.primary, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

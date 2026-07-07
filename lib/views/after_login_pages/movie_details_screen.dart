@@ -1,6 +1,7 @@
 import 'package:catch_watch/models/content_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/text_style.dart';
+import 'package:catch_watch/utils/share_helper.dart';
 import 'package:catch_watch/view_model/after_login_provider/movie_details_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
 import 'package:flutter/material.dart';
@@ -561,23 +562,50 @@ class _HeaderActions extends StatelessWidget {
         const SizedBox(width: 8),
         Consumer<WatchlistProvider>(
           builder: (context, watchlistProvider, _) {
-            final isInWatchlist = watchlistProvider.items
-                .any((i) => i.item?.id == provider.content.id);
+            // Check if this specific content ID is in the watchlist items
+            final isInWatchlist = watchlistProvider.items.any((i) {
+              return i.item?.id == provider.content.id || (i.item as dynamic)?['_id'] == provider.content.id;
+            });
+            
             return _SmallActionBtn(
               icon: isInWatchlist
                   ? Icons.favorite_rounded
                   : Icons.favorite_border_rounded,
               label: 'Wishlist',
-              onTap: () {
+              onTap: () async {
+                if (watchlistProvider.isLoading) return;
+                
                 if (isInWatchlist) {
-                  final item = watchlistProvider.items
-                      .firstWhere((i) => i.item?.id == provider.content.id);
-                  watchlistProvider.removeItem(item.id!);
+                  final item = watchlistProvider.items.firstWhere((i) => 
+                    i.item?.id == provider.content.id || (i.item as dynamic)?['_id'] == provider.content.id);
+                  
+                  final success = await watchlistProvider.removeItem(item.id!);
+                  if (success && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Removed from Wishlist')),
+                    );
+                  }
                 } else {
-                  watchlistProvider.addItem(provider.content.id!);
+                  final success = await watchlistProvider.addItem(provider.content.id!);
+                  if (success && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Added to Wishlist')),
+                    );
+                  }
                 }
               },
               iconColor: isInWatchlist ? AppColors.error : AppColors.textPrimary,
+              overlay: watchlistProvider.isLoading
+                  ? Positioned.fill(
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        child: const CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    )
+                  : null,
             );
           },
         ),
@@ -585,7 +613,16 @@ class _HeaderActions extends StatelessWidget {
         _SmallActionBtn(
           icon: Icons.share_outlined,
           label: 'Share',
-          onTap: () {},
+          onTap: () {
+            final content = provider.content;
+            ShareHelper.shareContent(
+              title: content.title ?? 'Catch Watch',
+              text: 'Check out this ${content.type}: ${content.title}',
+              imageUrl: content.poster,
+              contentId: content.id,
+              contentType: content.type ?? 'video',
+            );
+          },
         ),
       ],
     );

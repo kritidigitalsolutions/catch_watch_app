@@ -120,7 +120,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 const SizedBox(height: 20),
               ],
               
-              if (_isSearching && reelsProvider.reels.isNotEmpty) ...[
+              if (_isSearching) ...[
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Text(
@@ -129,18 +129,29 @@ class _SearchScreenState extends State<SearchScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                SizedBox(
-                  height: 200,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(left: 16),
-                    itemCount: reelsProvider.reels.length,
-                    itemBuilder: (context, index) {
-                      final reel = reelsProvider.reels[index];
-                      return _buildReelCard(reel);
-                    },
+                if (reelsProvider.isLoading)
+                  const Center(child: Padding(
+                    padding: EdgeInsets.all(20.0),
+                    child: CircularProgressIndicator(color: AppColors.primary),
+                  ))
+                else if (reelsProvider.reels.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text("No reels found", style: text14(color: AppColors.textSecondary)),
+                  )
+                else
+                  SizedBox(
+                    height: 200,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.only(left: 16),
+                      itemCount: reelsProvider.reels.length,
+                      itemBuilder: (context, index) {
+                        final reel = reelsProvider.reels[index];
+                        return _buildReelCard(reel);
+                      },
+                    ),
                   ),
-                ),
                 const SizedBox(height: 20),
               ],
 

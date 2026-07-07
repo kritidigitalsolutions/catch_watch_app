@@ -14,6 +14,7 @@ class VideoUploadProvider extends ChangeNotifier {
 
   // ── Picked file ──────────────────────────────────────────────────────────
   XFile? _pickedFile;
+  XFile? _thumbnailFile;
   double _fileSizeMB = 0;
   bool _isPicking = false;
   PickError _pickError = PickError.none;
@@ -37,10 +38,12 @@ class VideoUploadProvider extends ChangeNotifier {
 
   // ── Getters ───────────────────────────────────────────────────────────────
   XFile? get pickedFile => _pickedFile;
+  XFile? get thumbnailFile => _thumbnailFile;
   double get fileSizeMB => _fileSizeMB;
   bool get isPicking => _isPicking;
   PickError get pickError => _pickError;
   bool get hasFile => _pickedFile != null;
+  bool get hasThumbnail => _thumbnailFile != null;
 
   double get uploadProgress => _uploadProgress;
   bool get isUploading => _isUploading;
@@ -96,6 +99,10 @@ class VideoUploadProvider extends ChangeNotifier {
 
       _pickedFile = file;
       _fileSizeMB = double.parse(sizeMB.toStringAsFixed(1));
+      
+      // Reset thumbnail when a new video is picked
+      _thumbnailFile = null;
+      
       _uploadProgress = 0;
       _uploadComplete = false;
       _isPicking = false;
@@ -107,51 +114,103 @@ class VideoUploadProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> pickThumbnail() async {
+    try {
+      final picker = ImagePicker();
+      final XFile? file = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70,
+      );
+
+      if (file != null) {
+        _thumbnailFile = file;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint("Error picking thumbnail: $e");
+    }
+  }
+
   void setVisibility(VisibilityOption option) {
     _visibility = option;
     notifyListeners();
   }
 
   Future<bool> publish() async {
-    if (_pickedFile == null) return false;
-    
+    if (_pickedFile == null || _thumbnailFile == null) {
+      _uploadError = _thumbnailFile == null ? "Please select a thumbnail image" : "Please select a video";
+      notifyListeners();
+      return false;
+    }
+
     _isUploading = true;
     _uploadError = null;
     _uploadProgress = 0.0;
     notifyListeners();
 
     try {
-      dio.FormData formData = dio.FormData.fromMap({
-        'caption': captionController.text, // Use captionController
-        'hashtags': hashtagsController.text.split(' ').where((h) => h.startsWith('#')).toList(),
+      final hashtags = hashtagsController.text
+          .split(' ')
+          .where((h) => h.trim().startsWith('#'))
+          .join(',');
+
+      // Create FormData - match Postman's simple structure
+      final String videoFileName = _pickedFile!.path.split('/').last;
+      final String videoExtension = videoFileName.split('.').last.toLowerCase();
+      final String videoMimeType = (videoExtension == 'mov') ? 'video/quicktime' : 'video/mp4';
+
+      final String thumbFileName = _thumbnailFile!.path.split('/').last;
+      final String thumbExtension = thumbFileName.split('.').last.toLowerCase();
+      final String thumbMimeType = (thumbExtension == 'png') ? 'image/png' : 'image/jpeg';
+
+      final Map<String, dynamic> dataMap = {
+        'title': titleController.text.trim().isEmpty ? 'New Reel' : titleController.text.trim(),
+        'caption': captionController.text.trim(),
+        'hashtags': hashtags,
         'video': await dio.MultipartFile.fromFile(
           _pickedFile!.path,
-          filename: _pickedFile!.name,
+          filename: videoFileName,
+          contentType: dio.DioMediaType.parse(videoMimeType),
         ),
-      });
+        'thumbnail': await dio.MultipartFile.fromFile(
+          _thumbnailFile!.path,
+          filename: thumbFileName,
+          contentType: dio.DioMediaType.parse(thumbMimeType),
+        ),
+      };
+
+      final formData = dio.FormData.fromMap(dataMap);
+
+      debugPrint("📤 Uploading to API: ${_pickedFile!.path}");
 
       final response = await _reelsRepository.uploadReel(
         formData,
         onSendProgress: (sent, total) {
-          _uploadProgress = sent / total;
-          notifyListeners();
+          if (total > 0) {
+            _uploadProgress = sent / total;
+            notifyListeners();
+          }
         },
       );
 
-      if (response['success'] == true) {
+      if (response != null && response is Map && (response['success'] == true || response['status'] == 'success')) {
         _uploadProgress = 1.0;
         _uploadComplete = true;
         _isUploading = false;
         notifyListeners();
         return true;
       } else {
-        _uploadError = response['message'] ?? 'Failed to upload reel';
+        _uploadError = (response is Map ? response['message'] : null) ?? 'Server returned an error';
         _isUploading = false;
         notifyListeners();
         return false;
       }
     } catch (e) {
-      _uploadError = e.toString();
+      debugPrint("❌ UPLOAD ERROR: $e");
+      _uploadError = e.toString().replaceAll("Exception:", "").trim();
+      if (_uploadError!.isEmpty) {
+        _uploadError = "Upload failed. Please check your internet or try a smaller video.";
+      }
       _isUploading = false;
       notifyListeners();
       return false;

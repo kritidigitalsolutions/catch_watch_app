@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
+import 'package:catch_watch/utils/share_helper.dart';
 import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -43,6 +44,9 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final reelsProvider = context.read<ReelsProvider>();
+      if (widget.initialReels != null) {
+        reelsProvider.applyInteractionsTo(widget.initialReels!);
+      }
       if (widget.initialReels == null) {
         reelsProvider.fetchReelsFeed().then((_) {
           if (reelsProvider.targetReelId != null) {
@@ -223,7 +227,7 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
                             if (commentController.text.trim().isNotEmpty) {
                               final text = commentController.text.trim();
                               commentController.clear();
-                              final success = await provider.postComment(reel.id!, text);
+                              final success = await provider.postComment(reel.id!, text, reel: reel);
                               if (!success) {
                                 // Maybe show a toast
                               }
@@ -280,8 +284,8 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
             key: ValueKey(reel.id),
             reel: reel,
             isActive: widget.isVisible && index == _currentIndex,
-            onLike: () => provider.toggleLike(reel.id!),
-            onSave: () => provider.toggleBookmark(reel.id!),
+            onLike: () => provider.toggleLike(reel.id!, reel: reel),
+            onSave: () => provider.toggleBookmark(reel.id!, reel: reel),
             onComment: () => _showComments(reel),
           );
         },
@@ -420,18 +424,13 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
                   ),
                 ),
                 const Spacer(),
-                IconButton(
-                  tooltip: 'Search',
-                  onPressed: () {
-                    // Implement search
-                  },
-                  icon: const Icon(Icons.search, color: Colors.white),
-                ),
-                IconButton(
-                  tooltip: 'More',
-                  onPressed: () {},
-                  icon: const Icon(Icons.more_vert, color: Colors.white),
-                ),
+                // IconButton(
+                //   tooltip: 'Search',
+                //   onPressed: () {
+                //     // Implement search
+                //   },
+                //   icon: const Icon(Icons.search, color: Colors.white),
+                // ),
               ],
             ),
           ),
@@ -585,8 +584,13 @@ class _ShortActions extends StatelessWidget {
           icon: Icons.share_rounded,
           label: 'Share',
           onTap: () {
-            // Placeholder for share
-            debugPrint('Sharing reel: ${reel.id}');
+            ShareHelper.shareContent(
+              title: 'Catch Watch Reel',
+              text: 'Check out this Reel: ${reel.caption}',
+              imageUrl: reel.thumbnail,
+              contentId: reel.id,
+              contentType: 'reel',
+            );
           },
         ),
       ],
