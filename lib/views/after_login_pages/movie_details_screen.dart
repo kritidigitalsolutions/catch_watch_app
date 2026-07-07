@@ -155,7 +155,7 @@ class _VideoContent extends StatelessWidget {
       return Stack(
         fit: StackFit.expand,
         children: [
-          provider.content.poster != null
+          provider.content.poster != null && provider.content.poster!.isNotEmpty
               ? Image.network(
                   provider.content.poster!,
                   fit: BoxFit.cover,
@@ -238,6 +238,29 @@ class _PlayerTopBar extends StatelessWidget {
                 ),
               ),
             ),
+            GestureDetector(
+              onTap: () => _showAudioSheet(context, provider),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.white.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.audiotrack_rounded, color: Colors.white, size: 12),
+                    const SizedBox(width: 4),
+                    Text(
+                      provider.selectedAudioTrack?.language ?? 'Audio',
+                      style: text12(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(width: 8),
             GestureDetector(
               onTap: () => _showQualitySheet(context, provider),
@@ -291,6 +314,18 @@ class _PlayerTopBar extends StatelessWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) => _QualitySheet(provider: provider),
+    );
+  }
+
+  void _showAudioSheet(BuildContext context, MovieDetailProvider provider) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1C1C1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _AudioSheet(provider: provider),
     );
   }
 }
@@ -564,7 +599,7 @@ class _HeaderActions extends StatelessWidget {
           builder: (context, watchlistProvider, _) {
             // Check if this specific content ID is in the watchlist items
             final isInWatchlist = watchlistProvider.items.any((i) {
-              return i.item?.id == provider.content.id || (i.item as dynamic)?['_id'] == provider.content.id;
+              return i.item?.id == provider.content.id;
             });
             
             return _SmallActionBtn(
@@ -577,7 +612,7 @@ class _HeaderActions extends StatelessWidget {
                 
                 if (isInWatchlist) {
                   final item = watchlistProvider.items.firstWhere((i) => 
-                    i.item?.id == provider.content.id || (i.item as dynamic)?['_id'] == provider.content.id);
+                    i.item?.id == provider.content.id);
                   
                   final success = await watchlistProvider.removeItem(item.id!);
                   if (success && context.mounted) {
@@ -728,7 +763,11 @@ class _EpisodeSection extends StatelessWidget {
                           fit: StackFit.expand,
                           children: [
                             Image.network(
-                              episode.thumbnail ?? episode.poster ?? '',
+                              (episode.thumbnail != null && episode.thumbnail!.isNotEmpty)
+                                  ? episode.thumbnail!
+                                  : (episode.poster != null && episode.poster!.isNotEmpty)
+                                      ? episode.poster!
+                                      : '',
                               fit: BoxFit.cover,
                               errorBuilder: (_, __, ___) => Container(color: AppColors.grey300),
                             ),
@@ -901,6 +940,82 @@ class _MoreLikeThisSection extends StatelessWidget {
     // For now, we can use trending content as "more like this" or similar
     // Since we don't have a direct field for it in Content model
     return const SizedBox();
+  }
+}
+
+class _AudioSheet extends StatelessWidget {
+  final MovieDetailProvider provider;
+  const _AudioSheet({required this.provider});
+
+  @override
+  Widget build(BuildContext context) {
+    final tracks = provider.availableAudioTracks;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Audio Language',
+            style: text16(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 16),
+          if (tracks.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Text(
+                'No additional audio tracks available',
+                style: text14(color: Colors.white54),
+              ),
+            )
+          else
+            ...tracks.map((track) {
+              final selected = provider.selectedAudioTrack?.fileUrl == track.fileUrl;
+              return GestureDetector(
+                onTap: () {
+                  provider.setAudioTrack(track);
+                  Navigator.pop(context);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          track.language ?? 'Unknown',
+                          style: text15(
+                            color: selected ? AppColors.primary : Colors.white70,
+                            fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                          ),
+                        ),
+                      ),
+                      if (selected)
+                        const Icon(
+                          Icons.check_rounded,
+                          color: AppColors.primary,
+                          size: 18,
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+        ],
+      ),
+    );
   }
 }
 

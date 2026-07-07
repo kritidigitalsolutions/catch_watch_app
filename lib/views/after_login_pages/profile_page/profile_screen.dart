@@ -726,11 +726,13 @@ class _GridCard extends StatelessWidget {
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => _errorPlaceholder(),
             )
-          : Image.asset(
-              imageUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _errorPlaceholder(),
-            );
+          : (imageUrl.startsWith('assets/')
+              ? Image.asset(
+                  imageUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _errorPlaceholder(),
+                )
+              : _errorPlaceholder());
     }
 
     if (item is ReelModel &&

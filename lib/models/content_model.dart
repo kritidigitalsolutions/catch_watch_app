@@ -15,7 +15,7 @@ class ContentModel {
     this.content,
   });
 
-  ContentModel.fromJson(Map<String, dynamic> json) {
+  ContentModel.fromJson(Map<dynamic, dynamic> json) {
     success = json['success'];
     moviesCount = json['moviesCount'];
     seriesCount = json['seriesCount'];
@@ -23,7 +23,9 @@ class ContentModel {
     if (json['content'] != null) {
       content = <Content>[];
       json['content'].forEach((v) {
-        content!.add(Content.fromJson(v));
+        if (v is Map) {
+          content!.add(Content.fromJson(Map<String, dynamic>.from(v)));
+        }
       });
     }
   }
@@ -64,6 +66,7 @@ class Content {
   bool? isLocked;
   bool? isVertical;
   int? views;
+  List<AudioTrack>? audioTracks;
 
   Content({
     this.id,
@@ -100,9 +103,10 @@ class Content {
     this.isLocked,
     this.isVertical,
     this.views,
+    this.audioTracks,
   });
 
-  Content.fromJson(Map<String, dynamic> json) {
+  Content.fromJson(Map<dynamic, dynamic> json) {
     id = json['_id'];
     title = json['title'];
     description = json['description'];
@@ -152,6 +156,15 @@ class Content {
     isLocked = json['isLocked'];
     isVertical = json['isVertical'];
     views = json['views'];
+
+    if (json['audioTracks'] != null) {
+      audioTracks = <AudioTrack>[];
+      json['audioTracks'].forEach((v) {
+        if (v is Map) {
+          audioTracks!.add(AudioTrack.fromJson(Map<String, dynamic>.from(v), fixUrl));
+        }
+      });
+    }
   }
 
   Map<String, dynamic> toJson() {
@@ -190,6 +203,35 @@ class Content {
     data['isLocked'] = isLocked;
     data['isVertical'] = isVertical;
     data['views'] = views;
+    if (audioTracks != null) {
+      data['audioTracks'] = audioTracks!.map((v) => v.toJson()).toList();
+    }
     return data;
   }
 }
+
+class AudioTrack {
+  String? language;
+  String? fileUrl;
+  bool? isDefault;
+  String? id;
+
+  AudioTrack({this.language, this.fileUrl, this.isDefault, this.id});
+
+  AudioTrack.fromJson(Map<dynamic, dynamic> json, String Function(String?) fixUrl) {
+    language = json['language'];
+    fileUrl = fixUrl(json['fileUrl']);
+    isDefault = json['isDefault'];
+    id = json['_id'];
+  }
+
+  Map<String, dynamic> toJson() {
+    final Map<String, dynamic> data = <String, dynamic>{};
+    data['language'] = language;
+    data['fileUrl'] = fileUrl;
+    data['isDefault'] = isDefault;
+    data['_id'] = id;
+    return data;
+  }
+}
+

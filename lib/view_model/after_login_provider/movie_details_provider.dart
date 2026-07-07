@@ -28,6 +28,8 @@ class MovieDetailProvider extends ChangeNotifier {
   VideoPlayerController? _videoController;
   VideoPlayerController? get videoController => _videoController;
 
+  VideoPlayerController? _audioController; // Separate audio track controller
+
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
 
@@ -66,6 +68,23 @@ class MovieDetailProvider extends ChangeNotifier {
   String _selectedQuality = 'Auto';
   String get selectedQuality => _selectedQuality;
   final List<String> qualityOptions = ['Auto', '1080p', '720p', '480p', '360p'];
+
+  // ── Audio Tracks ──────────────────────────────────────────────────────────
+  AudioTrack? _selectedAudioTrack;
+  AudioTrack? get selectedAudioTrack => _selectedAudioTrack;
+
+  List<AudioTrack> get availableAudioTracks {
+    final tracks = <AudioTrack>[];
+    // Add default language if it exists
+    if (content.language != null && content.videoUrl != null) {
+      tracks.add(AudioTrack(language: content.language, fileUrl: content.videoUrl, isDefault: true));
+    }
+    // Add other tracks
+    if (content.audioTracks != null) {
+      tracks.addAll(content.audioTracks!);
+    }
+    return tracks;
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -111,14 +130,27 @@ class MovieDetailProvider extends ChangeNotifier {
   // ── Init ──────────────────────────────────────────────────────────────────
 
   Future<void> _initPlayer({String? url}) async {
-    String? finalUrl = url ?? content.videoUrl;
+    String? finalUrl = url;
     
-    // Check if downloaded
-    if (context != null) {
+    // Only check for local path if no specific URL (like a specific audio track or episode) is requested
+    if (finalUrl == null && context != null) {
       final downloadProvider = context!.read<DownloadProvider>();
       final localPath = downloadProvider.getLocalVideoPath(content.id!);
       if (localPath != null && File(localPath).existsSync()) {
         finalUrl = localPath;
+      }
+    }
+
+    finalUrl ??= _selectedAudioTrack?.fileUrl ?? content.videoUrl;
+    
+    // Set initial audio track if not set
+    if (_selectedAudioTrack == null) {
+      final tracks = availableAudioTracks;
+      if (tracks.isNotEmpty) {
+        _selectedAudioTrack = tracks.firstWhere(
+          (t) => t.fileUrl == finalUrl,
+          orElse: () => tracks.first,
+        );
       }
     }
 
@@ -130,26 +162,54 @@ class MovieDetailProvider extends ChangeNotifier {
     }
 
     try {
-      if (finalUrl.startsWith('http')) {
+      final baseVideoUrl = url ?? content.videoUrl;
+      if (baseVideoUrl == null) throw 'Video URL is null';
+
+      // 1. Initialize Video
+      if (baseVideoUrl.startsWith('http')) {
         _videoController = VideoPlayerController.networkUrl(
-          Uri.parse(finalUrl),
-          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+          Uri.parse(baseVideoUrl),
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
         );
       } else {
         _videoController = VideoPlayerController.file(
-          File(finalUrl),
-          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+          File(baseVideoUrl),
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
         );
       }
 
       await _videoController!.initialize();
       _videoController!.addListener(_onVideoUpdate);
-      _videoController!.play(); // Auto-play when screen opens
+
+      // 2. Initialize Audio if separate
+      final isSeparateAudio = _selectedAudioTrack != null && 
+                             _selectedAudioTrack!.fileUrl != baseVideoUrl;
+      
+      if (isSeparateAudio) {
+        final audioUrl = _selectedAudioTrack!.fileUrl!;
+        if (audioUrl.startsWith('http')) {
+          _audioController = VideoPlayerController.networkUrl(Uri.parse(audioUrl));
+        } else {
+          _audioController = VideoPlayerController.file(File(audioUrl));
+        }
+        await _audioController!.initialize();
+        _videoController!.setVolume(0); // Mute video
+        _audioController!.setVolume(_volume);
+        _audioController!.setPlaybackSpeed(_playbackSpeed);
+      } else {
+        _videoController!.setVolume(_volume);
+        _videoController!.setPlaybackSpeed(_playbackSpeed);
+      }
+
+      _videoController!.play();
+      _audioController?.play();
+      
       _isInitialized = true;
       WakelockPlus.enable();
       _resetHideTimer();
       notifyListeners();
     } catch (e) {
+      debugPrint('Error initializing player: $e');
       _hasError = true;
       _errorMessage = 'Could not load video. Please try again.';
       notifyListeners();
@@ -159,6 +219,32 @@ class MovieDetailProvider extends ChangeNotifier {
   void _onVideoUpdate() {
     final ctrl = _videoController;
     if (ctrl == null) return;
+
+    // Sync audio position if it drifts too much (> 300ms)
+    if (_audioController != null && _isInitialized) {
+      final vPos = ctrl.value.position;
+      final aPos = _audioController!.value.position;
+      final diff = (vPos.inMilliseconds - aPos.inMilliseconds).abs();
+      
+      // If video is playing but audio is buffering, pause video to wait
+      if (_audioController!.value.isBuffering && ctrl.value.isPlaying) {
+        ctrl.pause();
+      } else if (!_audioController!.value.isBuffering && !ctrl.value.isPlaying && _isInitialized && _showControls == false) {
+        // Resume video if audio finished buffering (only if we didn't manually pause)
+        ctrl.play();
+      }
+
+      if (diff > 300) {
+        _audioController!.seekTo(vPos);
+      }
+      
+      // Sync play/pause state
+      if (ctrl.value.isPlaying && !_audioController!.value.isPlaying && !_audioController!.value.isBuffering) {
+        _audioController!.play();
+      } else if (!ctrl.value.isPlaying && _audioController!.value.isPlaying) {
+        _audioController!.pause();
+      }
+    }
 
     final isBuffering = ctrl.value.isBuffering;
     if (isBuffering != _isBuffering) {
@@ -194,9 +280,11 @@ class MovieDetailProvider extends ChangeNotifier {
     if (ctrl == null || !_isInitialized) return;
     if (ctrl.value.isPlaying) {
       ctrl.pause();
+      _audioController?.pause();
       WakelockPlus.disable();
     } else {
       ctrl.play();
+      _audioController?.play();
       WakelockPlus.enable();
     }
     _resetHideTimer();
@@ -213,6 +301,7 @@ class MovieDetailProvider extends ChangeNotifier {
       milliseconds: (duration.inMilliseconds * ratio).round(),
     );
     ctrl.seekTo(newPos);
+    _audioController?.seekTo(newPos);
     _resetHideTimer();
     notifyListeners();
   }
@@ -221,7 +310,9 @@ class MovieDetailProvider extends ChangeNotifier {
     final ctrl = _videoController;
     if (ctrl == null || !_isInitialized) return;
     final newPos = ctrl.value.position + const Duration(seconds: 10);
-    ctrl.seekTo(newPos > ctrl.value.duration ? ctrl.value.duration : newPos);
+    final targetPos = newPos > ctrl.value.duration ? ctrl.value.duration : newPos;
+    ctrl.seekTo(targetPos);
+    _audioController?.seekTo(targetPos);
     _resetHideTimer();
     notifyListeners();
   }
@@ -230,7 +321,9 @@ class MovieDetailProvider extends ChangeNotifier {
     final ctrl = _videoController;
     if (ctrl == null || !_isInitialized) return;
     final newPos = ctrl.value.position - const Duration(seconds: 10);
-    ctrl.seekTo(newPos < Duration.zero ? Duration.zero : newPos);
+    final targetPos = newPos < Duration.zero ? Duration.zero : newPos;
+    ctrl.seekTo(targetPos);
+    _audioController?.seekTo(targetPos);
     _resetHideTimer();
     notifyListeners();
   }
@@ -300,7 +393,12 @@ class MovieDetailProvider extends ChangeNotifier {
 
   void setVolume(double vol) {
     _volume = vol.clamp(0.0, 1.0);
-    _videoController?.setVolume(_volume);
+    if (_audioController != null) {
+      _audioController!.setVolume(_volume);
+      _videoController?.setVolume(0);
+    } else {
+      _videoController?.setVolume(_volume);
+    }
     notifyListeners();
   }
 
@@ -315,6 +413,7 @@ class MovieDetailProvider extends ChangeNotifier {
   void setSpeed(double speed) {
     _playbackSpeed = speed;
     _videoController?.setPlaybackSpeed(speed);
+    _audioController?.setPlaybackSpeed(speed);
     notifyListeners();
   }
 
@@ -322,6 +421,40 @@ class MovieDetailProvider extends ChangeNotifier {
 
   void setQuality(String quality) {
     _selectedQuality = quality;
+    notifyListeners();
+  }
+
+  // ── Audio Tracks ──────────────────────────────────────────────────────────
+
+  void setAudioTrack(AudioTrack track) async {
+    if (_selectedAudioTrack?.fileUrl == track.fileUrl) return;
+
+    final currentPosition = _videoController?.value.position ?? Duration.zero;
+    final wasPlaying = _videoController?.value.isPlaying ?? false;
+
+    _selectedAudioTrack = track;
+    _isInitialized = false;
+    notifyListeners();
+
+    if (_videoController != null) {
+      await _videoController!.dispose();
+    }
+    if (_audioController != null) {
+      await _audioController!.dispose();
+      _audioController = null;
+    }
+
+    await _initPlayer();
+
+    if (_videoController != null && _isInitialized) {
+      await _videoController!.seekTo(currentPosition);
+      await _audioController?.seekTo(currentPosition);
+      if (wasPlaying) {
+        _videoController!.play();
+        _audioController?.play();
+      }
+    }
+    _resetHideTimer();
     notifyListeners();
   }
 
@@ -358,6 +491,7 @@ class MovieDetailProvider extends ChangeNotifier {
     _hideControlsTimer?.cancel();
     _videoController?.removeListener(_onVideoUpdate);
     _videoController?.dispose();
+    _audioController?.dispose();
     WakelockPlus.disable();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);

@@ -32,6 +32,20 @@ class ContentRepository {
     }
   }
 
+  Future<Content?> getMovieById(String id) async {
+    try {
+      dynamic response = await _apiService.getApi('${AppUrl.getMovies}/id/$id');
+      if (response['success'] == true) {
+        final content = Content.fromJson(response['movie']);
+        content.type = 'movie';
+        return content;
+      }
+      return null;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<List<Content>> getTvShows() async {
     try {
       dynamic response = await _apiService.getApi(AppUrl.getTvShows);

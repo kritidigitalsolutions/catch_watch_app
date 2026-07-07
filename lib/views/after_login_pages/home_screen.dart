@@ -763,7 +763,7 @@ class _ContentCard extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            content.poster != null
+            content.poster != null && content.poster!.isNotEmpty
                 ? Image.network(
                     content.poster!,
                     fit: BoxFit.cover,
@@ -799,14 +799,17 @@ class _ContinueCard extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            item.image != null && item.image!.startsWith('http')
+            item.image != null && item.image!.isNotEmpty && item.image!.startsWith('http')
                 ? Image.network(
                     item.image!,
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) =>
                         Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
                   )
-                : Image.asset(item.image ?? 'assets/images/logo.jpg',
+                : Image.asset(
+                    (item.image != null && item.image!.isNotEmpty)
+                        ? item.image!
+                        : 'assets/images/logo.jpg',
                     fit: BoxFit.cover),
             Positioned(
               bottom: 0,

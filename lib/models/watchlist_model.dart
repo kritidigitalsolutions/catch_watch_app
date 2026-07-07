@@ -7,13 +7,15 @@ class WatchlistResponse {
 
   WatchlistResponse({this.success, this.count, this.data});
 
-  WatchlistResponse.fromJson(Map<String, dynamic> json) {
+  WatchlistResponse.fromJson(Map<dynamic, dynamic> json) {
     success = json['success'];
     count = json['count'];
     if (json['data'] != null) {
       data = <WatchlistItem>[];
       json['data'].forEach((v) {
-        data!.add(WatchlistItem.fromJson(v));
+        if (v is Map) {
+          data!.add(WatchlistItem.fromJson(v));
+        }
       });
     }
   }
@@ -27,10 +29,12 @@ class WatchlistItem {
 
   WatchlistItem({this.id, this.user, this.item, this.itemModel});
 
-  WatchlistItem.fromJson(Map<String, dynamic> json) {
+  WatchlistItem.fromJson(Map<dynamic, dynamic> json) {
     id = json['_id'];
     user = json['user'];
-    item = json['item'] != null ? Content.fromJson(json['item']) : null;
+    if (json['item'] != null && json['item'] is Map) {
+      item = Content.fromJson(json['item']);
+    }
     itemModel = json['itemModel'];
   }
 }
