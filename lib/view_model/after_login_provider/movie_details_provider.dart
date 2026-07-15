@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:http/http.dart' as http;
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
@@ -76,7 +77,10 @@ class MovieDetailProvider extends ChangeNotifier {
       ? 'Auto ($_detectedQuality)'
       : _selectedQuality;
 
-  final List<String> qualityOptions = ['Auto', '1080p', '720p', '480p', '360p', '240p'];
+  List<String> _qualityOptions = ['Auto', '1080p', '720p', '480p', '360p', '240p'];
+  List<String> get qualityOptions => _qualityOptions;
+
+  Map<String, String> _availableQualityUrls = {};
 
   // ── Audio Tracks ──────────────────────────────────────────────────────────
   AudioTrack? _selectedAudioTrack;
@@ -140,6 +144,12 @@ class MovieDetailProvider extends ChangeNotifier {
       _audioController = null;
     }
 
+    // Reset quality states for the new episode
+    _availableQualityUrls.clear();
+    _qualityOptions = ['Auto', '1080p', '720p', '480p', '360p', '240p'];
+    _detectedQuality = null;
+    _selectedQuality = 'Auto'; // Always start new content in Auto
+
     _initPlayer(url: episode.videoUrl);
   }
 
@@ -153,6 +163,10 @@ class MovieDetailProvider extends ChangeNotifier {
     // 1. Determine Video URL
     if (url != null) {
       _currentBaseUrl = url;
+      // Reset qualities when base URL changes explicitly
+      _availableQualityUrls.clear();
+      _qualityOptions = ['Auto', '1080p', '720p', '480p', '360p', '240p'];
+      _detectedQuality = null;
     }
     
     String? baseVideoUrl = _currentBaseUrl;
@@ -183,9 +197,20 @@ class MovieDetailProvider extends ChangeNotifier {
       _detectQualityFromUrl(baseVideoUrl);
     }
 
+    // Load available qualities for HLS/MP4 if needed
+    if (baseVideoUrl.startsWith('http') && _availableQualityUrls.isEmpty) {
+      if (baseVideoUrl.contains('.m3u8')) {
+        await _loadHlsQualities(baseVideoUrl);
+      } else if (baseVideoUrl.contains('.mp4')) {
+        _setupMp4Qualities(baseVideoUrl);
+      }
+    }
+
     // 2. Quality Application
     String finalVideoUrl = baseVideoUrl;
-    if (finalVideoUrl.startsWith('http') && _selectedQuality != 'Auto') {
+    if (_availableQualityUrls.containsKey(_selectedQuality)) {
+      finalVideoUrl = _availableQualityUrls[_selectedQuality]!;
+    } else if (finalVideoUrl.startsWith('http') && _selectedQuality != 'Auto') {
       finalVideoUrl = _applyQualityToUrl(finalVideoUrl, _selectedQuality);
     }
     debugPrint('Final Video URL (Quality: $_selectedQuality): $finalVideoUrl');
@@ -484,36 +509,87 @@ class MovieDetailProvider extends ChangeNotifier {
   // ── Quality ───────────────────────────────────────────────────────────────
 
   void _detectQualityFromUrl(String url) {
-    final qualityFolderRegex = RegExp(r'/(1080p|720p|480p|360p|240p)/');
-    final match = qualityFolderRegex.firstMatch(url);
+    final qualityRegex = RegExp(r'(1080p|720p|480p|360p|240p)');
+    final match = qualityRegex.firstMatch(url);
     if (match != null) {
-      final q = match.group(1);
-      if (q != null) {
-        final found = qualityOptions.firstWhere(
-          (opt) => opt.toLowerCase() == q.toLowerCase(),
-          orElse: () => 'Auto',
-        );
-        if (found != 'Auto') {
-          _detectedQuality = found;
-        }
-      }
-      return;
+      _detectedQuality = match.group(1);
     }
+  }
 
-    final qualityTagRegex = RegExp(r'[_-](1080p|720p|480p|360p|240p)(\.mp4)');
-    final mp4Match = qualityTagRegex.firstMatch(url);
-    if (mp4Match != null) {
-      final q = mp4Match.group(1);
-      if (q != null) {
-        final found = qualityOptions.firstWhere(
-          (opt) => opt.toLowerCase() == q.toLowerCase(),
-          orElse: () => 'Auto',
-        );
-        if (found != 'Auto') {
-          _detectedQuality = found;
+  Future<void> _loadHlsQualities(String masterUrl) async {
+    try {
+      final token = HiveService.getToken();
+      Map<String, String> headers = {
+        'Referer': 'https://catchandwatch.com',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      };
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+
+      final response = await http.get(Uri.parse(masterUrl), headers: headers);
+      if (response.statusCode == 200) {
+        final lines = response.body.split('\n');
+        final Map<String, String> discovered = {'Auto': masterUrl};
+        
+        String? currentResolution;
+        for (int i = 0; i < lines.length; i++) {
+          final line = lines[i].trim();
+          if (line.isEmpty) continue;
+
+          if (line.contains('#EXT-X-STREAM-INF:')) {
+            final resMatch = RegExp(r'RESOLUTION=\d+x(\d+)').firstMatch(line);
+            if (resMatch != null) {
+              currentResolution = '${resMatch.group(1)}p';
+            }
+          } else if (!line.startsWith('#') && currentResolution != null) {
+            String variantUrl = line;
+            if (!variantUrl.startsWith('http')) {
+              final uri = Uri.parse(masterUrl);
+              final path = uri.path.substring(0, uri.path.lastIndexOf('/') + 1);
+              variantUrl = uri.replace(path: path + variantUrl).toString();
+            }
+            discovered[currentResolution] = variantUrl;
+            currentResolution = null;
+          }
+        }
+        
+        if (discovered.length > 1) {
+          _availableQualityUrls = discovered;
+          final sortedKeys = discovered.keys.where((k) => k != 'Auto').toList();
+          sortedKeys.sort((a, b) {
+            final vA = int.tryParse(a.replaceAll('p', '')) ?? 0;
+            final vB = int.tryParse(b.replaceAll('p', '')) ?? 0;
+            return vB.compareTo(vA);
+          });
+          _qualityOptions = ['Auto', ...sortedKeys];
+          notifyListeners();
         }
       }
+    } catch (e) {
+      debugPrint('Error parsing HLS: $e');
     }
+  }
+
+  void _setupMp4Qualities(String url) {
+    _availableQualityUrls = {'Auto': url};
+    final qualities = ['1080p', '720p', '480p', '360p', '240p'];
+    for (var q in qualities) {
+      final qUrl = _applyQualityToUrl(url, q);
+      if (qUrl != url) {
+        _availableQualityUrls[q] = qUrl;
+      }
+    }
+    _qualityOptions = _availableQualityUrls.keys.toList();
+    // Sort
+    final sortedKeys = _qualityOptions.where((k) => k != 'Auto').toList();
+    sortedKeys.sort((a, b) {
+      final vA = int.tryParse(a.replaceAll('p', '')) ?? 0;
+      final vB = int.tryParse(b.replaceAll('p', '')) ?? 0;
+      return vB.compareTo(vA);
+    });
+    _qualityOptions = ['Auto', ...sortedKeys];
+    notifyListeners();
   }
 
   void setQuality(String quality) async {
@@ -522,7 +598,6 @@ class MovieDetailProvider extends ChangeNotifier {
     final currentPosition = _videoController?.value.position ?? Duration.zero;
     final wasPlaying = _videoController?.value.isPlaying ?? false;
 
-    final previousQuality = _selectedQuality;
     _selectedQuality = quality;
     notifyListeners();
 
@@ -536,32 +611,23 @@ class MovieDetailProvider extends ChangeNotifier {
       _audioController = null;
     }
 
-    try {
-      await _initPlayer(initialPosition: currentPosition, autoPlay: wasPlaying);
-      if (_hasError) throw 'Failed to load video with quality $quality';
-    } catch (e) {
-      debugPrint('Error switching quality to $quality: $e');
-      if (quality != 'Auto') {
-        _selectedQuality = previousQuality;
-        await _initPlayer(initialPosition: currentPosition, autoPlay: wasPlaying);
-      }
-    }
+    await _initPlayer(initialPosition: currentPosition, autoPlay: wasPlaying);
     _resetHideTimer();
   }
 
   String _applyQualityToUrl(String url, String quality) {
     if (!url.startsWith('http')) return url;
 
-    final qualityFolderRegex = RegExp(r'/(1080p|720p|480p|360p|240p)/');
-    final qualityTagRegex = RegExp(r'[_-](1080p|720p|480p|360p|240p)(\.mp4)');
+    final qualityFolderRegex = RegExp(r'/(1080p|720p|480p|360p|240p)/', caseSensitive: false);
+    final qualityTagRegex = RegExp(r'[_-](1080p|720p|480p|360p|240p)(\.mp4|\.m3u8)', caseSensitive: false);
 
     if (quality == 'Auto') {
-      // Try to revert to master playlist if it was a specific quality URL
-      if (url.contains(qualityFolderRegex)) {
-        return url.replaceFirst(qualityFolderRegex, '/');
-      }
+      if (url.contains(qualityFolderRegex)) return url.replaceFirst(qualityFolderRegex, '/');
       if (url.contains(qualityTagRegex)) {
-        return url.replaceFirst(qualityTagRegex, '.mp4');
+        final extMatch = qualityTagRegex.firstMatch(url);
+        if (extMatch != null) {
+          return url.replaceFirst(qualityTagRegex, extMatch.group(2)!);
+        }
       }
       return url;
     }
@@ -570,21 +636,29 @@ class MovieDetailProvider extends ChangeNotifier {
 
     // 1. HLS (.m3u8)
     if (url.contains('.m3u8')) {
-      if (url.contains(qualityFolderRegex)) {
-        return url.replaceFirst(qualityFolderRegex, '/$q/');
-      }
-      if (url.contains('playlist.m3u8')) {
-        return url.replaceFirst('playlist.m3u8', '$q/playlist.m3u8');
+      // Pattern: .../720p/playlist.m3u8
+      if (url.contains(qualityFolderRegex)) return url.replaceFirst(qualityFolderRegex, '/$q/');
+      
+      // Pattern: .../playlist.m3u8 -> .../720p/playlist.m3u8
+      if (url.contains('playlist.m3u8')) return url.replaceFirst('playlist.m3u8', '$q/playlist.m3u8');
+      
+      // Pattern: .../video.m3u8 -> .../video_720p.m3u8
+      if (url.contains(qualityTagRegex)) return url.replaceFirst(qualityTagRegex, '_$q.m3u8');
+      
+      // Default guess for HLS
+      if (!url.contains(q)) {
+        return url.replaceFirst('.m3u8', '_$q.m3u8');
       }
     }
 
     // 2. MP4
     if (url.contains('.mp4')) {
-      if (url.contains(qualityTagRegex)) {
-        return url.replaceFirst(qualityTagRegex, '_$q.mp4');
-      }
-      if (url.contains(qualityFolderRegex)) {
-        return url.replaceFirst(qualityFolderRegex, '/$q/');
+      if (url.contains(qualityTagRegex)) return url.replaceFirst(qualityTagRegex, '_$q.mp4');
+      if (url.contains(qualityFolderRegex)) return url.replaceFirst(qualityFolderRegex, '/$q/');
+      
+      // Default guess for MP4: video.mp4 -> video_720p.mp4
+      if (!url.contains(q)) {
+        return url.replaceFirst('.mp4', '_$q.mp4');
       }
     }
 
