@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../utils/hive_service/hive_service.dart';
 import '../../res/appUrl.dart' show AppUrl;
 import '../../utils/text_style.dart';
 
@@ -315,17 +316,65 @@ class _ShortVideoPage extends StatefulWidget {
 }
 
 class _ShortVideoPageState extends State<_ShortVideoPage> {
-  late final VideoPlayerController _controller;
+  VideoPlayerController? _controller;
   bool _hasStarted = false;
   bool _showPlayIcon = false;
+  String _selectedQuality = 'Auto';
+  Map<String, String> _availableQualities = {};
 
   @override
   void initState() {
     super.initState();
-    final videoUrl = widget.reel.videoUrl ?? '';
+    _setupQualities();
+    _initializeVideo();
+  }
+
+  void _setupQualities() {
+    final url = widget.reel.videoUrl ?? '';
+    _availableQualities = {'Auto': url};
+
+    final qualities = ['1080p', '720p', '480p', '360p', '240p'];
+    for (var q in qualities) {
+      final qUrl = _applyQualityToUrl(url, q);
+      if (qUrl != url) {
+        _availableQualities[q] = qUrl;
+      }
+    }
+  }
+
+  String _applyQualityToUrl(String url, String quality) {
+    final qualityFolderRegex = RegExp(r'/(1080p|720p|480p|360p|240p)/');
+    final qualityTagRegex = RegExp(r'[_-](1080p|720p|480p|360p|240p)(\.mp4)');
+
+    final String q = quality.toLowerCase();
+    if (url.contains(qualityFolderRegex)) {
+      return url.replaceFirst(qualityFolderRegex, '/$q/');
+    }
+    if (url.contains(qualityTagRegex)) {
+      return url.replaceFirst(qualityTagRegex, '_$q.mp4');
+    }
+    return url;
+  }
+
+  Future<void> _initializeVideo() async {
+    final videoUrl = _availableQualities[_selectedQuality] ?? widget.reel.videoUrl ?? '';
+    if (videoUrl.isEmpty) return;
+
+    if (_controller != null) {
+      await _controller!.dispose();
+    }
+
     if (videoUrl.startsWith('http')) {
+      final token = HiveService.getToken();
+      Map<String, String> headers = {
+        'Referer': 'https://catchandwatch.com',
+      };
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
       _controller = VideoPlayerController.networkUrl(
         Uri.parse(videoUrl),
+        httpHeaders: headers,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
       );
     } else {
@@ -334,13 +383,10 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
       );
     }
-    _initializeVideo();
-  }
 
-  Future<void> _initializeVideo() async {
     try {
-      await _controller.initialize();
-      await _controller.setLooping(true);
+      await _controller!.initialize();
+      await _controller!.setLooping(true);
       if (!mounted) return;
       setState(() {});
       _syncPlayback();
@@ -358,16 +404,16 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   }
 
   void _syncPlayback() {
-    if (!_controller.value.isInitialized) return;
+    if (_controller == null || !_controller!.value.isInitialized) return;
 
     if (mounted) {
       setState(() {
         if (widget.isActive) {
-          _controller.play();
+          _controller!.play();
           _hasStarted = true;
         } else {
-          _controller.pause();
-          _controller.seekTo(Duration.zero);
+          _controller!.pause();
+          _controller!.seekTo(Duration.zero);
           _hasStarted = false;
           _showPlayIcon = false;
         }
@@ -376,23 +422,71 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   }
 
   void _togglePlay() {
-    if (!_controller.value.isInitialized) return;
+    if (_controller == null || !_controller!.value.isInitialized) return;
 
     setState(() {
-      if (_controller.value.isPlaying) {
-        _controller.pause();
+      if (_controller!.value.isPlaying) {
+        _controller!.pause();
         _showPlayIcon = true;
       } else {
-        _controller.play();
+        _controller!.play();
         _hasStarted = true;
         _showPlayIcon = false;
       }
     });
   }
 
+  Future<void> setQuality(String quality) async {
+    if (_selectedQuality == quality) return;
+    if (!_availableQualities.containsKey(quality)) return;
+
+    final currentPos = _controller?.value.position ?? Duration.zero;
+    final wasPlaying = _controller?.value.isPlaying ?? false;
+
+    setState(() {
+      _selectedQuality = quality;
+    });
+
+    await _initializeVideo();
+
+    if (_controller != null && mounted) {
+      await _controller!.seekTo(currentPos);
+      if (wasPlaying) {
+        _controller!.play();
+      }
+      setState(() {});
+    }
+  }
+
+  void _showQualityDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => SimpleDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: Text("Select Quality", style: text18(color: Colors.white, fontWeight: FontWeight.bold)),
+        children: _availableQualities.keys.map((q) {
+          return SimpleDialogOption(
+            onPressed: () {
+              setQuality(q);
+              Navigator.pop(context);
+            },
+            child: Row(
+              children: [
+                Text(q, style: text14(color: Colors.white)),
+                const Spacer(),
+                if (_selectedQuality == q)
+                  const Icon(Icons.check, color: AppColors.primary, size: 20),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   @override
   void dispose() {
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
@@ -417,20 +511,13 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
             child: Row(
               children: [
                 Text(
-                  'Shorts',
+                  'Reels',
                   style: text24(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
                 const Spacer(),
-                // IconButton(
-                //   tooltip: 'Search',
-                //   onPressed: () {
-                //     // Implement search
-                //   },
-                //   icon: const Icon(Icons.search, color: Colors.white),
-                // ),
               ],
             ),
           ),
@@ -442,6 +529,8 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
               onLike: widget.onLike,
               onSave: widget.onSave,
               onComment: widget.onComment,
+              selectedQuality: _selectedQuality,
+              onQualityTap: () => _showQualityDialog(context),
             ),
           ),
           Positioned(
@@ -455,7 +544,7 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
             bottom: 40,
             child: _MusicDisc(image: widget.reel.thumbnail),
           ),
-          if (!_controller.value.isInitialized)
+          if (_controller == null || !_controller!.value.isInitialized)
             const Center(
               child: CircularProgressIndicator(
                 color: Colors.white,
@@ -484,8 +573,9 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   }
 }
 
+
 class _VideoBackground extends StatelessWidget {
-  final VideoPlayerController controller;
+  final VideoPlayerController? controller;
   final ReelModel reel;
   final bool hasStarted;
 
@@ -497,7 +587,7 @@ class _VideoBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!controller.value.isInitialized) {
+    if (controller == null || !controller!.value.isInitialized) {
       return reel.thumbnail != null && reel.thumbnail!.isNotEmpty
           ? Image.network(reel.thumbnail!, fit: BoxFit.cover)
           : Container(color: Colors.black);
@@ -506,9 +596,9 @@ class _VideoBackground extends StatelessWidget {
     return FittedBox(
       fit: BoxFit.cover,
       child: SizedBox(
-        width: controller.value.size.width,
-        height: controller.value.size.height,
-        child: VideoPlayer(controller),
+        width: controller!.value.size.width,
+        height: controller!.value.size.height,
+        child: VideoPlayer(controller!),
       ),
     );
   }
@@ -542,12 +632,16 @@ class _ShortActions extends StatelessWidget {
   final VoidCallback onLike;
   final VoidCallback onSave;
   final VoidCallback onComment;
+  final String selectedQuality;
+  final VoidCallback onQualityTap;
 
   const _ShortActions({
     required this.reel,
     required this.onLike,
     required this.onSave,
     required this.onComment,
+    required this.selectedQuality,
+    required this.onQualityTap,
   });
 
   bool get _isLiked => reel.userInteraction?.toUpperCase() == 'LIKE';
@@ -578,6 +672,12 @@ class _ShortActions extends StatelessWidget {
           label: reel.isBookmarked == true ? 'Saved' : 'Save',
           color: reel.isBookmarked == true ? Colors.amber : Colors.white,
           onTap: onSave,
+        ),
+        const SizedBox(height: 18),
+        _ActionButton(
+          icon: Icons.high_quality_rounded,
+          label: selectedQuality,
+          onTap: onQualityTap,
         ),
         const SizedBox(height: 18),
         _ActionButton(
@@ -678,20 +778,6 @@ class _ShortInfo extends StatelessWidget {
                 style: text16(color: Colors.white, fontWeight: FontWeight.w800),
               ),
             ),
-            // const SizedBox(width: 10),
-            // Container(
-            //   height: 30,
-            //   padding: const EdgeInsets.symmetric(horizontal: 13),
-            //   alignment: Alignment.center,
-            //   decoration: BoxDecoration(
-            //     color: Colors.white,
-            //     borderRadius: BorderRadius.circular(20),
-            //   ),
-            //   child: Text(
-            //     'Follow',
-            //     style: text12(color: Colors.black, fontWeight: FontWeight.w800),
-            //   ),
-            // ),
           ],
         ),
         const SizedBox(height: 12),
@@ -706,11 +792,11 @@ class _ShortInfo extends StatelessWidget {
           children: [
             const Icon(Icons.music_note, color: Colors.white, size: 16),
             const SizedBox(width: 5),
-            const Expanded(
+            Expanded(
               child: Text(
-                'Original Audio',
+                'Original Audio - ${reel.user?.username ?? 'User'}',
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12),
               ),
             ),
           ],

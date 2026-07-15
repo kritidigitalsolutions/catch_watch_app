@@ -4,6 +4,7 @@ import 'package:catch_watch/models/content_model.dart';
 import 'package:catch_watch/view_model/after_login_provider/download_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:catch_watch/repository/content_repository.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -17,6 +18,8 @@ class MovieDetailProvider extends ChangeNotifier {
   final Content content;
   final BuildContext? context;
   final ContentRepository _contentRepository = ContentRepository();
+
+  String? _currentBaseUrl; // Tracks the original URL (episode or movie) across quality/audio changes
 
   List<Content> _episodes = [];
   List<Content> get episodes => _episodes;
@@ -67,7 +70,13 @@ class MovieDetailProvider extends ChangeNotifier {
   // ── Quality ───────────────────────────────────────────────────────────────
   String _selectedQuality = 'Auto';
   String get selectedQuality => _selectedQuality;
-  final List<String> qualityOptions = ['Auto', '1080p', '720p', '480p', '360p'];
+
+  String? _detectedQuality; // Quality detected from source URL
+  String get displayQuality => _selectedQuality == 'Auto' && _detectedQuality != null
+      ? 'Auto ($_detectedQuality)'
+      : _selectedQuality;
+
+  final List<String> qualityOptions = ['Auto', '1080p', '720p', '480p', '360p', '240p'];
 
   // ── Audio Tracks ──────────────────────────────────────────────────────────
   AudioTrack? _selectedAudioTrack;
@@ -81,7 +90,12 @@ class MovieDetailProvider extends ChangeNotifier {
     }
     // Add other tracks
     if (content.audioTracks != null) {
-      tracks.addAll(content.audioTracks!);
+      for (var track in content.audioTracks!) {
+        // Only add if not already present (by URL)
+        if (!tracks.any((t) => t.fileUrl == track.fileUrl)) {
+          tracks.add(track);
+        }
+      }
     }
     return tracks;
   }
@@ -116,12 +130,14 @@ class MovieDetailProvider extends ChangeNotifier {
       return;
     }
 
-    _isInitialized = false;
-    _hasError = false;
-    notifyListeners();
-
     if (_videoController != null) {
+      _videoController!.removeListener(_onVideoUpdate);
       await _videoController!.dispose();
+      _videoController = null;
+    }
+    if (_audioController != null) {
+      await _audioController!.dispose();
+      _audioController = null;
     }
 
     _initPlayer(url: episode.videoUrl);
@@ -129,83 +145,131 @@ class MovieDetailProvider extends ChangeNotifier {
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
-  Future<void> _initPlayer({String? url}) async {
-    String? finalUrl = url;
+  Future<void> _initPlayer({String? url, Duration? initialPosition, bool autoPlay = true}) async {
+    _isInitialized = false;
+    _hasError = false;
+    notifyListeners();
+
+    // 1. Determine Video URL
+    if (url != null) {
+      _currentBaseUrl = url;
+    }
     
-    // Only check for local path if no specific URL (like a specific audio track or episode) is requested
-    if (finalUrl == null && context != null) {
+    String? baseVideoUrl = _currentBaseUrl;
+
+    // Check for local file if we don't have a URL yet
+    if (baseVideoUrl == null && context != null) {
       final downloadProvider = context!.read<DownloadProvider>();
       final localPath = downloadProvider.getLocalVideoPath(content.id!);
       if (localPath != null && File(localPath).existsSync()) {
-        finalUrl = localPath;
+        baseVideoUrl = localPath;
       }
     }
-
-    finalUrl ??= _selectedAudioTrack?.fileUrl ?? content.videoUrl;
     
-    // Set initial audio track if not set
-    if (_selectedAudioTrack == null) {
-      final tracks = availableAudioTracks;
-      if (tracks.isNotEmpty) {
-        _selectedAudioTrack = tracks.firstWhere(
-          (t) => t.fileUrl == finalUrl,
-          orElse: () => tracks.first,
-        );
-      }
-    }
-
-    if (finalUrl == null || finalUrl.isEmpty) {
+    baseVideoUrl ??= content.videoUrl;
+    
+    if (baseVideoUrl == null || baseVideoUrl.isEmpty) {
       _hasError = true;
       _errorMessage = 'Video URL is not available.';
       notifyListeners();
       return;
     }
 
-    try {
-      final baseVideoUrl = url ?? content.videoUrl;
-      if (baseVideoUrl == null) throw 'Video URL is null';
+    // Keep track of the base URL for quality switches
+    _currentBaseUrl = baseVideoUrl;
 
-      // 1. Initialize Video
-      if (baseVideoUrl.startsWith('http')) {
+    // Detect quality if current selection is Auto
+    if (_selectedQuality == 'Auto') {
+      _detectQualityFromUrl(baseVideoUrl);
+    }
+
+    // 2. Quality Application
+    String finalVideoUrl = baseVideoUrl;
+    if (finalVideoUrl.startsWith('http') && _selectedQuality != 'Auto') {
+      finalVideoUrl = _applyQualityToUrl(finalVideoUrl, _selectedQuality);
+    }
+    debugPrint('Final Video URL (Quality: $_selectedQuality): $finalVideoUrl');
+
+    // 3. Handle Audio Track Selection
+    final tracks = availableAudioTracks;
+    if (url != null && tracks.isNotEmpty) {
+      _selectedAudioTrack = tracks.firstWhere(
+        (t) => t.fileUrl == url,
+        orElse: () => tracks.first,
+      );
+    } else if (_selectedAudioTrack == null && tracks.isNotEmpty) {
+      _selectedAudioTrack = tracks.firstWhere(
+        (t) => t.isDefault == true,
+        orElse: () => tracks.first,
+      );
+    }
+
+    // 4. Separate Audio Logic
+    bool isSeparateAudio = false;
+    String? audioUrl;
+    if (_selectedAudioTrack != null) {
+      final bool isDefault = _selectedAudioTrack!.isDefault ?? false;
+      final bool isSameAsBaseVideo = _selectedAudioTrack!.fileUrl == baseVideoUrl;
+      if (!isDefault && !isSameAsBaseVideo) {
+        isSeparateAudio = true;
+        audioUrl = _selectedAudioTrack!.fileUrl;
+      }
+    }
+
+    try {
+      final token = HiveService.getToken();
+      Map<String, String> headers = {'Referer': 'https://catchandwatch.com'};
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+
+      // Initialize Video
+      if (finalVideoUrl.startsWith('http')) {
         _videoController = VideoPlayerController.networkUrl(
-          Uri.parse(baseVideoUrl),
+          Uri.parse(finalVideoUrl),
+          httpHeaders: headers,
           videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
         );
       } else {
         _videoController = VideoPlayerController.file(
-          File(baseVideoUrl),
+          File(finalVideoUrl),
           videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
         );
       }
-
       await _videoController!.initialize();
       _videoController!.addListener(_onVideoUpdate);
 
-      // 2. Initialize Audio if separate
-      final isSeparateAudio = _selectedAudioTrack != null && 
-                             _selectedAudioTrack!.fileUrl != baseVideoUrl;
-      
-      if (isSeparateAudio) {
-        final audioUrl = _selectedAudioTrack!.fileUrl!;
+      // Initialize Audio if needed
+      if (isSeparateAudio && audioUrl != null) {
         if (audioUrl.startsWith('http')) {
-          _audioController = VideoPlayerController.networkUrl(Uri.parse(audioUrl));
+          _audioController = VideoPlayerController.networkUrl(
+            Uri.parse(audioUrl),
+            httpHeaders: headers,
+          );
         } else {
           _audioController = VideoPlayerController.file(File(audioUrl));
         }
         await _audioController!.initialize();
-        _videoController!.setVolume(0); // Mute video
+        _videoController!.setVolume(0);
         _audioController!.setVolume(_volume);
         _audioController!.setPlaybackSpeed(_playbackSpeed);
+        if (autoPlay) _audioController!.play();
       } else {
         _videoController!.setVolume(_volume);
         _videoController!.setPlaybackSpeed(_playbackSpeed);
       }
 
-      _videoController!.play();
-      _audioController?.play();
-      
+      if (initialPosition != null) {
+        await _videoController!.seekTo(initialPosition);
+        await _audioController?.seekTo(initialPosition);
+      }
+
+      if (autoPlay) {
+        _videoController!.play();
+        WakelockPlus.enable();
+      }
+
       _isInitialized = true;
-      WakelockPlus.enable();
       _resetHideTimer();
       notifyListeners();
     } catch (e) {
@@ -419,9 +483,112 @@ class MovieDetailProvider extends ChangeNotifier {
 
   // ── Quality ───────────────────────────────────────────────────────────────
 
-  void setQuality(String quality) {
+  void _detectQualityFromUrl(String url) {
+    final qualityFolderRegex = RegExp(r'/(1080p|720p|480p|360p|240p)/');
+    final match = qualityFolderRegex.firstMatch(url);
+    if (match != null) {
+      final q = match.group(1);
+      if (q != null) {
+        final found = qualityOptions.firstWhere(
+          (opt) => opt.toLowerCase() == q.toLowerCase(),
+          orElse: () => 'Auto',
+        );
+        if (found != 'Auto') {
+          _detectedQuality = found;
+        }
+      }
+      return;
+    }
+
+    final qualityTagRegex = RegExp(r'[_-](1080p|720p|480p|360p|240p)(\.mp4)');
+    final mp4Match = qualityTagRegex.firstMatch(url);
+    if (mp4Match != null) {
+      final q = mp4Match.group(1);
+      if (q != null) {
+        final found = qualityOptions.firstWhere(
+          (opt) => opt.toLowerCase() == q.toLowerCase(),
+          orElse: () => 'Auto',
+        );
+        if (found != 'Auto') {
+          _detectedQuality = found;
+        }
+      }
+    }
+  }
+
+  void setQuality(String quality) async {
+    if (_selectedQuality == quality) return;
+
+    final currentPosition = _videoController?.value.position ?? Duration.zero;
+    final wasPlaying = _videoController?.value.isPlaying ?? false;
+
+    final previousQuality = _selectedQuality;
     _selectedQuality = quality;
     notifyListeners();
+
+    if (_videoController != null) {
+      _videoController!.removeListener(_onVideoUpdate);
+      await _videoController!.dispose();
+      _videoController = null;
+    }
+    if (_audioController != null) {
+      await _audioController!.dispose();
+      _audioController = null;
+    }
+
+    try {
+      await _initPlayer(initialPosition: currentPosition, autoPlay: wasPlaying);
+      if (_hasError) throw 'Failed to load video with quality $quality';
+    } catch (e) {
+      debugPrint('Error switching quality to $quality: $e');
+      if (quality != 'Auto') {
+        _selectedQuality = previousQuality;
+        await _initPlayer(initialPosition: currentPosition, autoPlay: wasPlaying);
+      }
+    }
+    _resetHideTimer();
+  }
+
+  String _applyQualityToUrl(String url, String quality) {
+    if (!url.startsWith('http')) return url;
+
+    final qualityFolderRegex = RegExp(r'/(1080p|720p|480p|360p|240p)/');
+    final qualityTagRegex = RegExp(r'[_-](1080p|720p|480p|360p|240p)(\.mp4)');
+
+    if (quality == 'Auto') {
+      // Try to revert to master playlist if it was a specific quality URL
+      if (url.contains(qualityFolderRegex)) {
+        return url.replaceFirst(qualityFolderRegex, '/');
+      }
+      if (url.contains(qualityTagRegex)) {
+        return url.replaceFirst(qualityTagRegex, '.mp4');
+      }
+      return url;
+    }
+
+    final String q = quality.toLowerCase();
+
+    // 1. HLS (.m3u8)
+    if (url.contains('.m3u8')) {
+      if (url.contains(qualityFolderRegex)) {
+        return url.replaceFirst(qualityFolderRegex, '/$q/');
+      }
+      if (url.contains('playlist.m3u8')) {
+        return url.replaceFirst('playlist.m3u8', '$q/playlist.m3u8');
+      }
+    }
+
+    // 2. MP4
+    if (url.contains('.mp4')) {
+      if (url.contains(qualityTagRegex)) {
+        return url.replaceFirst(qualityTagRegex, '_$q.mp4');
+      }
+      if (url.contains(qualityFolderRegex)) {
+        return url.replaceFirst(qualityFolderRegex, '/$q/');
+      }
+    }
+
+    return url;
   }
 
   // ── Audio Tracks ──────────────────────────────────────────────────────────
@@ -433,29 +600,19 @@ class MovieDetailProvider extends ChangeNotifier {
     final wasPlaying = _videoController?.value.isPlaying ?? false;
 
     _selectedAudioTrack = track;
-    _isInitialized = false;
-    notifyListeners();
 
     if (_videoController != null) {
+      _videoController!.removeListener(_onVideoUpdate);
       await _videoController!.dispose();
+      _videoController = null;
     }
     if (_audioController != null) {
       await _audioController!.dispose();
       _audioController = null;
     }
 
-    await _initPlayer();
-
-    if (_videoController != null && _isInitialized) {
-      await _videoController!.seekTo(currentPosition);
-      await _audioController?.seekTo(currentPosition);
-      if (wasPlaying) {
-        _videoController!.play();
-        _audioController?.play();
-      }
-    }
+    await _initPlayer(initialPosition: currentPosition, autoPlay: wasPlaying);
     _resetHideTimer();
-    notifyListeners();
   }
 
   // ── Fullscreen ────────────────────────────────────────────────────────────

@@ -271,7 +271,7 @@ class _PlayerTopBar extends StatelessWidget {
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  provider.selectedQuality,
+                  provider.displayQuality,
                   style: text12(
                     color: Colors.white,
                     fontWeight: FontWeight.w600,
@@ -1115,7 +1115,7 @@ class _QualitySheet extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           ...provider.qualityOptions.map((q) {
-            final selected = provider.selectedQuality == q;
+            final isSelected = provider.selectedQuality == q;
             return GestureDetector(
               onTap: () {
                 provider.setQuality(q);
@@ -1127,16 +1127,16 @@ class _QualitySheet extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        q,
+                        q == 'Auto' ? provider.displayQuality : q,
                         style: text15(
-                          color: selected ? AppColors.primary : Colors.white70,
-                          fontWeight: selected
+                          color: isSelected ? AppColors.primary : Colors.white70,
+                          fontWeight: isSelected
                               ? FontWeight.w700
                               : FontWeight.w400,
                         ),
                       ),
                     ),
-                    if (selected)
+                    if (isSelected)
                       const Icon(
                         Icons.check_rounded,
                         color: AppColors.primary,

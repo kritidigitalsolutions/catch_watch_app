@@ -13,6 +13,7 @@ import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
+import '../../../utils/hive_service/hive_service.dart';
 import '../../../models/content_model.dart';
 import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
@@ -770,7 +771,17 @@ class _VideoPreviewThumbnailState extends State<_VideoPreviewThumbnail> {
   void initState() {
     super.initState();
     if (widget.videoUrl.startsWith('http')) {
-      _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
+      final token = HiveService.getToken();
+      Map<String, String> headers = {
+        'Referer': 'https://catchandwatch.com',
+      };
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+      _controller = VideoPlayerController.networkUrl(
+        Uri.parse(widget.videoUrl),
+        httpHeaders: headers,
+      );
     } else {
       _controller = VideoPlayerController.file(File(widget.videoUrl));
     }

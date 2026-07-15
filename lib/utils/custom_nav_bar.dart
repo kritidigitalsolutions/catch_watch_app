@@ -29,7 +29,7 @@ class BottomNavBar extends StatelessWidget {
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.play_circle_outline),
-          label: "Short",
+          label: "Reels",
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.add_circle, size: 42),
