@@ -1,6 +1,5 @@
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/view_model/after_login_provider/notification_provider.dart';
-import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
@@ -138,139 +137,76 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildAllShowsTab(HomeScreenProvider provider) {
+    return _buildTabWithSections(provider, showContinueWatching: true);
+  }
+
+  Widget _buildMoviesTab(HomeScreenProvider provider) {
+    return _buildTabWithSections(provider, showContinueWatching: false);
+  }
+
+  Widget _buildShortFilmsTab(HomeScreenProvider provider) {
+    return _buildTabWithSections(provider, showContinueWatching: false);
+  }
+
+  Widget _buildSeriesTab(HomeScreenProvider provider) {
+    return _buildTabWithSections(provider, showContinueWatching: false);
+  }
+
+  Widget _buildTvShowsTab(HomeScreenProvider provider) {
+    return _buildTabWithSections(provider, showContinueWatching: false);
+  }
+
+  Widget _buildTabWithSections(HomeScreenProvider provider, {required bool showContinueWatching}) {
+    final categories = provider.categories;
     return ListView(
       padding: EdgeInsets.zero,
       children: [
         _buildCarousel(provider, context),
         _buildDotIndicator(provider),
         const SizedBox(height: 24),
-        _buildTrendingSection(provider),
-        if (provider.continueWatching.isNotEmpty) ...[
+
+        // First Category
+        if (categories.isNotEmpty) ...[
+          _buildCategorySection(provider, categories[0]),
+        ],
+
+        // Continue Watching - Only if requested and not empty
+        if (showContinueWatching && provider.continueWatching.isNotEmpty) ...[
           _buildSectionHeader('▶ Continue Watching'),
           const SizedBox(height: 10),
           _buildContinueRow(provider),
           const SizedBox(height: 24),
         ],
-        if (provider.movies.isNotEmpty) ...[
-          _buildSectionHeader('Recommended Movies', onMore: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ContentGridScreen(
-                  title: 'Recommended Movies',
-                  contentList: provider.movies,
-                ),
-              ),
-            );
-          }),
-          const SizedBox(height: 10),
-          _buildMovieRow(provider.movies),
-          const SizedBox(height: 24),
-        ],
-        if (provider.series.isNotEmpty) ...[
-          _buildSectionHeader('Popular Series', onMore: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ContentGridScreen(
-                  title: 'Series',
-                  contentList: provider.series,
-                ),
-              ),
-            );
-          }),
-          const SizedBox(height: 10),
-          _buildMovieRow(provider.series),
-          const SizedBox(height: 24),
-        ],
-        if (provider.tvShows.isNotEmpty) ...[
-          _buildSectionHeader('Popular TV Shows', onMore: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ContentGridScreen(
-                  title: 'Popular TV Shows',
-                  contentList: provider.tvShows,
-                ),
-              ),
-            );
-          }),
-          const SizedBox(height: 10),
-          _buildMovieRow(provider.tvShows),
-          const SizedBox(height: 24),
-        ],
-        if (provider.shortFilms.isNotEmpty) ...[
-          _buildSectionHeader('Must Watch Short Films', onMore: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ContentGridScreen(
-                  title: 'Short Films',
-                  contentList: provider.shortFilms,
-                ),
-              ),
-            );
-          }),
-          const SizedBox(height: 10),
-          _buildMovieRow(provider.shortFilms),
-          const SizedBox(height: 24),
-        ],
+
+        // Remaining Categories
+        if (categories.length > 1)
+          ...categories.skip(1).map((category) => _buildCategorySection(provider, category)),
+
         SizedBox(height: MediaQuery.paddingOf(context).bottom + 100),
       ],
     );
   }
 
-  Widget _buildMoviesTab(HomeScreenProvider provider) {
-    return _buildCategoryTab(provider, 'Latest Movies', provider.movies);
-  }
+  Widget _buildCategorySection(HomeScreenProvider provider, dynamic category) {
+    final categoryContent = provider.getContentByCategory(category.slug ?? category.name ?? '');
+    if (categoryContent.isEmpty) return const SizedBox();
 
-  Widget _buildShortFilmsTab(HomeScreenProvider provider) {
-    return _buildCategoryTab(provider, 'Short & Sweet', provider.shortFilms);
-  }
-
-  Widget _buildSeriesTab(HomeScreenProvider provider) {
-    return _buildCategoryTab(provider, 'Popular Series', provider.series);
-  }
-
-  Widget _buildTvShowsTab(HomeScreenProvider provider) {
-    return _buildCategoryTab(provider, 'Bingeworthy Series', provider.tvShows);
-  }
-
-  Widget _buildCategoryTab(HomeScreenProvider provider, String fullListTitle, List<Content> fullList) {
-    return ListView(
-      padding: EdgeInsets.zero,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildCarousel(provider, context),
-        _buildDotIndicator(provider),
-        const SizedBox(height: 24),
-        _buildTrendingSection(provider),
-        _buildSectionHeader(fullListTitle, onMore: () {
+        _buildSectionHeader(category.name ?? '', onMore: () {
           Navigator.push(
             context,
             MaterialPageRoute(
               builder: (_) => ContentGridScreen(
-                title: fullListTitle,
-                contentList: fullList,
+                title: category.name ?? '',
+                contentList: categoryContent,
               ),
             ),
           );
         }),
         const SizedBox(height: 10),
-        _buildMovieRow(fullList),
-        SizedBox(height: MediaQuery.paddingOf(context).bottom + 100),
-      ],
-    );
-  }
-
-  Widget _buildTrendingSection(HomeScreenProvider provider) {
-    final trending = provider.currentTabTrending;
-    if (trending.isEmpty) return const SizedBox();
-
-    return Column(
-      children: [
-        _buildSectionHeader('🔥 Trending Now'),
-        const SizedBox(height: 10),
-        _buildTrendingRow(provider),
+        _buildMovieRow(categoryContent),
         const SizedBox(height: 24),
       ],
     );
@@ -311,7 +247,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     end: Alignment.bottomCenter,
                     colors: [
                       Colors.transparent,
-                      Colors.black.withOpacity(0.95),
+                      Colors.black.withAlpha(242), // approx 0.95 * 255
                     ],
                     stops: const [0.3, 1.0],
                   ),
@@ -436,87 +372,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _playButton(BuildContext context, Content content) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.primary,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: () => _openMovie(context, content),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.play_arrow_rounded,
-                  color: Colors.white,
-                  size: 18,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'Play Now',
-                  style: text13(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _watchlistIcon(BuildContext context, Content content) {
-    final watchlistProvider = context.watch<WatchlistProvider>();
-    final isInWatchlist =
-        watchlistProvider.items.any((i) => i.item?.id == content.id);
-
-    return GestureDetector(
-      onTap: () {
-        if (isInWatchlist) {
-          final watchlistItem =
-              watchlistProvider.items.firstWhere((i) => i.item?.id == content.id);
-          watchlistProvider.removeItem(watchlistItem.id!);
-        } else {
-          watchlistProvider.addItem(content.id!);
-        }
-      },
-      child: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.white.withOpacity(0.1)),
-        ),
-        child: Icon(
-          isInWatchlist ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-          color: isInWatchlist ? AppColors.primary : Colors.white,
-          size: 18,
-        ),
-      ),
-    );
-  }
-
-  Widget _iconCircle(IconData icon) {
-    return Container(
-      width: 38,
-      height: 38,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
-      ),
-      child: Icon(icon, color: Colors.white, size: 18),
-    );
-  }
-
   Widget _buildDotIndicator(HomeScreenProvider provider) {
     final banners = provider.currentTabBanners;
     if (banners.isEmpty) return const SizedBox();
@@ -567,29 +422,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildTrendingRow(HomeScreenProvider provider) {
-    final trending = provider.currentTabTrending;
-    return SizedBox(
-      height: 210,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.only(left: 16),
-        itemCount: trending.length,
-        itemBuilder: (_, i) {
-          final item = trending[i];
-          return Container(
-            width: 132,
-            margin: const EdgeInsets.only(right: 12),
-            child: _MoviePosterCard(content: item),
-          );
-        },
-      ),
-    );
-  }
-
   Widget _buildContinueRow(HomeScreenProvider provider) {
     return SizedBox(
-      height: 170,
+      height: 160,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.only(left: 16),
@@ -597,7 +432,7 @@ class _HomeScreenState extends State<HomeScreen> {
         itemBuilder: (_, i) {
           final item = provider.continueWatching[i];
           return Container(
-            width: 240,
+            width: 280,
             margin: const EdgeInsets.only(right: 12),
             child: _ContinueCard(item: item),
           );
@@ -620,34 +455,6 @@ class _HomeScreenState extends State<HomeScreen> {
             child: _MoviePosterCard(content: items[i]),
           );
         },
-      ),
-    );
-  }
-}
-
-class _ContentCard extends StatelessWidget {
-  final Content content;
-  const _ContentCard({required this.content});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => _openMovie(context, content),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            content.poster != null && content.poster!.isNotEmpty
-                ? Image.network(
-                    content.poster!,
-                    fit: BoxFit.fill,
-                    errorBuilder: (context, error, stackTrace) =>
-                        Image.asset('assets/images/logo.jpg', fit: BoxFit.fill),
-                  )
-                : Image.asset('assets/images/logo.jpg', fit: BoxFit.fill),
-          ],
-        ),
       ),
     );
   }
@@ -677,7 +484,7 @@ class _ContinueCard extends StatelessWidget {
             item.image != null && item.image!.isNotEmpty && item.image!.startsWith('http')
                 ? Image.network(
                     item.image!,
-                    fit: BoxFit.fill,
+                    fit: BoxFit.fill, // Use cover for banner aspect ratio
                     errorBuilder: (context, error, stackTrace) =>
                         Image.asset('assets/images/logo.jpg', fit: BoxFit.fill),
                   )
@@ -691,14 +498,14 @@ class _ContinueCard extends StatelessWidget {
               left: 0,
               right: 0,
               child: Container(
-                padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
+                padding: const EdgeInsets.fromLTRB(10, 20, 10, 10),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
                       Colors.transparent,
-                      Colors.black.withOpacity(0.92),
+                      Colors.black.withAlpha(235), // approx 0.92 * 255
                     ],
                   ),
                 ),
@@ -811,17 +618,24 @@ class _ContinueCard extends StatelessWidget {
             Positioned(
               top: 10,
               right: 10,
-              child: Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.45),
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: const Icon(
-                  Icons.more_vert,
-                  color: Colors.white,
-                  size: 18,
+              child: GestureDetector(
+                onTap: () {
+                  if (item.content?.id != null) {
+                    context.read<HomeScreenProvider>().removeFromContinueWatching(item.content!.id!);
+                  }
+                },
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.45),
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: const Icon(
+                    Icons.delete_forever_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
                 ),
               ),
             ),

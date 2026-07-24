@@ -20,6 +20,7 @@ class AppUrl {
   static const String cancelSubscription = '$baseUrl/subscription/cancel';
   static const String subscriptionStatus = '$baseUrl/subscription/status';
   static const String getContent = '$baseUrl/content';
+  static const String getCategories = '$baseUrl/categories';
   static const String getMovies = '$baseUrl/movies';
   static const String getTvShows = '$baseUrl/tv-shows';
   static const String getShortFilms = '$baseUrl/short-films';

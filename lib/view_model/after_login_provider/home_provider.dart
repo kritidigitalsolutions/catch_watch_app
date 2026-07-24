@@ -1,3 +1,4 @@
+import 'package:catch_watch/models/category_model.dart';
 import 'package:catch_watch/models/content_model.dart';
 import 'package:catch_watch/repository/content_repository.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
@@ -24,6 +25,7 @@ class HomeScreenProvider extends ChangeNotifier {
   List<Content> _shortFilms = [];
   List<Content> _series = [];
   List<Content> _banners = [];
+  List<Category> _categories = [];
 
   int get pageIndex => _pageIndex;
   bool get showButtons => _showButtons;
@@ -37,6 +39,7 @@ class HomeScreenProvider extends ChangeNotifier {
   List<Content> get shortFilms => _shortFilms;
   List<Content> get series => _series;
   List<Content> get bannersList => _banners;
+  List<Category> get categories => _categories;
 
   HomeScreenProvider() {
     fetchAllContent();
@@ -59,6 +62,12 @@ class HomeScreenProvider extends ChangeNotifier {
       }).toList();
       notifyListeners();
     }
+  }
+
+  void removeFromContinueWatching(String contentId) {
+    HiveService.removeFromWatchHistory(contentId);
+    _continueWatching.removeWhere((item) => item.content?.id == contentId);
+    notifyListeners();
   }
 
   List<Widget> get screenPage => [
@@ -134,8 +143,18 @@ class HomeScreenProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final contentModel = await _contentRepository.getContent();
+      final results = await Future.wait([
+        _contentRepository.getContent(),
+        _contentRepository.getCategories(),
+      ]);
+
+      final contentModel = results[0] as ContentModel;
+      _categories = results[1] as List<Category>;
+      _categories.sort((a, b) => (a.priority ?? 0).compareTo(b.priority ?? 0));
+
       _allContent = contentModel.content ?? [];
+      // Sort content by priority ascending (0, 1, 2, 3...)
+      _allContent.sort((a, b) => (a.priority ?? 0).compareTo(b.priority ?? 0));
 
       _movies = _allContent.where((c) => c.type == 'movie').toList();
       _tvShows = _allContent.where((c) => c.type == 'tvShow' || c.type == 'tvShows' || c.type == 'tvshow').toList();
@@ -197,6 +216,14 @@ class HomeScreenProvider extends ChangeNotifier {
   void updateBannerIndex(int index) {
     _currentBannerIndex = index;
     notifyListeners();
+  }
+
+  List<Content> getContentByCategory(String categorySlug) {
+    final baseList = _getContentForTab(_selectedTabIndex);
+    return baseList.where((c) {
+      return c.category != null && 
+             c.category!.any((cat) => cat.toLowerCase() == categorySlug.toLowerCase());
+    }).toList();
   }
 }
 

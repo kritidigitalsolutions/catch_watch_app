@@ -136,7 +136,7 @@ class MyHomePage extends StatelessWidget {
                 automaticallyImplyLeading: false,
               ),
               backgroundColor: AppColors.white,
-  
+
               // Separate Bottom Navigation
               bottomNavigationBar: SafeArea(
                 child: BottomNavBar(

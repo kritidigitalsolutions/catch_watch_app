@@ -1,5 +1,6 @@
 import '../data/network/api_network_service.dart';
 import '../data/network/base_api_service.dart';
+import '../models/category_model.dart';
 import '../models/content_model.dart';
 import '../res/appUrl.dart';
 
@@ -10,6 +11,20 @@ class ContentRepository {
     try {
       dynamic response = await _apiService.getApi(AppUrl.getContent);
       return ContentModel.fromJson(response);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<List<Category>> getCategories() async {
+    try {
+      dynamic response = await _apiService.getApi(AppUrl.getCategories);
+      if (response['success'] == true) {
+        return (response['categories'] as List)
+            .map((e) => Category.fromJson(e))
+            .toList();
+      }
+      return [];
     } catch (e) {
       rethrow;
     }

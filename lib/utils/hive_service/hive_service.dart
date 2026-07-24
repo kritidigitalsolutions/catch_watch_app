@@ -53,6 +53,10 @@ class HiveService {
     await _historyBox.put(contentId, data);
   }
 
+  static Future<void> removeFromWatchHistory(String contentId) async {
+    await _historyBox.delete(contentId);
+  }
+
   static Map<dynamic, dynamic> getWatchHistory() {
     return _historyBox.toMap();
   }
