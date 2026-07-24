@@ -42,7 +42,7 @@ void _openShortFilm(BuildContext context, Content content) {
 }
 
 Future<void> _openMovie(BuildContext context, Content content) async {
-  if (content.type == 'shortfilm') {
+  if (content.type == 'shortFilm' || content.type == 'short' || content.type == 'shortfilm') {
     _openShortFilm(context, content);
     return;
   }
@@ -128,7 +128,9 @@ class _HomeScreenState extends State<HomeScreen> {
         return _buildMoviesTab(provider);
       case 2: // Short Films
         return _buildShortFilmsTab(provider);
-      case 3: // TV Shows
+      case 3: // Series
+        return _buildSeriesTab(provider);
+      case 4: // TV Shows
         return _buildTvShowsTab(provider);
       default:
         return _buildAllShowsTab(provider);
@@ -142,22 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _buildCarousel(provider, context),
         _buildDotIndicator(provider),
         const SizedBox(height: 24),
-        if (provider.trending.isNotEmpty) ...[
-          _buildSectionHeader('🔥 Trending Now', onMore: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ContentGridScreen(
-                  title: 'Trending Now',
-                  contentList: provider.trending,
-                ),
-              ),
-            );
-          }),
-          const SizedBox(height: 10),
-          _buildTrendingRow(provider),
-          const SizedBox(height: 24),
-        ],
+        _buildTrendingSection(provider),
         if (provider.continueWatching.isNotEmpty) ...[
           _buildSectionHeader('▶ Continue Watching'),
           const SizedBox(height: 10),
@@ -178,6 +165,22 @@ class _HomeScreenState extends State<HomeScreen> {
           }),
           const SizedBox(height: 10),
           _buildMovieRow(provider.movies),
+          const SizedBox(height: 24),
+        ],
+        if (provider.series.isNotEmpty) ...[
+          _buildSectionHeader('Popular Series', onMore: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ContentGridScreen(
+                  title: 'Series',
+                  contentList: provider.series,
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 10),
+          _buildMovieRow(provider.series),
           const SizedBox(height: 24),
         ],
         if (provider.tvShows.isNotEmpty) ...[
@@ -212,161 +215,79 @@ class _HomeScreenState extends State<HomeScreen> {
           _buildMovieRow(provider.shortFilms),
           const SizedBox(height: 24),
         ],
-        const SizedBox(height: 100),
+        SizedBox(height: MediaQuery.paddingOf(context).bottom + 100),
       ],
     );
   }
 
   Widget _buildMoviesTab(HomeScreenProvider provider) {
-    final movieBanners = provider.movies.where((m) => m.category?.contains('trending') ?? false).toList();
-    final actionMovies = provider.movies.where((m) => m.genre?.contains('Action') ?? m.genre?.contains('Thriller') ?? false).toList();
-    final romanceMovies = provider.movies.where((m) => m.genre?.contains('Romance') ?? false).toList();
-
-    return ListView(
-      padding: EdgeInsets.zero,
-      children: [
-        if (movieBanners.isNotEmpty) ...[
-          _buildCategoryCarousel(movieBanners),
-          _buildDotIndicator(provider),
-          const SizedBox(height: 24),
-        ],
-        _buildSectionHeader('Latest Movies', onMore: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ContentGridScreen(
-                title: 'Latest Movies',
-                contentList: provider.movies,
-              ),
-            ),
-          );
-        }),
-        const SizedBox(height: 10),
-        _buildMovieRow(provider.movies),
-        const SizedBox(height: 24),
-        if (actionMovies.isNotEmpty) ...[
-          _buildSectionHeader('Action & Thriller', onMore: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ContentGridScreen(
-                  title: 'Action & Thriller',
-                  contentList: actionMovies,
-                ),
-              ),
-            );
-          }),
-          const SizedBox(height: 10),
-          _buildMovieRow(actionMovies),
-          const SizedBox(height: 24),
-        ],
-        if (romanceMovies.isNotEmpty) ...[
-          _buildSectionHeader('Romance', onMore: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ContentGridScreen(
-                  title: 'Romance Movies',
-                  contentList: romanceMovies,
-                ),
-              ),
-            );
-          }),
-          const SizedBox(height: 10),
-          _buildMovieRow(romanceMovies),
-        ],
-        const SizedBox(height: 100),
-      ],
-    );
+    return _buildCategoryTab(provider, 'Latest Movies', provider.movies);
   }
 
   Widget _buildShortFilmsTab(HomeScreenProvider provider) {
-    final shortBanners = provider.shortFilms.where((m) => m.category?.contains('trending') ?? false).toList();
-    return ListView(
-      padding: EdgeInsets.zero,
-      children: [
-        if (shortBanners.isNotEmpty) ...[
-          _buildCategoryCarousel(shortBanners),
-          _buildDotIndicator(provider),
-          const SizedBox(height: 24),
-        ],
-        _buildSectionHeader('Short & Sweet', onMore: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ContentGridScreen(
-                title: 'Short Films',
-                contentList: provider.shortFilms,
-              ),
-            ),
-          );
-        }),
-        const SizedBox(height: 10),
-        _buildMovieRow(provider.shortFilms),
-        const SizedBox(height: 24),
-        _buildSectionHeader('Trending Shorts'),
-        const SizedBox(height: 10),
-        _buildTrendingRow(provider),
-        const SizedBox(height: 100),
-      ],
-    );
+    return _buildCategoryTab(provider, 'Short & Sweet', provider.shortFilms);
+  }
+
+  Widget _buildSeriesTab(HomeScreenProvider provider) {
+    return _buildCategoryTab(provider, 'Popular Series', provider.series);
   }
 
   Widget _buildTvShowsTab(HomeScreenProvider provider) {
-    final tvBanners = provider.tvShows.where((m) => m.category?.contains('trending') ?? false).toList();
-    final ongoingShows = provider.tvShows.where((s) => s.status == 'ongoing').toList();
+    return _buildCategoryTab(provider, 'Bingeworthy Series', provider.tvShows);
+  }
 
+  Widget _buildCategoryTab(HomeScreenProvider provider, String fullListTitle, List<Content> fullList) {
     return ListView(
       padding: EdgeInsets.zero,
       children: [
-        if (tvBanners.isNotEmpty) ...[
-          _buildCategoryCarousel(tvBanners),
-          _buildDotIndicator(provider),
-          const SizedBox(height: 24),
-        ],
-        _buildSectionHeader('Bingeworthy Series', onMore: () {
+        _buildCarousel(provider, context),
+        _buildDotIndicator(provider),
+        const SizedBox(height: 24),
+        _buildTrendingSection(provider),
+        _buildSectionHeader(fullListTitle, onMore: () {
           Navigator.push(
             context,
             MaterialPageRoute(
               builder: (_) => ContentGridScreen(
-                title: 'TV Series',
-                contentList: provider.tvShows,
+                title: fullListTitle,
+                contentList: fullList,
               ),
             ),
           );
         }),
         const SizedBox(height: 10),
-        _buildMovieRow(provider.tvShows),
-        const SizedBox(height: 24),
-        if (ongoingShows.isNotEmpty) ...[
-          _buildSectionHeader('New Episodes', onMore: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ContentGridScreen(
-                  title: 'Ongoing Series',
-                  contentList: ongoingShows,
-                ),
-              ),
-            );
-          }),
-          const SizedBox(height: 10),
-          _buildMovieRow(ongoingShows),
-        ],
-        const SizedBox(height: 100),
+        _buildMovieRow(fullList),
+        SizedBox(height: MediaQuery.paddingOf(context).bottom + 100),
       ],
     );
   }
 
-  Widget _buildCategoryCarousel(List<Content> banners) {
+  Widget _buildTrendingSection(HomeScreenProvider provider) {
+    final trending = provider.currentTabTrending;
+    if (trending.isEmpty) return const SizedBox();
+
+    return Column(
+      children: [
+        _buildSectionHeader('🔥 Trending Now'),
+        const SizedBox(height: 10),
+        _buildTrendingRow(provider),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildCarousel(HomeScreenProvider provider, BuildContext context) {
+    final banners = provider.currentTabBanners;
+    if (banners.isEmpty) return const SizedBox();
+
     return CarouselSlider(
       options: CarouselOptions(
         height: 220,
         viewportFraction: 1.0,
-        enlargeCenterPage: false,
         autoPlay: true,
         autoPlayInterval: const Duration(seconds: 5),
-        onPageChanged: (i, _) => context.read<HomeScreenProvider>().updateBannerIndex(i),
+        autoPlayAnimationDuration: const Duration(milliseconds: 700),
+        onPageChanged: (i, _) => provider.updateBannerIndex(i),
       ),
       items: banners.map((item) {
         return GestureDetector(
@@ -374,9 +295,15 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              item.banner != null
-                  ? Image.network(item.banner!, fit: BoxFit.cover)
-                  : Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
+              item.banner != null && item.banner!.isNotEmpty
+                  ? Image.network(
+                      item.banner!,
+                      fit: BoxFit.fill,
+                      errorBuilder: (context, error, stackTrace) =>
+                          Image.asset('assets/images/logo.jpg', fit: BoxFit.fill),
+                    )
+                  : Image.asset('assets/images/logo.jpg', fit: BoxFit.fill),
+              // Dark gradient
               Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -509,53 +436,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildCarousel(HomeScreenProvider provider, BuildContext context) {
-    if (provider.bannersList.isEmpty) return const SizedBox();
-
-    return CarouselSlider(
-      options: CarouselOptions(
-        height: 220,
-        viewportFraction: 1.0,
-        autoPlay: true,
-        autoPlayInterval: const Duration(seconds: 5),
-        autoPlayAnimationDuration: const Duration(milliseconds: 700),
-        onPageChanged: (i, _) => provider.updateBannerIndex(i),
-      ),
-      items: provider.bannersList.map((item) {
-        return GestureDetector(
-          onTap: () => _openMovie(context, item),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              item.banner != null
-                  ? Image.network(
-                      item.banner!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) =>
-                          Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
-                    )
-                  : Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
-              // Dark gradient
-              Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.transparent,
-                      Colors.black.withOpacity(0.95),
-                    ],
-                    stops: const [0.3, 1.0],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
-
   Widget _playButton(BuildContext context, Content content) {
     return Container(
       decoration: BoxDecoration(
@@ -638,18 +518,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDotIndicator(HomeScreenProvider provider) {
-    List<Content> currentBanners = [];
-    switch (provider.selectedTabIndex) {
-      case 0: currentBanners = provider.bannersList; break;
-      case 1: currentBanners = provider.movies.where((m) => m.category?.contains('trending') ?? false).toList(); break;
-      case 2: currentBanners = provider.shortFilms.where((m) => m.category?.contains('trending') ?? false).toList(); break;
-      case 3: currentBanners = provider.tvShows.where((m) => m.category?.contains('trending') ?? false).toList(); break;
-    }
+    final banners = provider.currentTabBanners;
+    if (banners.isEmpty) return const SizedBox();
 
-    if (currentBanners.isEmpty) return const SizedBox();
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(currentBanners.length, (i) {
+      children: List.generate(banners.length, (i) {
         final active = i == provider.currentBannerIndex;
         return AnimatedContainer(
           duration: const Duration(milliseconds: 300),
@@ -694,18 +568,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildTrendingRow(HomeScreenProvider provider) {
+    final trending = provider.currentTabTrending;
     return SizedBox(
-      height: 160,
+      height: 210,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.only(left: 16),
-        itemCount: provider.trending.length,
+        itemCount: trending.length,
         itemBuilder: (_, i) {
-          final item = provider.trending[i];
+          final item = trending[i];
           return Container(
-            width: 110,
-            margin: const EdgeInsets.only(right: 10),
-            child: _ContentCard(content: item),
+            width: 132,
+            margin: const EdgeInsets.only(right: 12),
+            child: _MoviePosterCard(content: item),
           );
         },
       ),
@@ -766,11 +641,11 @@ class _ContentCard extends StatelessWidget {
             content.poster != null && content.poster!.isNotEmpty
                 ? Image.network(
                     content.poster!,
-                    fit: BoxFit.cover,
+                    fit: BoxFit.fill,
                     errorBuilder: (context, error, stackTrace) =>
-                        Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
+                        Image.asset('assets/images/logo.jpg', fit: BoxFit.fill),
                   )
-                : Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
+                : Image.asset('assets/images/logo.jpg', fit: BoxFit.fill),
           ],
         ),
       ),
@@ -802,15 +677,15 @@ class _ContinueCard extends StatelessWidget {
             item.image != null && item.image!.isNotEmpty && item.image!.startsWith('http')
                 ? Image.network(
                     item.image!,
-                    fit: BoxFit.cover,
+                    fit: BoxFit.fill,
                     errorBuilder: (context, error, stackTrace) =>
-                        Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
+                        Image.asset('assets/images/logo.jpg', fit: BoxFit.fill),
                   )
                 : Image.asset(
                     (item.image != null && item.image!.isNotEmpty)
                         ? item.image!
                         : 'assets/images/logo.jpg',
-                    fit: BoxFit.cover),
+                    fit: BoxFit.fill),
             Positioned(
               bottom: 0,
               left: 0,
@@ -980,13 +855,13 @@ class _MoviePosterCard extends StatelessWidget {
                   content.poster != null
                       ? Image.network(
                           content.poster!,
-                          fit: BoxFit.cover,
+                          fit: BoxFit.fill,
                           errorBuilder: (context, error, stackTrace) =>
                               Image.asset('assets/images/logo.jpg',
-                                  fit: BoxFit.cover),
+                                  fit: BoxFit.fill),
                         )
                       : Image.asset('assets/images/logo.jpg',
-                          fit: BoxFit.cover),
+                          fit: BoxFit.fill),
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(

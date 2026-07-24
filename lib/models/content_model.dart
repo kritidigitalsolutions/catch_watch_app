@@ -4,6 +4,8 @@ class ContentModel {
   bool? success;
   int? moviesCount;
   int? seriesCount;
+  int? shortFilmsCount;
+  int? tvShowsCount;
   int? episodesCount;
   List<Content>? content;
 
@@ -11,6 +13,8 @@ class ContentModel {
     this.success,
     this.moviesCount,
     this.seriesCount,
+    this.shortFilmsCount,
+    this.tvShowsCount,
     this.episodesCount,
     this.content,
   });
@@ -19,6 +23,8 @@ class ContentModel {
     success = json['success'];
     moviesCount = json['moviesCount'];
     seriesCount = json['seriesCount'];
+    shortFilmsCount = json['shortFilmsCount'];
+    tvShowsCount = json['tvShowsCount'];
     episodesCount = json['episodesCount'];
     if (json['content'] != null) {
       content = <Content>[];
@@ -57,6 +63,7 @@ class Content {
   String? slug;
   String? type;
   bool? isTrending;
+  bool? isNewContent;
   int? totalEpisodes;
   int? totalViews;
   String? status;
@@ -148,6 +155,7 @@ class Content {
     slug = json['slug'];
     type = json['type'];
     isTrending = json['isTrending'];
+    isNewContent = json['isNewContent'];
     totalEpisodes = json['totalEpisodes'];
     totalViews = json['totalViews'];
     status = json['status'];
@@ -194,6 +202,7 @@ class Content {
     data['slug'] = slug;
     data['type'] = type;
     data['isTrending'] = isTrending;
+    data['isNewContent'] = isNewContent;
     data['totalEpisodes'] = totalEpisodes;
     data['totalViews'] = totalViews;
     data['status'] = status;

@@ -88,7 +88,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Grid
               _buildGrid(provider),
 
-              const SliverToBoxAdapter(child: SizedBox(height: 80)),
+              SliverToBoxAdapter(
+                child: SizedBox(height: MediaQuery.paddingOf(context).bottom + 80),
+              ),
             ],
           ),
 
@@ -596,7 +598,7 @@ class _GridCard extends StatelessWidget {
           final content = item is WatchlistItem ? item.item : item as Content;
           if (content == null) return;
 
-          if (content.type == 'shortfilm') {
+          if (content.type == 'shortFilm' || content.type == 'short' || content.type == 'shortfilm') {
             final subProvider = context.read<SubscriptionProvider>();
             bool canWatch = content.isPremium != true || subProvider.currentSubscription != null;
 
@@ -724,13 +726,13 @@ class _GridCard extends StatelessWidget {
       return imageUrl.startsWith('http')
           ? Image.network(
               imageUrl,
-              fit: BoxFit.cover,
+              fit: BoxFit.fill,
               errorBuilder: (_, __, ___) => _errorPlaceholder(),
             )
           : (imageUrl.startsWith('assets/')
               ? Image.asset(
                   imageUrl,
-                  fit: BoxFit.cover,
+                  fit: BoxFit.fill,
                   errorBuilder: (_, __, ___) => _errorPlaceholder(),
                 )
               : _errorPlaceholder());

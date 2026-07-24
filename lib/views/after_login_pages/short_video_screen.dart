@@ -574,7 +574,7 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
           ),
           Positioned(
             right: 12,
-            bottom: 112,
+            bottom: 112 + MediaQuery.paddingOf(context).bottom,
             child: _ShortActions(
               reel: widget.reel,
               onLike: widget.onLike,
@@ -587,12 +587,12 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
           Positioned(
             left: 16,
             right: 82,
-            bottom: 34,
+            bottom: 34 + MediaQuery.paddingOf(context).bottom,
             child: _ShortInfo(reel: widget.reel),
           ),
           Positioned(
             right: 18,
-            bottom: 40,
+            bottom: 40 + MediaQuery.paddingOf(context).bottom,
             child: _MusicDisc(image: widget.reel.thumbnail),
           ),
           if (_controller == null || !_controller!.value.isInitialized)

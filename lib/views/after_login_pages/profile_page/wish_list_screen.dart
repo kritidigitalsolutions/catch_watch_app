@@ -180,7 +180,7 @@ class _WishListScreenState extends State<WishListScreen> {
                   child: item.poster != null
                       ? Image.network(
                           item.poster!,
-                          fit: BoxFit.cover,
+                          fit: BoxFit.fill,
                           errorBuilder: (_, __, ___) => const Icon(
                             Icons.movie_outlined,
                             color: AppColors.grey400,

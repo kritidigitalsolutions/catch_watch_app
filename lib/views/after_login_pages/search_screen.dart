@@ -165,6 +165,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                   ),
                 ),
+              SizedBox(height: MediaQuery.paddingOf(context).bottom + 100),
             ],
           ),
         ),
@@ -185,7 +186,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 item.poster!,
                 width: 70,
                 height: 45,
-                fit: BoxFit.cover,
+                fit: BoxFit.fill,
                 errorBuilder: (_, __, ___) => Container(
                   width: 70,
                   height: 45,
@@ -238,7 +239,7 @@ class _SearchScreenState extends State<SearchScreen> {
             image: reel.thumbnail != null && reel.thumbnail!.isNotEmpty
                 ? NetworkImage(reel.thumbnail!)
                 : const AssetImage('assets/images/logo.jpg') as ImageProvider,
-            fit: BoxFit.cover,
+            fit: BoxFit.fill,
           ),
         ),
         child: Stack(

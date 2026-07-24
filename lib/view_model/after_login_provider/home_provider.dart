@@ -22,6 +22,7 @@ class HomeScreenProvider extends ChangeNotifier {
   List<Content> _movies = [];
   List<Content> _tvShows = [];
   List<Content> _shortFilms = [];
+  List<Content> _series = [];
   List<Content> _banners = [];
 
   int get pageIndex => _pageIndex;
@@ -34,6 +35,7 @@ class HomeScreenProvider extends ChangeNotifier {
   List<Content> get movies => _movies;
   List<Content> get tvShows => _tvShows;
   List<Content> get shortFilms => _shortFilms;
+  List<Content> get series => _series;
   List<Content> get bannersList => _banners;
 
   HomeScreenProvider() {
@@ -84,6 +86,7 @@ class HomeScreenProvider extends ChangeNotifier {
     'All Shows',
     'Movies',
     'Short Films',
+    'Series',
     'TV Shows',
   ];
 
@@ -96,7 +99,7 @@ class HomeScreenProvider extends ChangeNotifier {
     final remaining = total - position;
     
     final newItem = ContentItem(
-      image: content.poster ?? '',
+      image: (content.banner != null && content.banner!.isNotEmpty) ? content.banner : content.poster ?? '',
       views: '100k',
       title: content.title ?? '',
       progress: progress.toStringAsFixed(2),
@@ -131,21 +134,16 @@ class HomeScreenProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final results = await Future.wait([
-        _contentRepository.getMovies(),
-        _contentRepository.getTvShows(),
-        _contentRepository.getShortFilms(),
-      ]);
+      final contentModel = await _contentRepository.getContent();
+      _allContent = contentModel.content ?? [];
 
-      _movies = results[0];
-      _tvShows = results[1];
-      _shortFilms = results[2];
+      _movies = _allContent.where((c) => c.type == 'movie').toList();
+      _tvShows = _allContent.where((c) => c.type == 'tvShow' || c.type == 'tvShows' || c.type == 'tvshow').toList();
+      _shortFilms = _allContent.where((c) => c.type == 'shortFilm' || c.type == 'short' || c.type == 'shortfilm').toList();
+      _series = _allContent.where((c) => c.type == 'series').toList();
 
-      _allContent = [..._movies, ..._tvShows, ..._shortFilms];
-      _allContent.shuffle(); // Mix them for "All Shows"
-
-      _trending = _allContent.where((c) => c.category?.contains('trending') ?? false).toList();
-      _banners = _allContent.where((c) => c.category?.contains('trending') ?? false).toList();
+      _trending = _allContent.where((c) => c.isTrending == true).toList();
+      _banners = _allContent.where((c) => c.isNewContent == true).toList();
 
       if (_banners.isEmpty && _allContent.isNotEmpty) {
         _banners = _allContent.take(5).toList();
@@ -162,7 +160,30 @@ class HomeScreenProvider extends ChangeNotifier {
     await fetchAllContent();
   }
 
-  // ... (remove the old const continueWatching)
+  List<Content> _getContentForTab(int index) {
+    switch (index) {
+      case 0: return _allContent;
+      case 1: return _movies;
+      case 2: return _shortFilms;
+      case 3: return _series;
+      case 4: return _tvShows;
+      default: return _allContent;
+    }
+  }
+
+  List<Content> get currentTabBanners {
+    final baseList = _getContentForTab(_selectedTabIndex);
+    final banners = baseList.where((c) => c.isNewContent == true).toList();
+    if (banners.isEmpty && baseList.isNotEmpty) {
+      return baseList.take(5).toList();
+    }
+    return banners;
+  }
+
+  List<Content> get currentTabTrending {
+    final baseList = _getContentForTab(_selectedTabIndex);
+    return baseList.where((c) => c.isTrending == true).toList();
+  }
 
   int get selectedTabIndex => _selectedTabIndex;
   int get currentBannerIndex => _currentBannerIndex;

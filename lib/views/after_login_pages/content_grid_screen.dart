@@ -60,7 +60,7 @@ class _GridItem extends StatelessWidget {
   const _GridItem({required this.content});
 
   void _handleTap(BuildContext context) {
-    if (content.type == 'shortfilm') {
+    if (content.type == 'shortFilm' || content.type == 'short' || content.type == 'shortfilm') {
       final subProvider = context.read<SubscriptionProvider>();
       bool canWatch = content.isPremium != true || subProvider.currentSubscription != null;
 
@@ -106,8 +106,8 @@ class _GridItem extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   content.poster != null
-                      ? Image.network(content.poster!, fit: BoxFit.cover)
-                      : Image.asset('assets/images/logo.jpg', fit: BoxFit.cover),
+                      ? Image.network(content.poster!, fit: BoxFit.fill)
+                      : Image.asset('assets/images/logo.jpg', fit: BoxFit.fill),
                   if (content.isPremium == true)
                     Positioned(
                       top: 4,

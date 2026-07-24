@@ -33,11 +33,12 @@ void main() async {
 
   FirebaseMessaging.onBackgroundMessage(NotificationService.backgroundHandler);
 
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
-      systemNavigationBarColor: AppColors.white,
+      systemNavigationBarColor: Colors.transparent,
       systemNavigationBarIconBrightness: Brightness.dark,
     ),
   );
@@ -111,7 +112,7 @@ class MyHomePage extends StatelessWidget {
           value: const SystemUiOverlayStyle(
             statusBarColor: Colors.transparent,
             statusBarIconBrightness: Brightness.dark,
-            systemNavigationBarColor: AppColors.white,
+            systemNavigationBarColor: Colors.transparent,
             systemNavigationBarIconBrightness: Brightness.dark,
           ),
           child: PopScope(
@@ -137,11 +138,13 @@ class MyHomePage extends StatelessWidget {
               backgroundColor: AppColors.white,
   
               // Separate Bottom Navigation
-              bottomNavigationBar: BottomNavBar(
-                currentIndex: ctr.pageIndex,
-                onTap: (index) {
-                  ctr.changePage(index);
-                },
+              bottomNavigationBar: SafeArea(
+                child: BottomNavBar(
+                  currentIndex: ctr.pageIndex,
+                  onTap: (index) {
+                    ctr.changePage(index);
+                  },
+                ),
               ),
   
               body: Consumer<HomeScreenProvider>(

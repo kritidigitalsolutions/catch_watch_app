@@ -158,7 +158,7 @@ class _VideoContent extends StatelessWidget {
           provider.content.poster != null && provider.content.poster!.isNotEmpty
               ? Image.network(
                   provider.content.poster!,
-                  fit: BoxFit.cover,
+                  fit: BoxFit.fill,
                   errorBuilder: (_, _, _) => Container(color: Colors.grey[900]),
                 )
               : Container(color: Colors.grey[900]),
@@ -768,7 +768,7 @@ class _EpisodeSection extends StatelessWidget {
                                   : (episode.poster != null && episode.poster!.isNotEmpty)
                                       ? episode.poster!
                                       : '',
-                              fit: BoxFit.cover,
+                              fit: BoxFit.fill,
                               errorBuilder: (_, __, ___) => Container(color: AppColors.grey300),
                             ),
                             if (isPlaying)

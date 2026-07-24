@@ -52,7 +52,7 @@ class ContentRepository {
       if (response['success'] == true) {
         List<Content> tvShows = (response['dramas'] as List).map((e) {
           final content = Content.fromJson(e);
-          content.type = 'tvshow';
+          content.type = 'tvShow';
           return content;
         }).toList();
         return tvShows;
@@ -69,7 +69,7 @@ class ContentRepository {
       if (response['success'] == true) {
         List<Content> shortFilms = (response['shortFilms'] as List).map((e) {
           final content = Content.fromJson(e);
-          content.type = 'shortfilm';
+          content.type = 'shortFilm';
           return content;
         }).toList();
         return shortFilms;

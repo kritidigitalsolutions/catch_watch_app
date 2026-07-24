@@ -168,7 +168,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                   image: posterPath != null && File(posterPath).existsSync()
                       ? DecorationImage(
                           image: FileImage(File(posterPath)),
-                          fit: BoxFit.cover,
+                          fit: BoxFit.fill,
                         )
                       : null,
                 ),
