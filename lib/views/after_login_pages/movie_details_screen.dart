@@ -1127,7 +1127,7 @@ class _QualitySheet extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        q == 'Auto' ? provider.displayQuality : q,
+                        q,
                         style: text15(
                           color: isSelected ? AppColors.primary : Colors.white70,
                           fontWeight: isSelected

@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:http/http.dart' as http;
 
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
@@ -32,7 +31,6 @@ class ShortVideoPlayerScreen extends StatefulWidget {
 class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
   late final PageController _pageController;
   late int _currentIndex;
-  List<ReelModel> _localReels = [];
 
   @override
   void initState() {
@@ -40,9 +38,6 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
     
-    if (widget.initialReels != null) {
-      _localReels = widget.initialReels!;
-    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final reelsProvider = context.read<ReelsProvider>();
@@ -320,95 +315,15 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   VideoPlayerController? _controller;
   bool _hasStarted = false;
   bool _showPlayIcon = false;
-  String _selectedQuality = 'Auto';
-  Map<String, String> _availableQualities = {};
 
   @override
   void initState() {
     super.initState();
-    _setupQualities();
     _initializeVideo();
   }
 
-  void _setupQualities() async {
-    final url = widget.reel.videoUrl ?? '';
-    _availableQualities = {'Auto': url};
-
-    if (url.contains('.m3u8')) {
-      await _loadHlsQualities(url);
-    } else {
-      final qualities = ['1080p', '720p', '480p', '360p', '240p'];
-      for (var q in qualities) {
-        final qUrl = _applyQualityToUrl(url, q);
-        if (qUrl != url) {
-          _availableQualities[q] = qUrl;
-        }
-      }
-    }
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _loadHlsQualities(String masterUrl) async {
-    try {
-      final token = HiveService.getToken();
-      Map<String, String> headers = {'Referer': 'https://catchandwatch.com'};
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-      }
-
-      final response = await http.get(Uri.parse(masterUrl), headers: headers);
-      if (response.statusCode == 200) {
-        final lines = response.body.split('\n');
-        String? currentRes;
-        for (var line in lines) {
-          final trimmed = line.trim();
-          if (trimmed.contains('RESOLUTION=')) {
-            final match = RegExp(r'RESOLUTION=\d+x(\d+)').firstMatch(trimmed);
-            if (match != null) currentRes = '${match.group(1)}p';
-          } else if (trimmed.isNotEmpty && !trimmed.startsWith('#') && currentRes != null) {
-            String variantUrl = trimmed;
-            if (!variantUrl.startsWith('http')) {
-              final uri = Uri.parse(masterUrl);
-              final path = uri.path.substring(0, uri.path.lastIndexOf('/') + 1);
-              variantUrl = uri.replace(path: path + variantUrl).toString();
-            }
-            _availableQualities[currentRes] = variantUrl;
-            currentRes = null;
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('Error loading HLS for reel: $e');
-    }
-  }
-
-  String _applyQualityToUrl(String url, String quality) {
-    if (!url.startsWith('http')) return url;
-    final String q = quality.toLowerCase();
-    
-    final qualityFolderRegex = RegExp(r'/(1080p|720p|480p|360p|240p)/', caseSensitive: false);
-    final qualityTagRegex = RegExp(r'[_-](1080p|720p|480p|360p|240p)(\.mp4|\.m3u8)', caseSensitive: false);
-
-    if (quality == 'Auto') {
-      if (url.contains(qualityFolderRegex)) return url.replaceFirst(qualityFolderRegex, '/');
-      if (url.contains(qualityTagRegex)) {
-        final extMatch = qualityTagRegex.firstMatch(url);
-        if (extMatch != null) return url.replaceFirst(qualityTagRegex, extMatch.group(2)!);
-      }
-      return url;
-    }
-
-    if (url.contains(qualityFolderRegex)) return url.replaceFirst(qualityFolderRegex, '/$q/');
-    if (url.contains(qualityTagRegex)) return url.replaceFirst(qualityTagRegex, '_$q.mp4');
-    
-    if (url.contains('.mp4')) return url.replaceFirst('.mp4', '_$q.mp4');
-    if (url.contains('.m3u8')) return url.replaceFirst('.m3u8', '_$q.m3u8');
-
-    return url;
-  }
-
   Future<void> _initializeVideo() async {
-    final videoUrl = _availableQualities[_selectedQuality] ?? widget.reel.videoUrl ?? '';
+    final videoUrl = widget.reel.videoUrl ?? '';
     if (videoUrl.isEmpty) return;
 
     if (_controller != null) {
@@ -487,54 +402,6 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
     });
   }
 
-  Future<void> setQuality(String quality) async {
-    if (_selectedQuality == quality) return;
-    if (!_availableQualities.containsKey(quality)) return;
-
-    final currentPos = _controller?.value.position ?? Duration.zero;
-    final wasPlaying = _controller?.value.isPlaying ?? false;
-
-    setState(() {
-      _selectedQuality = quality;
-    });
-
-    await _initializeVideo();
-
-    if (_controller != null && mounted) {
-      await _controller!.seekTo(currentPos);
-      if (wasPlaying) {
-        _controller!.play();
-      }
-      setState(() {});
-    }
-  }
-
-  void _showQualityDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => SimpleDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        title: Text("Select Quality", style: text18(color: Colors.white, fontWeight: FontWeight.bold)),
-        children: _availableQualities.keys.map((q) {
-          return SimpleDialogOption(
-            onPressed: () {
-              setQuality(q);
-              Navigator.pop(context);
-            },
-            child: Row(
-              children: [
-                Text(q, style: text14(color: Colors.white)),
-                const Spacer(),
-                if (_selectedQuality == q)
-                  const Icon(Icons.check, color: AppColors.primary, size: 20),
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
   @override
   void dispose() {
     _controller?.dispose();
@@ -580,8 +447,6 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
               onLike: widget.onLike,
               onSave: widget.onSave,
               onComment: widget.onComment,
-              selectedQuality: _selectedQuality,
-              onQualityTap: () => _showQualityDialog(context),
             ),
           ),
           Positioned(
@@ -683,16 +548,12 @@ class _ShortActions extends StatelessWidget {
   final VoidCallback onLike;
   final VoidCallback onSave;
   final VoidCallback onComment;
-  final String selectedQuality;
-  final VoidCallback onQualityTap;
 
   const _ShortActions({
     required this.reel,
     required this.onLike,
     required this.onSave,
     required this.onComment,
-    required this.selectedQuality,
-    required this.onQualityTap,
   });
 
   bool get _isLiked => reel.userInteraction?.toUpperCase() == 'LIKE';
@@ -723,12 +584,6 @@ class _ShortActions extends StatelessWidget {
           label: reel.isBookmarked == true ? 'Saved' : 'Save',
           color: reel.isBookmarked == true ? Colors.amber : Colors.white,
           onTap: onSave,
-        ),
-        const SizedBox(height: 18),
-        _ActionButton(
-          icon: Icons.high_quality_rounded,
-          label: selectedQuality,
-          onTap: onQualityTap,
         ),
         const SizedBox(height: 18),
         _ActionButton(

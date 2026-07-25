@@ -576,9 +576,7 @@ class MovieDetailProvider extends ChangeNotifier {
     final qualities = ['1080p', '720p', '480p', '360p', '240p'];
     for (var q in qualities) {
       final qUrl = _applyQualityToUrl(url, q);
-      if (qUrl != url) {
-        _availableQualityUrls[q] = qUrl;
-      }
+      _availableQualityUrls[q] = qUrl;
     }
     _qualityOptions = _availableQualityUrls.keys.toList();
     // Sort

@@ -235,5 +235,12 @@ class ProfileProvider extends ChangeNotifier {
   void setTab(ProfileTab tab) {
     _activeTab = tab;
     notifyListeners();
+    
+    // Auto-refresh data when switching tabs
+    if (tab == ProfileTab.videos) {
+      fetchMyReels();
+    } else if (tab == ProfileTab.saved) {
+      fetchBookmarkedReels();
+    }
   }
 }

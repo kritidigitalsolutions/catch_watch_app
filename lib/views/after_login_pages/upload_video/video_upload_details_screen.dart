@@ -455,8 +455,9 @@ class _PublishButton extends StatelessWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Reel uploaded successfully!')),
                   );
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                } else if (provider.uploadError != null && context.mounted) {
+                  Navigator.of(context).pop();
+                }
+ else if (provider.uploadError != null && context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text(provider.uploadError!)),
                   );

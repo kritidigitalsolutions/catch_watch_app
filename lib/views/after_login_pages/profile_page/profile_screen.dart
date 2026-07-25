@@ -40,17 +40,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ProfileProvider>().fetchProfile();
+      
+      // Listen to page changes in HomeScreenProvider to refresh profile when navigating to it
+      final homeProvider = context.read<HomeScreenProvider>();
+      homeProvider.addListener(_homeProviderListener);
     });
-    _scrollController.addListener(() {
-      final collapsed = _scrollController.offset > _collapseThreshold;
-      if (collapsed != _isCollapsed) {
-        setState(() => _isCollapsed = collapsed);
-      }
-    });
+    _scrollController.addListener(_scrollListener);
+  }
+
+  void _homeProviderListener() {
+    final homeProvider = context.read<HomeScreenProvider>();
+    if (homeProvider.pageIndex == 4) { // 4 is the Profile tab index
+       context.read<ProfileProvider>().fetchProfile();
+    }
+  }
+
+  void _scrollListener() {
+    final collapsed = _scrollController.offset > _collapseThreshold;
+    if (collapsed != _isCollapsed) {
+      setState(() => _isCollapsed = collapsed);
+    }
   }
 
   @override
   void dispose() {
+    context.read<HomeScreenProvider>().removeListener(_homeProviderListener);
     _scrollController.dispose();
     super.dispose();
   }
@@ -64,34 +78,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
       body: Stack(
         children: [
           // ── Main scrollable content ──────────────────────────────────────
-          CustomScrollView(
-            controller: _scrollController,
-            slivers: [
-              // Full expanded orange header (no appbar title here)
-              SliverToBoxAdapter(child: _ExpandedHeader(provider: provider)),
+          RefreshIndicator(
+            onRefresh: () => provider.fetchProfile(),
+            color: AppColors.primary,
+            child: CustomScrollView(
+              controller: _scrollController,
+              slivers: [
+                // Full expanded orange header (no appbar title here)
+                SliverToBoxAdapter(child: _ExpandedHeader(provider: provider)),
 
-              // // Stats
-              // SliverToBoxAdapter(child: _buildStats(provider)),
+                // // Stats
+                // SliverToBoxAdapter(child: _buildStats(provider)),
 
-              // Tab row
-              SliverToBoxAdapter(child: _buildTabRow(provider)),
+                // Tab row
+                SliverToBoxAdapter(child: _buildTabRow(provider)),
 
-              // Divider
-              const SliverToBoxAdapter(
-                child: Divider(
-                  color: Color(0xFFF0F0F0),
-                  thickness: 1,
-                  height: 1,
+                // Divider
+                const SliverToBoxAdapter(
+                  child: Divider(
+                    color: Color(0xFFF0F0F0),
+                    thickness: 1,
+                    height: 1,
+                  ),
                 ),
-              ),
 
-              // Grid
-              _buildGrid(provider),
+                // Grid
+                _buildGrid(provider),
 
-              SliverToBoxAdapter(
-                child: SizedBox(height: MediaQuery.paddingOf(context).bottom + 80),
-              ),
-            ],
+                SliverToBoxAdapter(
+                  child: SizedBox(height: MediaQuery.paddingOf(context).bottom + 80),
+                ),
+              ],
+            ),
           ),
 
           // ── Collapsed sticky bar (only visible after scroll threshold) ───

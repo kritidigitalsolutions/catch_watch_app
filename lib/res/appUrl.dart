@@ -1,6 +1,6 @@
 class AppUrl {
-  static const String serverUrl = 'http://192.168.1.20:5000';
-  // static const String serverUrl = 'https://api.catchandwatch.com';
+  // static const String serverUrl = 'http://192.168.1.20:5000';
+  static const String serverUrl = 'https://api.catchandwatch.com';
   static const String baseUrl = '$serverUrl/api';
 
   // Auth Endpoints

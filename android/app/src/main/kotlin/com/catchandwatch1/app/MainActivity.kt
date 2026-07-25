@@ -1,4 +1,4 @@
-package com.catchwatch.app
+package com.catchandwatch1.app
 
 import android.view.WindowManager.LayoutParams
 import io.flutter.embedding.android.FlutterActivity

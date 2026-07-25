@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:182426744921:android:a8aaa984ecec4e0d605948",
+        "mobilesdk_app_id": "1:182426744921:android:2d301f03f29932a0605948",
         "android_client_info": {
-          "package_name": "com.catchwatch.app"
+          "package_name": "com.catchandwatch1.app"
         }
       },
       "oauth_client": [],
