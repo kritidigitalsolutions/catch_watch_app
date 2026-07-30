@@ -35,6 +35,7 @@ class ProfileProvider extends ChangeNotifier {
   List<ReelModel> _localDrafts = [];
   List<UserModel> _followersList = [];
   List<UserModel> _followingList = [];
+  final Set<String> _followingIds = {};
 
   UserModel? get user => _user;
   bool get isLoading => _isLoading;
@@ -47,9 +48,17 @@ class ProfileProvider extends ChangeNotifier {
   List<UserModel> get followersList => _followersList;
   List<UserModel> get followingList => _followingList;
 
+  bool isUserFollowed(String userId) => _followingIds.contains(userId);
+
   ProfileProvider() {
     _loadUserFromHive();
     _loadStatsFromCache();
+    // Fetch following list immediately if logged in to sync follow buttons globally
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (HiveService.isLogin()) {
+        fetchFollowing();
+      }
+    });
   }
 
   void _loadStatsFromCache() {
@@ -112,13 +121,15 @@ class ProfileProvider extends ChangeNotifier {
           await HiveService.saveUser(currentHiveUser);
         }
 
-        // Fetch reels, watchlist, and stats too
+        // Fetch following FIRST to populate _followingIds set correctly
+        await fetchFollowing();
+
+        // Fetch others
         await Future.wait([
           fetchMyReels(),
           fetchWatchlist(),
           fetchBookmarkedReels(),
           fetchFollowers(),
-          fetchFollowing(),
         ]);
 
         // Save to cache after fetching all
@@ -193,12 +204,29 @@ class ProfileProvider extends ChangeNotifier {
       final response = await InteractionRepository().getFollowers(targetId);
       if (response['success'] == true) {
         _followersList = (response['followers'] as List)
-            .map((e) => UserModel.fromJson(e))
+            .map((e) {
+              Map<String, dynamic> userData;
+              if (e is Map<String, dynamic>) {
+                if (e.containsKey('user') && e['user'] is Map) {
+                  userData = Map<String, dynamic>.from(e['user']);
+                } else if (e.containsKey('follower') && e['follower'] is Map) {
+                  userData = Map<String, dynamic>.from(e['follower']);
+                } else {
+                  userData = e;
+                }
+              } else {
+                return UserModel();
+              }
+              final u = UserModel.fromJson(userData);
+              if (u.id != null) u.isFollowing = _followingIds.contains(u.id);
+              return u;
+            })
             .toList();
         
         // Sync count if it's the current user
         if (targetId == _user?.id) {
           _user?.followersCount = _followersList.length;
+          notifyListeners();
         }
       }
     } catch (e) {
@@ -220,12 +248,35 @@ class ProfileProvider extends ChangeNotifier {
       final response = await InteractionRepository().getFollowing(targetId);
       if (response['success'] == true) {
         _followingList = (response['following'] as List)
-            .map((e) => UserModel.fromJson(e))
+            .map((e) {
+              // Handle both direct user objects and follow objects containing user field
+              Map<String, dynamic> userData;
+              if (e is Map<String, dynamic>) {
+                if (e.containsKey('user') && e['user'] is Map) {
+                  userData = Map<String, dynamic>.from(e['user']);
+                } else if (e.containsKey('following') && e['following'] is Map) {
+                  userData = Map<String, dynamic>.from(e['following']);
+                } else {
+                  userData = e;
+                }
+              } else {
+                return UserModel(); // Should not happen
+              }
+              
+              final u = UserModel.fromJson(userData);
+              if (u.id != null) u.isFollowing = _followingIds.contains(u.id);
+              return u;
+            })
             .toList();
 
-        // Sync count if it's the current user
+        // Sync count and followingIds set if it's the current user
         if (targetId == _user?.id) {
           _user?.followingCount = _followingList.length;
+          _followingIds.clear();
+          for (var u in _followingList) {
+            if (u.id != null) _followingIds.add(u.id!);
+          }
+          notifyListeners();
         }
       }
     } catch (e) {
@@ -237,45 +288,66 @@ class ProfileProvider extends ChangeNotifier {
   }
 
   Future<void> toggleFollow(String userId) async {
-    // Update locally first for followers/following list
+    final bool wasFollowing = _followingIds.contains(userId);
+    
+    // Update locally first
+    if (wasFollowing) {
+      _followingIds.remove(userId);
+      _user?.followingCount = (_user?.followingCount ?? 1) - 1;
+    } else {
+      _followingIds.add(userId);
+      _user?.followingCount = (_user?.followingCount ?? 0) + 1;
+    }
+
+    // Sync followers/following list properties (legacy support)
     for (var u in _followersList) {
-      if (u.id == userId) u.isFollowing = !(u.isFollowing ?? false);
+      if (u.id == userId) u.isFollowing = !wasFollowing;
     }
     for (var u in _followingList) {
-      if (u.id == userId) u.isFollowing = !(u.isFollowing ?? false);
+      if (u.id == userId) u.isFollowing = !wasFollowing;
     }
     notifyListeners();
 
     try {
       final response = await InteractionRepository().toggleFollow(userId);
       if (response['success'] == true) {
-        // Sync state from response if available
-        if (response['followersCount'] != null) {
-          // If we're toggling someone ELSE, but the response gives counts for US,
-          // we need to be careful. Usually these APIs return counts for the target user.
-          // But if it's "followersCount" in a global toggle, it might be for the current user.
-          // Let's refresh profile just to be safe as previously implemented, 
-          // but also update current counts if returned.
+        // Optionally sync with exact count from server
+        if (response['followingCount'] != null) {
+          _user?.followingCount = response['followingCount'];
         }
-        fetchProfile();
+        // fetchProfile(); // Too heavy to call every time, but good for total sync
       } else {
         // Rollback local update on failure
+        if (wasFollowing) {
+          _followingIds.add(userId);
+          _user?.followingCount = (_user?.followingCount ?? 0) + 1;
+        } else {
+          _followingIds.remove(userId);
+          _user?.followingCount = (_user?.followingCount ?? 1) - 1;
+        }
         for (var u in _followersList) {
-          if (u.id == userId) u.isFollowing = !(u.isFollowing ?? false);
+          if (u.id == userId) u.isFollowing = wasFollowing;
         }
         for (var u in _followingList) {
-          if (u.id == userId) u.isFollowing = !(u.isFollowing ?? false);
+          if (u.id == userId) u.isFollowing = wasFollowing;
         }
         notifyListeners();
       }
     } catch (e) {
       debugPrint('Error toggling follow: $e');
       // Rollback
+      if (wasFollowing) {
+        _followingIds.add(userId);
+        _user?.followingCount = (_user?.followingCount ?? 0) + 1;
+      } else {
+        _followingIds.remove(userId);
+        _user?.followingCount = (_user?.followingCount ?? 1) - 1;
+      }
       for (var u in _followersList) {
-        if (u.id == userId) u.isFollowing = !(u.isFollowing ?? false);
+        if (u.id == userId) u.isFollowing = wasFollowing;
       }
       for (var u in _followingList) {
-        if (u.id == userId) u.isFollowing = !(u.isFollowing ?? false);
+        if (u.id == userId) u.isFollowing = wasFollowing;
       }
       notifyListeners();
     }
@@ -390,6 +462,22 @@ class ProfileProvider extends ChangeNotifier {
       fetchMyReels();
     } else if (tab == ProfileTab.saved) {
       fetchBookmarkedReels();
+    }
+  }
+
+  void syncFollowStatus(String userId, bool isFollowing) {
+    if (isFollowing) {
+      if (!_followingIds.contains(userId)) {
+        _followingIds.add(userId);
+        _user?.followingCount = (_user?.followingCount ?? 0) + 1;
+        notifyListeners();
+      }
+    } else {
+      if (_followingIds.contains(userId)) {
+        _followingIds.remove(userId);
+        _user?.followingCount = (_user?.followingCount ?? 1) - 1;
+        notifyListeners();
+      }
     }
   }
 }

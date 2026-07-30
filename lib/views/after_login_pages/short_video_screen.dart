@@ -12,6 +12,7 @@ import 'package:video_player/video_player.dart';
 import '../../utils/hive_service/hive_service.dart';
 import '../../res/appUrl.dart' show AppUrl;
 import '../../utils/text_style.dart';
+import '../../view_model/after_login_provider/profile_provider.dart';
 
 class ShortVideoPlayerScreen extends StatefulWidget {
   final bool isVisible;
@@ -749,12 +750,18 @@ class _ShortInfo extends StatelessWidget {
             ),
             if (!isSelf && reel.user?.id != null) ...[
               const SizedBox(width: 12),
-              Selector<ReelsProvider, bool>(
+              Selector<ProfileProvider, bool>(
                 selector: (_, p) => p.isUserFollowed(reel.user!.id!),
                 builder: (context, isFollowing, _) {
                   return GestureDetector(
-                    onTap: () {
-                      reelsProvider.toggleFollow(reel.user!.id!, reel: reel);
+                    onTap: () async {
+                      await reelsProvider.toggleFollow(reel.user!.id!, reel: reel);
+                      if (context.mounted) {
+                        context.read<ProfileProvider>().syncFollowStatus(
+                          reel.user!.id!, 
+                          reelsProvider.isUserFollowed(reel.user!.id!),
+                        );
+                      }
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),

@@ -79,55 +79,60 @@ class _FollowersFollowingScreenState extends State<FollowersFollowingScreen> {
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemBuilder: (context, index) {
                 final user = users[index];
-                return ListTile(
-                  onTap: () {
-                    if (user.username != null) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => UserProfileScreen(username: user.username!),
+                return Selector<ProfileProvider, bool>(
+                  selector: (_, p) => p.isUserFollowed(user.id ?? ''),
+                  builder: (context, isFollowing, _) {
+                    return ListTile(
+                      onTap: () {
+                        if (user.username != null) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => UserProfileScreen(username: user.username!),
+                            ),
+                          );
+                        }
+                      },
+                      leading: CircleAvatar(
+                        radius: 25,
+                        backgroundImage: user.profileImage != null && user.profileImage!.isNotEmpty
+                            ? NetworkImage(user.profileImage!)
+                            : null,
+                        backgroundColor: AppColors.grey200,
+                        child: user.profileImage == null || user.profileImage!.isEmpty
+                            ? const Icon(Icons.person, color: Colors.grey)
+                            : null,
+                      ),
+                      title: Text(user.name ?? 'Unknown', style: text16(fontWeight: FontWeight.w600)),
+                      subtitle: Text(user.username ?? '', style: text14(color: Colors.grey)),
+                      trailing: ElevatedButton(
+                        onPressed: () async {
+                           await provider.toggleFollow(user.id!);
+                           if (context.mounted) {
+                             context.read<ReelsProvider>().updateFollowStatus(
+                               user.id!, 
+                               provider.isUserFollowed(user.id!),
+                             );
+                           }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isFollowing 
+                              ? Colors.grey.shade200 
+                              : AppColors.primary,
+                          foregroundColor: isFollowing 
+                              ? Colors.black 
+                              : Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                         ),
-                      );
-                    }
+                        child: Text(
+                          isFollowing ? "Following" : "Follow", 
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)
+                        ),
+                      ),
+                    );
                   },
-                  leading: CircleAvatar(
-                    radius: 25,
-                    backgroundImage: user.profileImage != null && user.profileImage!.isNotEmpty
-                        ? NetworkImage(user.profileImage!)
-                        : null,
-                    backgroundColor: AppColors.grey200,
-                    child: user.profileImage == null || user.profileImage!.isEmpty
-                        ? const Icon(Icons.person, color: Colors.grey)
-                        : null,
-                  ),
-                  title: Text(user.name ?? 'Unknown', style: text16(fontWeight: FontWeight.w600)),
-                  subtitle: Text(user.username ?? '', style: text14(color: Colors.grey)),
-                  trailing: ElevatedButton(
-                    onPressed: () async {
-                       await provider.toggleFollow(user.id!);
-                       if (context.mounted) {
-                         context.read<ReelsProvider>().updateFollowStatus(
-                           user.id!, 
-                           user.isFollowing == true,
-                         );
-                       }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: user.isFollowing == true 
-                          ? Colors.grey.shade200 
-                          : AppColors.primary,
-                      foregroundColor: user.isFollowing == true 
-                          ? Colors.black 
-                          : Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                    ),
-                    child: Text(
-                      user.isFollowing == true ? "Following" : "Follow", 
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)
-                    ),
-                  ),
                 );
               },
             ),

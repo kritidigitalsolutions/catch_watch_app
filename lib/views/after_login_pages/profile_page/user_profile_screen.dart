@@ -8,6 +8,8 @@ import 'package:catch_watch/views/after_login_pages/profile_page/followers_follo
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../view_model/after_login_provider/profile_provider.dart';
+
 class UserProfileScreen extends StatefulWidget {
   final String username;
   const UserProfileScreen({super.key, required this.username});
@@ -343,18 +345,28 @@ class _ExpandedHeader extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: _actionButton(
-                        context,
-                        user.isFollowing == true ? 'Following' : 'Follow',
-                        user.isFollowing == true ? Colors.white.withOpacity(0.2) : Colors.white,
-                        user.isFollowing == true ? Colors.white : const Color(0xFFFF5F00),
-                        () {
-                          provider.toggleFollow(
-                            user.id!,
-                            onSuccess: () {
-                              context.read<ReelsProvider>().updateFollowStatus(
+                      child: Selector<ProfileProvider, bool>(
+                        selector: (_, p) => p.isUserFollowed(user.id!),
+                        builder: (context, isFollowing, _) {
+                          return _actionButton(
+                            context,
+                            isFollowing ? 'Following' : 'Follow',
+                            isFollowing ? Colors.white.withOpacity(0.2) : Colors.white,
+                            isFollowing ? Colors.white : const Color(0xFFFF5F00),
+                            () {
+                              provider.toggleFollow(
                                 user.id!,
-                                provider.user?.isFollowing ?? false,
+                                onSuccess: () {
+                                  final actualFollowing = provider.user?.isFollowing ?? false;
+                                  context.read<ReelsProvider>().updateFollowStatus(
+                                    user.id!,
+                                    actualFollowing,
+                                  );
+                                  context.read<ProfileProvider>().syncFollowStatus(
+                                    user.id!,
+                                    actualFollowing,
+                                  );
+                                },
                               );
                             },
                           );
@@ -525,36 +537,46 @@ class _CollapsedBar extends StatelessWidget {
               ],
             ),
           ),
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () {
-                  provider.toggleFollow(
-                    user.id!,
-                    onSuccess: () {
-                      context.read<ReelsProvider>().updateFollowStatus(
+          Selector<ProfileProvider, bool>(
+            selector: (_, p) => p.isUserFollowed(user.id!),
+            builder: (context, isFollowing, _) {
+              return Container(
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      provider.toggleFollow(
                         user.id!,
-                        provider.user?.isFollowing ?? false,
+                        onSuccess: () {
+                          final actualFollowing = provider.user?.isFollowing ?? false;
+                          context.read<ReelsProvider>().updateFollowStatus(
+                            user.id!,
+                            actualFollowing,
+                          );
+                          context.read<ProfileProvider>().syncFollowStatus(
+                            user.id!,
+                            actualFollowing,
+                          );
+                        },
                       );
                     },
-                  );
-                },
-                borderRadius: BorderRadius.circular(20),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  child: Text(
-                    user.isFollowing == true ? 'Following' : 'Follow',
-                    style: text11(color: Colors.white, fontWeight: FontWeight.w700),
+                    borderRadius: BorderRadius.circular(20),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      child: Text(
+                        isFollowing ? 'Following' : 'Follow',
+                        style: text11(color: Colors.white, fontWeight: FontWeight.w700),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ],
       ),
