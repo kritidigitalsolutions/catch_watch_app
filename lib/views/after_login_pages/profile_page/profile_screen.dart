@@ -11,6 +11,8 @@ import 'package:catch_watch/views/after_login_pages/profile_page/menu_screen.dar
 import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
 import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/followers_following_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/dashboard_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/wallet_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
@@ -257,25 +259,46 @@ class _ExpandedHeader extends StatelessWidget {
             ),
           ),
 
-          // ── Menu button top-right (always visible) ──
+          // ── Dashboard & Menu button top-right ──
           Positioned(
             top: 0,
             right: 16,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: CustomIconButton(
-                icon: Icons.menu_rounded,
-                color: AppColors.white,
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => MenuScreen()),
-                  );
-                },
-              ),
+            child: Row(
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: CustomIconButton(
+                    icon: Icons.dashboard_rounded,
+                    color: AppColors.white,
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const DashboardScreen()),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: CustomIconButton(
+                    icon: Icons.menu_rounded,
+                    color: AppColors.white,
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => MenuScreen()),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
 
@@ -331,11 +354,41 @@ class _ExpandedHeader extends StatelessWidget {
                           ),
                           Text(provider.handle,
                               style: text14(color: Colors.white70)),
+                          const SizedBox(height: 8),
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const WalletScreen()),
+                              );
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: Colors.white.withOpacity(0.3)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.stars_rounded, color: AppColors.yellow, size: 14),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    "${provider.totalPoints} Points",
+                                    style: text11(color: Colors.white, fontWeight: FontWeight.bold),
+                                  ),
+                                  const Icon(Icons.chevron_right_rounded, color: Colors.white70, size: 16),
+                                ],
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),
                   ],
                 ),
+                const SizedBox(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
