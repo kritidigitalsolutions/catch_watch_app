@@ -30,7 +30,10 @@ class ReelsProvider extends ChangeNotifier {
 
   final Set<String> _likedIds = {};
   final Set<String> _bookmarkedIds = {};
+  final Set<String> _followingIds = {};
   bool _hasFetchedInitialInteractions = false;
+
+  bool isUserFollowed(String userId) => _followingIds.contains(userId);
 
   Future<void> applyInteractionsTo(List<ReelModel> reelList) async {
     if (!_hasFetchedInitialInteractions) {
@@ -50,6 +53,16 @@ class ReelsProvider extends ChangeNotifier {
           reel.isBookmarked = true;
         }
       }
+      if (reel.user?.id != null) {
+        if (_followingIds.contains(reel.user!.id)) {
+          reel.user!.isFollowing = true;
+        } else if (reel.user!.isFollowing == true) {
+          // If the reel data already says we are following, trust it and update local set
+          _followingIds.add(reel.user!.id!);
+        } else {
+          reel.user!.isFollowing = false;
+        }
+      }
     }
   }
 
@@ -61,8 +74,8 @@ class ReelsProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Fetch bookmarks once to ensure we have the state
-      if (!_hasFetchedInitialInteractions) {
+      // Re-fetch interactions on force refresh to sync following state
+      if (forceRefresh || !_hasFetchedInitialInteractions) {
         await _fetchInitialInteractions();
       }
 
@@ -102,16 +115,42 @@ class ReelsProvider extends ChangeNotifier {
       final localLikes = HiveService.getLikedIds();
       _likedIds.addAll(localLikes);
 
-      final response = await _interactionRepository.getBookmarks();
-      if (response['success'] == true) {
-        final bookmarks = response['bookmarks'] as List;
+      // Fetch Bookmarks
+      final bookmarkResponse = await _interactionRepository.getBookmarks();
+      if (bookmarkResponse['success'] == true) {
+        _bookmarkedIds.clear();
+        final bookmarks = bookmarkResponse['bookmarks'] as List;
         for (var b in bookmarks) {
           if (b['contentType'] == 'reel' && b['contentId'] != null) {
             _bookmarkedIds.add(b['contentId'].toString());
           }
         }
-        _hasFetchedInitialInteractions = true;
       }
+
+      // Fetch Following for current user to sync follow buttons
+      final currentUser = HiveService.getUser();
+      if (currentUser?.sId != null) {
+        final followingResponse = await _interactionRepository.getFollowing(currentUser!.sId!);
+        if (followingResponse['success'] == true) {
+          _followingIds.clear();
+          final following = followingResponse['following'] as List;
+          for (var f in following) {
+            if (f == null) continue;
+            
+            // Handle plain string IDs or user objects
+            String? fId;
+            if (f is String) {
+              fId = f;
+            } else if (f is Map) {
+              fId = f['_id'] ?? f['id'] ?? f['user']?['_id'] ?? f['user']?['id'] ?? f['following']?['_id'] ?? f['following']?['id'];
+            }
+            
+            if (fId != null) _followingIds.add(fId.toString());
+          }
+        }
+      }
+
+      _hasFetchedInitialInteractions = true;
     } catch (e) {
       debugPrint('Error fetching initial interactions: $e');
     }
@@ -167,17 +206,12 @@ class ReelsProvider extends ChangeNotifier {
   }
 
   Future<void> toggleLike(String reelId, {ReelModel? reel}) async {
-    // Find all instances of this reel in our provider and the one passed from UI
-    final List<ReelModel> targetReels = [];
+    // Find all unique instances of this reel in our provider and the one passed from UI
+    final Set<ReelModel> targetReels = {};
     if (reel != null) targetReels.add(reel);
     
     final mainIndex = _reels.indexWhere((r) => r.id == reelId);
     if (mainIndex != -1) targetReels.add(_reels[mainIndex]);
-
-    if (targetReels.isEmpty && !_likedIds.contains(reelId)) {
-      // If we don't have the object, we can't update counts optimistically
-      // but we still proceed to toggle the API
-    }
 
     final bool wasLiked = _likedIds.contains(reelId);
     
@@ -247,7 +281,7 @@ class ReelsProvider extends ChangeNotifier {
   }
 
   Future<void> toggleBookmark(String reelId, {ReelModel? reel}) async {
-    final List<ReelModel> targetReels = [];
+    final Set<ReelModel> targetReels = {};
     if (reel != null) targetReels.add(reel);
     
     final mainIndex = _reels.indexWhere((r) => r.id == reelId);
@@ -342,5 +376,52 @@ class ReelsProvider extends ChangeNotifier {
       debugPrint('Error posting comment: $e');
     }
     return false;
+  }
+
+  Future<void> toggleFollow(String userId, {ReelModel? reel}) async {
+    final bool wasFollowing = _followingIds.contains(userId);
+
+    _updateLocalFollowState(userId, !wasFollowing, reel: reel);
+
+    try {
+      final response = await _interactionRepository.toggleFollow(userId);
+      if (response['success'] == true) {
+        final bool actualFollowing = response['isFollowing'] ?? !wasFollowing;
+        _updateLocalFollowState(userId, actualFollowing, reel: reel);
+      } else {
+        _rollbackFollow(userId, wasFollowing, reel);
+      }
+    } catch (e) {
+      debugPrint('Error toggling follow: $e');
+      _rollbackFollow(userId, wasFollowing, reel);
+    }
+  }
+
+  void _updateLocalFollowState(String userId, bool isFollowing, {ReelModel? reel}) {
+    if (isFollowing) {
+      _followingIds.add(userId);
+    } else {
+      _followingIds.remove(userId);
+    }
+
+    // Apply to all reels by this user in the current list
+    for (var r in _reels) {
+      if (r.user?.id == userId) {
+        r.user?.isFollowing = isFollowing;
+      }
+    }
+    // Also update the specific reel instance passed from UI
+    if (reel?.user?.id == userId) {
+      reel!.user!.isFollowing = isFollowing;
+    }
+    notifyListeners();
+  }
+
+  void updateFollowStatus(String userId, bool isFollowing) {
+    _updateLocalFollowState(userId, isFollowing);
+  }
+
+  void _rollbackFollow(String userId, bool wasFollowing, ReelModel? reel) {
+    _updateLocalFollowState(userId, wasFollowing, reel: reel);
   }
 }

@@ -4,6 +4,7 @@ import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/share_helper.dart';
 import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/user_profile_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
@@ -257,6 +258,40 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
       return const Scaffold(
         backgroundColor: Colors.black,
         body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+      );
+    }
+
+    if (reels.isEmpty && provider.error != null) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.wifi_off_rounded, size: 64, color: Colors.white.withOpacity(0.5)),
+                const SizedBox(height: 24),
+                Text(
+                  provider.error!,
+                  textAlign: TextAlign.center,
+                  style: text18(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 32),
+                ElevatedButton(
+                  onPressed: () => provider.fetchReelsFeed(forceRefresh: true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  ),
+                  child: const Text('Try Again', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
@@ -570,13 +605,13 @@ class _ShortActions extends StatelessWidget {
           color: _isLiked ? AppColors.primary : Colors.white,
           onTap: onLike,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 12),
         _ActionButton(
           icon: Icons.mode_comment_outlined,
           label: _compactCount(reel.commentsCount ?? 0),
           onTap: onComment,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 12),
         _ActionButton(
           icon: reel.isBookmarked == true 
               ? Icons.bookmark_rounded 
@@ -585,7 +620,7 @@ class _ShortActions extends StatelessWidget {
           color: reel.isBookmarked == true ? Colors.amber : Colors.white,
           onTap: onSave,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 12),
         _ActionButton(
           icon: Icons.share_rounded,
           label: 'Share',
@@ -657,33 +692,89 @@ class _ShortInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final reelsProvider = context.read<ReelsProvider>();
+    final currentUser = HiveService.getUser();
+    final bool isSelf = currentUser?.sId == reel.user?.id;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Row(
           children: [
-            CircleAvatar(
-              radius: 22,
-              backgroundImage: reel.user?.profileImage != null && reel.user!.profileImage!.isNotEmpty
-                  ? NetworkImage(reel.user!.profileImage!)
-                  : null,
-              backgroundColor: AppColors.primary,
-              child: reel.user?.profileImage == null || reel.user!.profileImage!.isEmpty
-                  ? Text(
-                      reel.user?.name?[0] ?? '?',
-                      style: text18(color: Colors.white, fontWeight: FontWeight.w800),
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 10),
-            Flexible(
-              child: Text(
-                reel.user?.username ?? '@unknown',
-                overflow: TextOverflow.ellipsis,
-                style: text16(color: Colors.white, fontWeight: FontWeight.w800),
+            GestureDetector(
+              onTap: () {
+                if (reel.user?.username != null) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => UserProfileScreen(username: reel.user!.username!),
+                    ),
+                  );
+                }
+              },
+              child: CircleAvatar(
+                radius: 20,
+                backgroundImage: reel.user?.profileImage != null && reel.user!.profileImage!.isNotEmpty
+                    ? NetworkImage(reel.user!.profileImage!)
+                    : null,
+                backgroundColor: AppColors.primary,
+                child: reel.user?.profileImage == null || reel.user!.profileImage!.isEmpty
+                    ? Text(
+                        reel.user?.name?[0] ?? '?',
+                        style: text16(color: Colors.white, fontWeight: FontWeight.w800),
+                      )
+                    : null,
               ),
             ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: GestureDetector(
+                onTap: () {
+                  if (reel.user?.username != null) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => UserProfileScreen(username: reel.user!.username!),
+                      ),
+                    );
+                  }
+                },
+                child: Text(
+                  reel.user?.username ?? '@unknown',
+                  overflow: TextOverflow.ellipsis,
+                  style: text14(color: Colors.white, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+            if (!isSelf && reel.user?.id != null) ...[
+              const SizedBox(width: 12),
+              Selector<ReelsProvider, bool>(
+                selector: (_, p) => p.isUserFollowed(reel.user!.id!),
+                builder: (context, isFollowing, _) {
+                  return GestureDetector(
+                    onTap: () {
+                      reelsProvider.toggleFollow(reel.user!.id!, reel: reel);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: isFollowing ? Colors.white.withOpacity(0.5) : Colors.white,
+                          width: 1.2,
+                        ),
+                        color: isFollowing ? Colors.white.withOpacity(0.12) : AppColors.primary.withOpacity(0.9),
+                      ),
+                      child: Text(
+                        isFollowing ? 'Following' : 'Follow',
+                        style: text11(color: Colors.white, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
           ],
         ),
         const SizedBox(height: 12),

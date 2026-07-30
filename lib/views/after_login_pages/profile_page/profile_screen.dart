@@ -10,6 +10,7 @@ import 'package:catch_watch/views/after_login_pages/profile_page/edit_profile_sc
 import 'package:catch_watch/views/after_login_pages/profile_page/menu_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
 import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/followers_following_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
@@ -128,7 +129,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildTabRow(ProfileProvider provider) {
     final tabs = [
-      (ProfileTab.videos, Icons.play_circle_outline_rounded, 'VIDEOS'),
+      (ProfileTab.videos, Icons.play_circle_outline_rounded, 'POSTS'),
       // (ProfileTab.cuts, Icons.cut_rounded, 'CUTS'),
       (ProfileTab.saved, Icons.bookmark_border_rounded, 'SAVED'),
     ];
@@ -315,33 +316,56 @@ class _ExpandedHeader extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            provider.name,
-                            style: text20(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w900),
+                          Row(
+                            children: [
+                              Text(
+                                provider.name,
+                                style: text20(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w900),
+                              ),
+                              const SizedBox(width: 6),
+                              const Icon(Icons.verified_rounded, 
+                                  color: Colors.blue, size: 20),
+                            ],
                           ),
                           Text(provider.handle,
                               style: text14(color: Colors.white70)),
-                          const SizedBox(height: 12),
-                          _pill(context, Icons.edit_rounded, 'Edit Profile'),
                         ],
                       ),
                     ),
                   ],
                 ),
-                // const SizedBox(height: 24),
-                // // Stats Row
-                // Row(
-                //   mainAxisAlignment: MainAxisAlignment.spaceAround,
-                //   children: [
-                //     _statItem(provider.videosCount, 'Videos'),
-                //     _statDivider(),
-                //     _statItem(provider.followers, 'Followers'),
-                //     _statDivider(),
-                //     _statItem(provider.following, 'Following'),
-                //   ],
-                // ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _statItem(context, provider.videosCount, 'Videos', null),
+                    _statDivider(),
+                    _statItem(context, provider.followers, 'Followers', () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const FollowersFollowingScreen(
+                            title: 'Followers',
+                            isFollowers: true,
+                          ),
+                        ),
+                      );
+                    }),
+                    _statDivider(),
+                    _statItem(context, provider.following, 'Following', () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const FollowersFollowingScreen(
+                            title: 'Following',
+                            isFollowers: false,
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ),
               ],
             ),
           ),
@@ -350,18 +374,21 @@ class _ExpandedHeader extends StatelessWidget {
     );
   }
 
-  Widget _statItem(String count, String label) {
-    return Column(
-      children: [
-        Text(
-          count,
-          style: text18(color: Colors.white, fontWeight: FontWeight.w800),
-        ),
-        Text(
-          label,
-          style: text12(color: Colors.white70, fontWeight: FontWeight.w500),
-        ),
-      ],
+  Widget _statItem(BuildContext context, String count, String label, VoidCallback? onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Text(
+            count,
+            style: text18(color: Colors.white, fontWeight: FontWeight.w800),
+          ),
+          Text(
+            label,
+            style: text12(color: Colors.white70, fontWeight: FontWeight.w500),
+          ),
+        ],
+      ),
     );
   }
 
@@ -370,45 +397,6 @@ class _ExpandedHeader extends StatelessWidget {
       height: 24,
       width: 1,
       color: Colors.white24,
-    );
-  }
-
-  Widget _pill(BuildContext context, IconData icon, String label) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => EditProfileScreen()),
-            );
-          },
-          borderRadius: BorderRadius.circular(20),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, color: Colors.white, size: 14),
-                const SizedBox(width: 5),
-                Text(
-                  label,
-                  style: text12(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -483,64 +471,26 @@ class _CollapsedBar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  provider.name,
-                  style: text14(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      provider.name,
+                      style: text14(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.verified_rounded, 
+                        color: Colors.blue, size: 14),
+                  ],
                 ),
-                // Text(
-                //   '${provider.followers} Followers • ${provider.following} Following',
-                //   style: text11(color: Colors.white70),
-                // ),
+                Text(
+                  '${provider.followers} Followers • ${provider.following} Following',
+                  style: text11(color: Colors.white70),
+                ),
                 Text(provider.handle, style: text11(color: Colors.white70)),
               ],
-            ),
-          ),
-
-          // Edit pill
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => EditProfileScreen()),
-                  );
-                },
-                borderRadius: BorderRadius.circular(20),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.edit_rounded,
-                        color: Colors.white,
-                        size: 13,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Edit',
-                        style: text11(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
             ),
           ),
 

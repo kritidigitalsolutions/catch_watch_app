@@ -16,6 +16,7 @@ class UserModel {
   int? followersCount;
   int? followingCount;
   int? reelsCount;
+  bool? isFollowing;
   String? createdAt;
   String? updatedAt;
 
@@ -35,6 +36,7 @@ class UserModel {
     this.followersCount,
     this.followingCount,
     this.reelsCount,
+    this.isFollowing,
     this.createdAt,
     this.updatedAt,
   });
@@ -51,7 +53,14 @@ class UserModel {
       }
       return '${AppUrl.serverUrl}/$url';
     }
-    
+
+    int? parseInt(dynamic value) {
+      if (value == null) return null;
+      if (value is int) return value;
+      if (value is String) return int.tryParse(value);
+      return null;
+    }
+
     profileImage = fixUrl(json['profileImage']);
     bio = json['bio'];
     genres = json['genres'] != null ? List<String>.from(json['genres']) : null;
@@ -61,9 +70,10 @@ class UserModel {
     status = json['status'];
     fcmToken = json['fcmToken'];
     username = json['username'];
-    followersCount = json['followersCount'];
-    followingCount = json['followingCount'];
-    reelsCount = json['reelsCount'];
+    followersCount = parseInt(json['followersCount'] ?? json['followers']);
+    followingCount = parseInt(json['followingCount'] ?? json['following']);
+    reelsCount = parseInt(json['reelsCount'] ?? json['postsCount'] ?? json['totalReels']);
+    isFollowing = json['isFollowing'] ?? false;
     createdAt = json['createdAt'];
     updatedAt = json['updatedAt'];
   }
@@ -85,6 +95,7 @@ class UserModel {
     data['followersCount'] = followersCount;
     data['followingCount'] = followingCount;
     data['reelsCount'] = reelsCount;
+    data['isFollowing'] = isFollowing;
     data['createdAt'] = createdAt;
     data['updatedAt'] = updatedAt;
     return data;

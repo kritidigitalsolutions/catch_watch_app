@@ -3,6 +3,7 @@ import 'package:catch_watch/utils/text_style.dart';
 import 'package:catch_watch/view_model/after_login_provider/video_upload_provider.dart';
 import 'package:catch_watch/views/after_login_pages/upload_video/video_upload_details_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 /// Wrap this screen in its own provider so the same provider instance
@@ -127,45 +128,74 @@ class UploadScreen extends StatelessWidget {
 class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    final provider = context.read<VideoUploadProvider>();
+
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.1),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(
-            Icons.cloud_upload_outlined,
-            size: 80,
-            color: AppColors.primary,
-          ),
-        ),
-        const SizedBox(height: 24),
-        Text('Select your video', style: text24(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
         Text(
-          'MP4 · MOV · Max 100 MB',
-          style: text15(color: AppColors.textSecondary),
+          'Create a Reel',
+          style: text24(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 32),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-          decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: AppColors.primary.withOpacity(0.3)),
-          ),
-          child: Text(
-            'Tap to browse gallery',
-            style: text14(
-              color: AppColors.primary,
-              fontWeight: FontWeight.w500,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _OptionCard(
+              icon: Icons.videocam_rounded,
+              label: 'Shoot Video',
+              onTap: () => provider.pickVideo(source: ImageSource.camera),
             ),
-          ),
+            _OptionCard(
+              icon: Icons.photo_library_rounded,
+              label: 'From Gallery',
+              onTap: () => provider.pickVideo(source: ImageSource.gallery),
+            ),
+          ],
+        ),
+        const SizedBox(height: 32),
+        Text(
+          'MP4 · MOV · Max 100 MB',
+          style: text13(color: AppColors.textSecondary),
         ),
       ],
+    );
+  }
+}
+
+class _OptionCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _OptionCard({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+            ),
+            child: Icon(icon, size: 40, color: AppColors.primary),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            label,
+            style: text14(fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -180,7 +210,7 @@ class _PickingIndicator extends StatelessWidget {
       children: [
         const CircularProgressIndicator(color: AppColors.primary),
         const SizedBox(height: 20),
-        Text('Opening gallery…', style: text15(color: AppColors.textSecondary)),
+        Text('Opening…', style: text15(color: AppColors.textSecondary)),
       ],
     );
   }

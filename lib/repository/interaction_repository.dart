@@ -13,6 +13,30 @@ class InteractionRepository {
     }
   }
 
+  Future<dynamic> followUser(String userId) async {
+    try {
+      return await _apiServices.postApi(AppUrl.followUser(userId), {});
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> unfollowUser(String userId) async {
+    try {
+      return await _apiServices.postApi(AppUrl.unfollowUser(userId), {});
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> getFollowStatus(String userId) async {
+    try {
+      return await _apiServices.getApi(AppUrl.getFollowStatus(userId));
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<dynamic> toggleLike(String contentId) async {
     try {
       return await _apiServices.postApi(AppUrl.toggleLike(contentId), {});
@@ -40,6 +64,22 @@ class InteractionRepository {
   Future<dynamic> getBookmarks() async {
     try {
       return await _apiServices.getApi(AppUrl.getBookmarks);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> getFollowers(String userId) async {
+    try {
+      return await _apiServices.getApi(AppUrl.getFollowers(userId));
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> getFollowing(String userId) async {
+    try {
+      return await _apiServices.getApi(AppUrl.getFollowing(userId));
     } catch (e) {
       rethrow;
     }

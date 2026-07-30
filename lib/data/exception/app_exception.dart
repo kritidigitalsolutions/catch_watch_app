@@ -6,7 +6,7 @@ class AppException implements Exception {
 
   @override
   String toString() {
-    return "$prefix$message";
+    return message;
   }
 }
 

@@ -153,7 +153,7 @@ class NetworkApiService extends BaseApiService {
         return FetchDataException("Connection timeout");
 
       case DioExceptionType.connectionError:
-        return FetchDataException("Connection error: ${error.message ?? 'Check your internet or server IP'}");
+        return FetchDataException("No Internet Connection");
 
       case DioExceptionType.badResponse:
         final statusCode = error.response?.statusCode ?? 0;

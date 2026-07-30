@@ -9,9 +9,11 @@ import 'package:catch_watch/repository/watchlist_repository.dart';
 import 'package:catch_watch/repository/interaction_repository.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/utils/hive_service/userdetail.dart';
+import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:dio/dio.dart' as dio;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 
 enum ProfileTab { videos, cuts, saved, liked }
 
@@ -31,6 +33,8 @@ class ProfileProvider extends ChangeNotifier {
   List<ReelModel> _bookmarkedReels = [];
   List<WatchlistItem> _watchlist = [];
   List<ReelModel> _localDrafts = [];
+  List<UserModel> _followersList = [];
+  List<UserModel> _followingList = [];
 
   UserModel? get user => _user;
   bool get isLoading => _isLoading;
@@ -40,9 +44,25 @@ class ProfileProvider extends ChangeNotifier {
   List<ReelModel> get bookmarkedReels => _bookmarkedReels;
   List<WatchlistItem> get watchlist => _watchlist;
   List<ReelModel> get localDrafts => _localDrafts;
+  List<UserModel> get followersList => _followersList;
+  List<UserModel> get followingList => _followingList;
 
   ProfileProvider() {
     _loadUserFromHive();
+    _loadStatsFromCache();
+  }
+
+  void _loadStatsFromCache() {
+    final userId = HiveService.userId;
+    if (userId != null) {
+      final stats = HiveService.getUserStats(userId);
+      if (stats != null && _user != null) {
+        _user!.followersCount = stats['followers'];
+        _user!.followingCount = stats['following'];
+        _user!.reelsCount = stats['reels'];
+        notifyListeners();
+      }
+    }
   }
 
   void _loadUserFromHive() {
@@ -65,8 +85,24 @@ class ProfileProvider extends ChangeNotifier {
     try {
       final response = await _authRepository.getProfile();
       if (response['success'] == true) {
-        _user = UserModel.fromJson(response['user']);
+        final newUser = UserModel.fromJson(response['user']);
         
+        // Merge stats if missing in the 'user' object but present at response root
+        newUser.followersCount = response['followersCount'] ?? response['followers'] ?? newUser.followersCount;
+        newUser.followingCount = response['followingCount'] ?? response['following'] ?? newUser.followingCount;
+        newUser.reelsCount = response['reelsCount'] ?? response['postsCount'] ?? response['totalReels'] ?? newUser.reelsCount;
+
+        // Merge with EXISTING user object if we have one to prevent resetting to 0
+        if (_user != null) {
+          newUser.followersCount = newUser.followersCount ?? _user!.followersCount;
+          newUser.followingCount = newUser.followingCount ?? _user!.followingCount;
+          newUser.reelsCount = newUser.reelsCount ?? _user!.reelsCount;
+          newUser.bio = newUser.bio ?? _user!.bio;
+          newUser.genres = newUser.genres ?? _user!.genres;
+        }
+
+        _user = newUser;
+
         // Update Hive with latest data
         final currentHiveUser = HiveService.getUser();
         if (currentHiveUser != null) {
@@ -76,10 +112,24 @@ class ProfileProvider extends ChangeNotifier {
           await HiveService.saveUser(currentHiveUser);
         }
 
-        // Fetch reels and watchlist too
-        await fetchMyReels();
-        await fetchWatchlist();
-        await fetchBookmarkedReels();
+        // Fetch reels, watchlist, and stats too
+        await Future.wait([
+          fetchMyReels(),
+          fetchWatchlist(),
+          fetchBookmarkedReels(),
+          fetchFollowers(),
+          fetchFollowing(),
+        ]);
+
+        // Save to cache after fetching all
+        if (_user?.id != null) {
+          await HiveService.saveUserStats(
+            _user!.id!,
+            _user!.followersCount ?? 0,
+            _user!.followingCount ?? 0,
+            _user!.reelsCount ?? 0,
+          );
+        }
       } else {
         _error = response['message'] ?? 'Failed to fetch profile';
       }
@@ -130,6 +180,105 @@ class ProfileProvider extends ChangeNotifier {
       debugPrint('Error fetching bookmarked reels: $e');
     }
     notifyListeners();
+  }
+
+  Future<void> fetchFollowers({String? userId}) async {
+    final targetId = userId ?? _user?.id;
+    if (targetId == null) return;
+    
+    _isLoading = true;
+    notifyListeners();
+    
+    try {
+      final response = await InteractionRepository().getFollowers(targetId);
+      if (response['success'] == true) {
+        _followersList = (response['followers'] as List)
+            .map((e) => UserModel.fromJson(e))
+            .toList();
+        
+        // Sync count if it's the current user
+        if (targetId == _user?.id) {
+          _user?.followersCount = _followersList.length;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching followers: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> fetchFollowing({String? userId}) async {
+    final targetId = userId ?? _user?.id;
+    if (targetId == null) return;
+
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final response = await InteractionRepository().getFollowing(targetId);
+      if (response['success'] == true) {
+        _followingList = (response['following'] as List)
+            .map((e) => UserModel.fromJson(e))
+            .toList();
+
+        // Sync count if it's the current user
+        if (targetId == _user?.id) {
+          _user?.followingCount = _followingList.length;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching following: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> toggleFollow(String userId) async {
+    // Update locally first for followers/following list
+    for (var u in _followersList) {
+      if (u.id == userId) u.isFollowing = !(u.isFollowing ?? false);
+    }
+    for (var u in _followingList) {
+      if (u.id == userId) u.isFollowing = !(u.isFollowing ?? false);
+    }
+    notifyListeners();
+
+    try {
+      final response = await InteractionRepository().toggleFollow(userId);
+      if (response['success'] == true) {
+        // Sync state from response if available
+        if (response['followersCount'] != null) {
+          // If we're toggling someone ELSE, but the response gives counts for US,
+          // we need to be careful. Usually these APIs return counts for the target user.
+          // But if it's "followersCount" in a global toggle, it might be for the current user.
+          // Let's refresh profile just to be safe as previously implemented, 
+          // but also update current counts if returned.
+        }
+        fetchProfile();
+      } else {
+        // Rollback local update on failure
+        for (var u in _followersList) {
+          if (u.id == userId) u.isFollowing = !(u.isFollowing ?? false);
+        }
+        for (var u in _followingList) {
+          if (u.id == userId) u.isFollowing = !(u.isFollowing ?? false);
+        }
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error toggling follow: $e');
+      // Rollback
+      for (var u in _followersList) {
+        if (u.id == userId) u.isFollowing = !(u.isFollowing ?? false);
+      }
+      for (var u in _followingList) {
+        if (u.id == userId) u.isFollowing = !(u.isFollowing ?? false);
+      }
+      notifyListeners();
+    }
   }
 
   Future<void> logout(BuildContext context) async {

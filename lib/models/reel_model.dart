@@ -64,14 +64,21 @@ class ReelModel {
       return '${AppUrl.serverUrl}/$url';
     }
 
+    int parseInt(dynamic value) {
+      if (value == null) return 0;
+      if (value is int) return value;
+      if (value is String) return int.tryParse(value) ?? 0;
+      return 0;
+    }
+
     videoUrl = fixUrl(json['videoUrl']);
-    thumbnail = fixUrl(json['thumbnail']);
+    thumbnail = fixUrl(json['thumbnail'] ?? json['thumbnailUrl']);
     caption = json['caption'];
-    hashtags = json['hashtags']?.cast<String>();
-    viewsCount = json['viewsCount'];
-    commentsCount = json['commentsCount'];
-    sharesCount = json['sharesCount'];
-    likesCount = json['likesCount'];
+    hashtags = json['hashtags'] != null ? List<String>.from(json['hashtags']) : [];
+    viewsCount = parseInt(json['viewsCount']);
+    commentsCount = parseInt(json['commentsCount']);
+    sharesCount = parseInt(json['sharesCount']);
+    likesCount = parseInt(json['likesCount']);
     userInteraction = json['userInteraction'];
     isBookmarked = json['isBookmarked'] ?? false;
     status = json['status'];
@@ -84,11 +91,12 @@ class ReelUser {
   String? name;
   String? profileImage;
   String? username;
+  bool? isFollowing;
 
-  ReelUser({this.id, this.name, this.profileImage, this.username});
+  ReelUser({this.id, this.name, this.profileImage, this.username, this.isFollowing});
 
   ReelUser.fromJson(Map<String, dynamic> json) {
-    id = json['_id'];
+    id = json['_id'] ?? json['id'];
     name = json['name'];
     
     String fixUrl(String? url) {
@@ -101,5 +109,6 @@ class ReelUser {
     
     profileImage = fixUrl(json['profileImage']);
     username = json['username'];
+    isFollowing = json['isFollowing'] ?? false;
   }
 }

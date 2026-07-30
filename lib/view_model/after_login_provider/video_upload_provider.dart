@@ -65,8 +65,8 @@ class VideoUploadProvider extends ChangeNotifier {
     });
   }
 
-  // ── Pick video from gallery ───────────────────────────────────────────────
-  Future<void> pickVideo() async {
+  // ── Pick video from camera or gallery ───────────────────────────────────────
+  Future<void> pickVideo({ImageSource source = ImageSource.gallery}) async {
     _isPicking = true;
     _pickError = PickError.none;
     _uploadError = null;
@@ -75,7 +75,7 @@ class VideoUploadProvider extends ChangeNotifier {
     try {
       final picker = ImagePicker();
       final XFile? file = await picker.pickVideo(
-        source: ImageSource.gallery,
+        source: source,
         maxDuration: const Duration(minutes: 30),
       );
 

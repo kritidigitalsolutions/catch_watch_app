@@ -1,6 +1,6 @@
 class AppUrl {
-  // static const String serverUrl = 'http://192.168.1.20:5000';
-  static const String serverUrl = 'https://api.catchandwatch.com';
+  static const String serverUrl = 'http://192.168.1.28:5000';
+  // static const String serverUrl = 'https://api.catchandwatch.com';
   static const String baseUrl = '$serverUrl/api';
 
   // Auth Endpoints
@@ -8,6 +8,8 @@ class AppUrl {
   static const String verifyOtp = '$baseUrl/auth/verify-otp';
   static const String completeProfile = '$baseUrl/user/complete-profile';
   static const String getProfile = '$baseUrl/user/profile';
+  static String getOtherProfileDetails(String username) => '$baseUrl/user/profile-details/$username';
+  static String getOtherProfileStats(String userId) => '$baseUrl/user/profile-stats/$userId';
   static const String updateProfile = '$baseUrl/user/update-profile';
   static const String getLegal = '$baseUrl/legal';
   static const String getHelp = '$baseUrl/help';
@@ -34,11 +36,16 @@ class AppUrl {
   static String viewReel(String id) => '$baseUrl/reels/$id/view';
   static String shareReel(String id) => '$baseUrl/reels/$id/share';
   static const String myReels = '$baseUrl/reels/my-reels';
+  static String getUserReels(String userId) => '$baseUrl/reels/user/$userId';
   static const String searchReels = '$baseUrl/reels/search';
-  // intrection
-  static String toggleFollow(String userId) => '$baseUrl/interaction/toggle/follow/$userId';
+  // user profile and interaction
+  static String toggleFollow(String userId) => '$baseUrl/user/toggle-follow/$userId';
+  static String followUser(String userId) => '$baseUrl/user/follow/$userId';
+  static String unfollowUser(String userId) => '$baseUrl/user/unfollow/$userId';
+  static String getFollowStatus(String userId) => '$baseUrl/user/follow-status/$userId';
+  static String getFollowers(String userId) => '$baseUrl/user/followers/$userId';
+  static String getFollowing(String userId) => '$baseUrl/user/following/$userId';
   static String interactionStats(String contentId) => '$baseUrl/interaction/stats/$contentId';
-  static String followStatus(String userId) => '$baseUrl/interaction/follow/$userId';
   static String toggleDislike(String contentId) => '$baseUrl/interaction/toggle/dislike/$contentId';
   static String toggleLike(String contentId) => '$baseUrl/interaction/toggle/like/$contentId';
   static String toggleBookmark(String contentId) => '$baseUrl/interaction/toggle/bookmark/$contentId';

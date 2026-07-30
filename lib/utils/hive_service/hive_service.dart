@@ -8,6 +8,7 @@ class HiveService {
   static const String historyBoxName = 'historyBox';
   static const String downloadsBoxName = 'downloadsBox';
   static const String likesBoxName = 'likesBox';
+  static const String statsBoxName = 'statsBox';
 
   static Future<void> init() async {
     await Hive.initFlutter();
@@ -18,6 +19,7 @@ class HiveService {
     await Hive.openBox(historyBoxName);
     await Hive.openBox(downloadsBoxName);
     await Hive.openBox(likesBoxName);
+    await Hive.openBox(statsBoxName);
   }
 
   static Box<UserDetails> get _box {
@@ -30,6 +32,7 @@ class HiveService {
   static Box get _historyBox => Hive.box(historyBoxName);
   static Box get _downloadsBox => Hive.box(downloadsBoxName);
   static Box get _likesBox => Hive.box(likesBoxName);
+  static Box get _statsBox => Hive.box(statsBoxName);
 
   static Future<void> saveUser(UserDetails user) async {
     await _box.put(userKey, user);
@@ -86,6 +89,22 @@ class HiveService {
     await _box.clear();
     await _historyBox.clear();
     await _likesBox.clear();
+    await _statsBox.clear();
+  }
+
+  // --- User Stats Cache ---
+  static Future<void> saveUserStats(String userId, int followers, int following, int reels) async {
+    await _statsBox.put(userId, {
+      'followers': followers,
+      'following': following,
+      'reels': reels,
+    });
+  }
+
+  static Map<String, int>? getUserStats(String userId) {
+    final data = _statsBox.get(userId);
+    if (data == null) return null;
+    return Map<String, int>.from(data);
   }
 
   static bool isLogin() {
