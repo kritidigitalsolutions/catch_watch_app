@@ -62,4 +62,16 @@ class ReelsRepository {
       rethrow;
     }
   }
+
+  Future<dynamic> recordReelView(String reelId, int watchDuration) async {
+    try {
+      final response = await _apiService.postApi(
+        AppUrl.viewReel(reelId),
+        {'watchDuration': watchDuration},
+      );
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
 }

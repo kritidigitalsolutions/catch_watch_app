@@ -17,6 +17,8 @@ class UserModel {
   int? followingCount;
   int? reelsCount;
   bool? isFollowing;
+  bool? isVerified;
+  bool? blueTick;
   String? createdAt;
   String? updatedAt;
 
@@ -74,6 +76,8 @@ class UserModel {
     followingCount = parseInt(json['followingCount'] ?? json['following']);
     reelsCount = parseInt(json['reelsCount'] ?? json['postsCount'] ?? json['totalReels']);
     isFollowing = json['isFollowing'] ?? false;
+    isVerified = json['isVerified'] ?? json['verification']?['isVerified'] ?? false;
+    blueTick = json['blueTick'] ?? (json['verification']?['badgeType'] == 'BLUE' && json['verification']?['isVerified'] == true) ?? false;
     createdAt = json['createdAt'];
     updatedAt = json['updatedAt'];
   }
@@ -96,6 +100,8 @@ class UserModel {
     data['followingCount'] = followingCount;
     data['reelsCount'] = reelsCount;
     data['isFollowing'] = isFollowing;
+    data['isVerified'] = isVerified;
+    data['blueTick'] = blueTick;
     data['createdAt'] = createdAt;
     data['updatedAt'] = updatedAt;
     return data;

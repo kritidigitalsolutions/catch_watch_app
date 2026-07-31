@@ -92,8 +92,10 @@ class ReelUser {
   String? profileImage;
   String? username;
   bool? isFollowing;
+  bool? isVerified;
+  bool? blueTick;
 
-  ReelUser({this.id, this.name, this.profileImage, this.username, this.isFollowing});
+  ReelUser({this.id, this.name, this.profileImage, this.username, this.isFollowing, this.isVerified, this.blueTick});
 
   ReelUser.fromJson(Map<String, dynamic> json) {
     id = json['_id'] ?? json['id'];
@@ -110,5 +112,7 @@ class ReelUser {
     profileImage = fixUrl(json['profileImage']);
     username = json['username'];
     isFollowing = json['isFollowing'] ?? false;
+    isVerified = json['isVerified'] ?? json['verification']?['isVerified'] ?? false;
+    blueTick = json['blueTick'] ?? (json['verification']?['badgeType'] == 'BLUE' && json['verification']?['isVerified'] == true) ?? false;
   }
 }

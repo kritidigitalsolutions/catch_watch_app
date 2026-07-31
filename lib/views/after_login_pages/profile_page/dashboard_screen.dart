@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:fl_chart/fl_chart.dart';
+// import 'package:fl_chart/fl_chart.dart'; // Commented out as it might not be used or causing issues if not in pubspec, but it was there
 import 'dart:ui';
 import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
 import '../../../view_model/after_login_provider/profile_provider.dart';
+import '../../../view_model/after_login_provider/verification_provider.dart';
 import 'wallet_screen.dart';
+import '../leaderboard_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -23,6 +25,9 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<VerificationProvider>().fetchVerificationStatus();
+    });
     _headerController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 5),
@@ -63,6 +68,8 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                   _buildTimeFilter(provider),
                   const SizedBox(height: 24),
                   _buildPerformanceScore(),
+                  const SizedBox(height: 24),
+                  _buildLeaderboardCard(),
                   const SizedBox(height: 32),
                   _buildSectionTitle("Performance Summary"),
                   const SizedBox(height: 16),
@@ -87,17 +94,6 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
         onPressed: () => Navigator.pop(context),
       ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.notifications_none_rounded, color: Colors.white),
-          onPressed: () {},
-        ),
-        IconButton(
-          icon: const Icon(Icons.settings_outlined, color: Colors.white),
-          onPressed: () {},
-        ),
-        const SizedBox(width: 8),
-      ],
       flexibleSpace: FlexibleSpaceBar(
         background: AnimatedBuilder(
           animation: _headerGradientAnimation,
@@ -127,7 +123,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                     child: CircleAvatar(radius: 30, backgroundColor: Colors.white.withOpacity(0.05)),
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 100, 24, 20),
+                    padding: const EdgeInsets.fromLTRB(24, 60, 24, 20),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
@@ -150,9 +146,18 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                             mainAxisAlignment: MainAxisAlignment.end,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                "👋 Welcome ${provider.name.split(' ')[0]}",
-                                style: text18(color: Colors.white, fontWeight: FontWeight.w800),
+                              Row(
+                                children: [
+                                  Text(
+                                    "👋 Welcome ${provider.name.split(' ')[0]}",
+                                    style: text18(color: Colors.white, fontWeight: FontWeight.w800),
+                                  ),
+                                  if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
+                                    const SizedBox(width: 6),
+                                    const Icon(Icons.verified_rounded, 
+                                        color: Colors.blue, size: 18),
+                                  ],
+                                ],
                               ),
                               const SizedBox(height: 4),
                               GestureDetector(
@@ -360,6 +365,60 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     return Text(
       title,
       style: text18(fontWeight: FontWeight.w800),
+    );
+  }
+
+  Widget _buildLeaderboardCard() {
+    return GestureDetector(
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [AppColors.primary, Color(0xFFFF8C42)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primary.withOpacity(0.3),
+              blurRadius: 15,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.emoji_events_rounded, color: Colors.white, size: 30),
+            ),
+            const SizedBox(width: 20),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Global Leaderboard",
+                    style: text16(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "See how you rank among others",
+                    style: text12(color: Colors.white.withOpacity(0.8)),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 18),
+          ],
+        ),
+      ),
     );
   }
 

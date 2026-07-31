@@ -18,9 +18,16 @@ class AppUrl {
 
   /// plans & subscriptions
   static const String getPlans = '$baseUrl/plan';
+  static const String getBluetickPlans = '$baseUrl/plan/bluetick';
   static const String subscribe = '$baseUrl/subscription/subscribe';
   static const String cancelSubscription = '$baseUrl/subscription/cancel';
   static const String subscriptionStatus = '$baseUrl/subscription/status';
+  
+  /// verification
+  static const String applyVerification = '$baseUrl/verification/apply';
+  static const String verificationStatus = '$baseUrl/verification/status';
+  static const String cancelVerification = '$baseUrl/verification/cancel';
+  static const String updateVerification = '$baseUrl/verification/update';
   static const String getContent = '$baseUrl/content';
   static const String getCategories = '$baseUrl/categories';
   static const String getMovies = '$baseUrl/movies';

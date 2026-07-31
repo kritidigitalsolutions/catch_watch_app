@@ -424,4 +424,20 @@ class ReelsProvider extends ChangeNotifier {
   void _rollbackFollow(String userId, bool wasFollowing, ReelModel? reel) {
     _updateLocalFollowState(userId, wasFollowing, reel: reel);
   }
+
+  Future<void> recordReelView(String reelId, int duration) async {
+    try {
+      final response = await _reelsRepository.recordReelView(reelId, duration);
+      if (response['success'] == true && response['viewsCount'] != null) {
+        // Update local views count for this reel
+        final index = _reels.indexWhere((r) => r.id == reelId);
+        if (index != -1) {
+          _reels[index].viewsCount = response['viewsCount'];
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error recording reel view: $e');
+    }
+  }
 }

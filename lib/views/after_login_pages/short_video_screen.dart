@@ -351,10 +351,16 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   VideoPlayerController? _controller;
   bool _hasStarted = false;
   bool _showPlayIcon = false;
+  
+  // Tracking logic
+  late final Stopwatch _watchStopwatch;
+  bool _viewRecorded = false;
+  static const int _viewThresholdSeconds = 3;
 
   @override
   void initState() {
     super.initState();
+    _watchStopwatch = Stopwatch();
     _initializeVideo();
   }
 
@@ -413,13 +419,40 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
         if (widget.isActive) {
           _controller!.play();
           _hasStarted = true;
+          _watchStopwatch.start();
+          _controller!.addListener(_videoListener);
         } else {
           _controller!.pause();
           _controller!.seekTo(Duration.zero);
           _hasStarted = false;
           _showPlayIcon = false;
+          
+          if (_watchStopwatch.isRunning) {
+            _watchStopwatch.stop();
+            _reportViewIfNecessary();
+          }
+          _controller!.removeListener(_videoListener);
         }
       });
+    }
+  }
+
+  void _videoListener() {
+    if (!_viewRecorded && _watchStopwatch.elapsed.inSeconds >= _viewThresholdSeconds) {
+      _reportViewIfNecessary();
+    }
+  }
+
+  void _reportViewIfNecessary() {
+    if (_viewRecorded || _watchStopwatch.elapsed.inSeconds < 1) return;
+    
+    // We only record "official" views after threshold, but we could report any duration if swiped away
+    if (_watchStopwatch.elapsed.inSeconds >= _viewThresholdSeconds) {
+      _viewRecorded = true;
+      final reelId = widget.reel.id;
+      if (reelId != null) {
+        context.read<ReelsProvider>().recordReelView(reelId, _watchStopwatch.elapsed.inSeconds);
+      }
     }
   }
 
@@ -430,17 +463,21 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
       if (_controller!.value.isPlaying) {
         _controller!.pause();
         _showPlayIcon = true;
+        _watchStopwatch.stop();
       } else {
         _controller!.play();
         _hasStarted = true;
         _showPlayIcon = false;
+        _watchStopwatch.start();
       }
     });
   }
 
   @override
   void dispose() {
+    _controller?.removeListener(_videoListener);
     _controller?.dispose();
+    _watchStopwatch.stop();
     super.dispose();
   }
 
@@ -748,6 +785,10 @@ class _ShortInfo extends StatelessWidget {
                 ),
               ),
             ),
+            if (reel.user?.isVerified == true || reel.user?.blueTick == true) ...[
+              const SizedBox(width: 4),
+              const Icon(Icons.verified_rounded, color: Colors.blue, size: 14),
+            ],
             if (!isSelf && reel.user?.id != null) ...[
               const SizedBox(width: 12),
               Selector<ProfileProvider, bool>(

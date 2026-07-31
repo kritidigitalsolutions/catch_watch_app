@@ -13,6 +13,8 @@ import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/followers_following_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/dashboard_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/wallet_screen.dart';
+import 'package:catch_watch/view_model/after_login_provider/verification_provider.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/verification/verification_main_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
@@ -43,6 +45,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ProfileProvider>().fetchProfile();
+      context.read<VerificationProvider>().fetchVerificationStatus();
       
       // Listen to page changes in HomeScreenProvider to refresh profile when navigating to it
       final homeProvider = context.read<HomeScreenProvider>();
@@ -87,11 +90,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: CustomScrollView(
               controller: _scrollController,
               slivers: [
-                // Full expanded orange header (no appbar title here)
+                // Full expanded orange header
                 SliverToBoxAdapter(child: _ExpandedHeader(provider: provider)),
 
-                // // Stats
-                // SliverToBoxAdapter(child: _buildStats(provider)),
+                // Stats Section (New position and design)
+                SliverToBoxAdapter(child: _buildStatsSection(context, provider)),
 
                 // Tab row
                 SliverToBoxAdapter(child: _buildTabRow(provider)),
@@ -131,44 +134,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildTabRow(ProfileProvider provider) {
     final tabs = [
-      (ProfileTab.videos, Icons.play_circle_outline_rounded, 'POSTS'),
-      // (ProfileTab.cuts, Icons.cut_rounded, 'CUTS'),
-      (ProfileTab.saved, Icons.bookmark_border_rounded, 'SAVED'),
+      (ProfileTab.videos, Icons.grid_view_rounded, 'Posts'),
+      (ProfileTab.saved, Icons.bookmark_outline_rounded, 'Saved'),
     ];
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0), width: 1)),
+      ),
       child: Row(
         children: tabs.map((t) {
           final isActive = provider.activeTab == t.$1;
           return Expanded(
             child: GestureDetector(
               onTap: () => provider.setTab(t.$1),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.symmetric(horizontal: 3),
-                padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
                 decoration: BoxDecoration(
-                  color: AppColors.grey100,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isActive ? AppColors.primary : AppColors.grey100,
-                    width: 1,
+                  border: Border(
+                    bottom: BorderSide(
+                      color: isActive ? AppColors.primary : Colors.transparent,
+                      width: 2,
+                    ),
                   ),
                 ),
-                child: Column(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
                       t.$2,
-                      size: 18,
-                      color: isActive ? AppColors.primary : AppColors.grey600,
+                      size: 20,
+                      color: isActive ? AppColors.primary : AppColors.grey500,
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(width: 8),
                     Text(
                       t.$3,
-                      style: text8(
-                        color: isActive ? AppColors.primary : AppColors.grey600,
-                        fontWeight: FontWeight.w700,
+                      style: text14(
+                        color: isActive ? AppColors.primary : AppColors.grey500,
+                        fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
                       ),
                     ),
                   ],
@@ -178,6 +181,75 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
         }).toList(),
       ),
+    );
+  }
+
+  Widget _buildStatsSection(BuildContext context, ProfileProvider provider) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0), width: 1)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _statItem(provider.videosCount, 'Videos', null),
+          _verticalDivider(),
+          _statItem(provider.followers, 'Followers', () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const FollowersFollowingScreen(
+                  title: 'Followers',
+                  isFollowers: true,
+                ),
+              ),
+            );
+          }),
+          _verticalDivider(),
+          _statItem(provider.following, 'Following', () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const FollowersFollowingScreen(
+                  title: 'Following',
+                  isFollowers: false,
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _statItem(String count, String label, VoidCallback? onTap) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Column(
+          children: [
+            Text(
+              count,
+              style: text20(color: AppColors.textPrimary, fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: text12(color: AppColors.grey600, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _verticalDivider() {
+    return Container(
+      height: 40,
+      width: 1,
+      color: const Color(0xFFE0E0E0),
     );
   }
 
@@ -208,7 +280,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 }
 
-// ─── Full expanded orange header ────────────────────────────────────────────
 class _ExpandedHeader extends StatelessWidget {
   final ProfileProvider provider;
   const _ExpandedHeader({required this.provider});
@@ -218,241 +289,141 @@ class _ExpandedHeader extends StatelessWidget {
     final topPadding = MediaQuery.of(context).padding.top;
 
     return Container(
-      padding: EdgeInsets.only(top: topPadding + 12, bottom: 28),
+      padding: EdgeInsets.only(top: topPadding + 16, bottom: 20),
       decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFFF5F00), Color(0xFFCC3D00)],
-        ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(28),
-          bottomRight: Radius.circular(28),
-        ),
+        color: AppColors.primary,
       ),
-      child: Stack(
-        alignment: Alignment.topLeft,
-        children: [
-          // Decorative circles
-          Positioned(
-            top: -30,
-            right: -30,
-            child: Container(
-              width: 130,
-              height: 130,
-              decoration: BoxDecoration(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // Avatar
+            Container(
+              padding: const EdgeInsets.all(2.5),
+              decoration: const BoxDecoration(
+                color: Colors.white,
                 shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.06),
+              ),
+              child: provider.user?.profileImage != null && provider.user!.profileImage!.isNotEmpty
+                  ? CircleAvatar(
+                      radius: 35,
+                      backgroundImage: NetworkImage(provider.user!.profileImage!),
+                    )
+                  : CircleAvatar(
+                      radius: 35,
+                      backgroundColor: AppColors.grey200,
+                      child: const Icon(Icons.person, size: 40, color: Colors.white),
+                    ),
+            ),
+            const SizedBox(width: 14),
+            // Info & Buttons
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        provider.name,
+                        style: text18(color: Colors.white, fontWeight: FontWeight.w900),
+                      ),
+                      if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
+                        const SizedBox(width: 6),
+                        const Icon(Icons.verified_rounded, 
+                            color: Colors.blue, size: 18),
+                      ],
+                    ],
+                  ),
+                  Text(
+                    provider.handle,
+                    style: text13(color: Colors.white.withOpacity(0.8)),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _actionPill(
+                        context,
+                        const Icon(Icons.stars_rounded, color: AppColors.yellow, size: 14),
+                        "${provider.totalPoints} Pts",
+                        () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WalletScreen())),
+                      ),
+                      if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.isVerified != true && provider.user?.blueTick != true) ...[
+                        const SizedBox(width: 8),
+                        _actionPill(
+                          context,
+                          const Icon(Icons.verified_rounded, color: Colors.blue, size: 12),
+                          "Get Blue Tick",
+                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VerificationMainScreen())),
+                          isPrimary: true,
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
               ),
             ),
-          ),
-          Positioned(
-            bottom: -20,
-            left: -20,
-            child: Container(
-              width: 90,
-              height: 90,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.black.withValues(alpha: 0.08),
-              ),
-            ),
-          ),
-
-          // ── Dashboard & Menu button top-right ──
-          Positioned(
-            top: 0,
-            right: 16,
-            child: Row(
+            // Dashboard & Menu buttons on the same line but at the corner
+            Row(
               children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: CustomIconButton(
-                    icon: Icons.dashboard_rounded,
-                    color: AppColors.white,
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const DashboardScreen()),
-                      );
-                    },
-                  ),
+                _glassIconButton(
+                  Icons.grid_view_rounded,
+                  () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DashboardScreen())),
                 ),
-                const SizedBox(width: 10),
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: CustomIconButton(
-                    icon: Icons.menu_rounded,
-                    color: AppColors.white,
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => MenuScreen()),
-                      );
-                    },
-                  ),
+                const SizedBox(width: 8),
+                _glassIconButton(
+                  Icons.menu_rounded,
+                  () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MenuScreen())),
                 ),
               ],
             ),
-          ),
-
-          // ── Profile Content ──
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.3),
-                          width: 3,
-                        ),
-                      ),
-                      child: provider.user?.profileImage != null &&
-                              provider.user!.profileImage!.isNotEmpty
-                          ? CircleAvatar(
-                              radius: 42,
-                              backgroundImage:
-                                  NetworkImage(provider.user!.profileImage!),
-                              backgroundColor: Colors.white,
-                            )
-                          : CircleAvatar(
-                              radius: 42,
-                              backgroundColor: Colors.white,
-                              child: Icon(Icons.person_rounded, 
-                                  size: 48, color: AppColors.primary),
-                            ),
-                    ),
-                    const SizedBox(width: 20),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                provider.name,
-                                style: text20(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w900),
-                              ),
-                              const SizedBox(width: 6),
-                              const Icon(Icons.verified_rounded, 
-                                  color: Colors.blue, size: 20),
-                            ],
-                          ),
-                          Text(provider.handle,
-                              style: text14(color: Colors.white70)),
-                          const SizedBox(height: 8),
-                          GestureDetector(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (_) => const WalletScreen()),
-                              );
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(color: Colors.white.withOpacity(0.3)),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.stars_rounded, color: AppColors.yellow, size: 14),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    "${provider.totalPoints} Points",
-                                    style: text11(color: Colors.white, fontWeight: FontWeight.bold),
-                                  ),
-                                  const Icon(Icons.chevron_right_rounded, color: Colors.white70, size: 16),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _statItem(context, provider.videosCount, 'Videos', null),
-                    _statDivider(),
-                    _statItem(context, provider.followers, 'Followers', () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const FollowersFollowingScreen(
-                            title: 'Followers',
-                            isFollowers: true,
-                          ),
-                        ),
-                      );
-                    }),
-                    _statDivider(),
-                    _statItem(context, provider.following, 'Following', () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const FollowersFollowingScreen(
-                            title: 'Following',
-                            isFollowers: false,
-                          ),
-                        ),
-                      );
-                    }),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
+  }
 
-  Widget _statItem(BuildContext context, String count, String label, VoidCallback? onTap) {
+  Widget _glassIconButton(IconData icon, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
-      child: Column(
-        children: [
-          Text(
-            count,
-            style: text18(color: Colors.white, fontWeight: FontWeight.w800),
-          ),
-          Text(
-            label,
-            style: text12(color: Colors.white70, fontWeight: FontWeight.w500),
-          ),
-        ],
+      child: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, color: Colors.white, size: 18),
       ),
     );
   }
 
-  Widget _statDivider() {
-    return Container(
-      height: 24,
-      width: 1,
-      color: Colors.white24,
+  Widget _actionPill(BuildContext context, Widget icon, String label, VoidCallback onTap, {bool isPrimary = false}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isPrimary ? Colors.white.withOpacity(0.2) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withOpacity(0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            icon,
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: text10(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ),
     );
   }
-}
 
 // ─── Collapsed sticky bar (slides in from top when scrolled) ───────────────
 class _CollapsedBar extends StatelessWidget {
@@ -533,9 +504,11 @@ class _CollapsedBar extends StatelessWidget {
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.verified_rounded, 
-                        color: Colors.blue, size: 14),
+                    if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.verified_rounded, 
+                          color: Colors.blue, size: 14),
+                    ],
                   ],
                 ),
                 Text(

@@ -325,9 +325,11 @@ class _ExpandedHeader extends StatelessWidget {
                                 user.name ?? '',
                                 style: text20(color: Colors.white, fontWeight: FontWeight.w900),
                               ),
-                              const SizedBox(width: 6),
-                              const Icon(Icons.verified_rounded, 
-                                  color: Colors.blue, size: 20),
+                              if (user.isVerified == true || user.blueTick == true) ...[
+                                const SizedBox(width: 6),
+                                const Icon(Icons.verified_rounded, 
+                                    color: Colors.blue, size: 20),
+                              ],
                             ],
                           ),
                           Text(
@@ -519,9 +521,11 @@ class _CollapsedBar extends StatelessWidget {
                 Row(
                   children: [
                     Text(user.name ?? '', style: text14(color: Colors.white, fontWeight: FontWeight.w800)),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.verified_rounded, 
-                        color: Colors.blue, size: 14),
+                    if (user.isVerified == true || user.blueTick == true) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.verified_rounded, 
+                          color: Colors.blue, size: 14),
+                    ],
                   ],
                 ),
                 Text(

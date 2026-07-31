@@ -6,6 +6,8 @@ import 'package:catch_watch/views/after_login_pages/profile_page/wish_list_scree
 import 'package:catch_watch/views/after_login_pages/profile_page/help_support_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/policy_screen.dart';
 import 'package:catch_watch/view_model/after_login_provider/profile_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/verification_provider.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/verification/verification_main_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../res/app_colors.dart';
@@ -35,6 +37,19 @@ class MenuScreen extends StatelessWidget {
                         context,
                         MaterialPageRoute(
                           builder: (_) => const EditProfileScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _divider(),
+                  _menuItem(
+                    Icons.verified_user_outlined,
+                    'Get Blue Tick',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const VerificationMainScreen(),
                         ),
                       );
                     },
@@ -229,12 +244,21 @@ class MenuScreen extends StatelessWidget {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        provider.name,
-                        style: text18(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                        ),
+                      Row(
+                        children: [
+                          Text(
+                            provider.name,
+                            style: text18(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
+                            const SizedBox(width: 4),
+                            const Icon(Icons.verified_rounded, 
+                                color: Colors.blue, size: 16),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 2),
                       Text(
