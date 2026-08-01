@@ -22,6 +22,23 @@ class UserModel {
   String? createdAt;
   String? updatedAt;
 
+  // Creator fields
+  bool? isCreator;
+  String? creatorStatus;
+  String? creatorCategory;
+  int? qualityScore;
+  String? creatorLevel;
+  int? totalEngagementPoints;
+  int? totalQualifiedViews;
+  int? totalWatchMinutes;
+  int? totalCreatorFollowers;
+  String? creatorJoinedAt;
+  
+  // Subscription & Verification
+  bool? isPremium;
+  String? verificationType;
+  String? planId;
+
   UserModel({
     this.id,
     this.phone,
@@ -39,8 +56,23 @@ class UserModel {
     this.followingCount,
     this.reelsCount,
     this.isFollowing,
+    this.isVerified,
+    this.blueTick,
     this.createdAt,
     this.updatedAt,
+    this.isCreator,
+    this.creatorStatus,
+    this.creatorCategory,
+    this.qualityScore,
+    this.creatorLevel,
+    this.totalEngagementPoints,
+    this.totalQualifiedViews,
+    this.totalWatchMinutes,
+    this.totalCreatorFollowers,
+    this.creatorJoinedAt,
+    this.isPremium,
+    this.verificationType,
+    this.planId,
   });
 
   UserModel.fromJson(Map<String, dynamic> json) {
@@ -80,6 +112,23 @@ class UserModel {
     blueTick = json['blueTick'] ?? (json['verification']?['badgeType'] == 'BLUE' && json['verification']?['isVerified'] == true) ?? false;
     createdAt = json['createdAt'];
     updatedAt = json['updatedAt'];
+
+    // Creator mapping
+    isCreator = json['isCreator'] ?? false;
+    creatorStatus = json['creatorStatus'];
+    creatorCategory = json['creatorCategory'];
+    qualityScore = parseInt(json['qualityScore']);
+    creatorLevel = json['creatorLevel'];
+    totalEngagementPoints = parseInt(json['totalEngagementPoints']);
+    totalQualifiedViews = parseInt(json['totalQualifiedViews']);
+    totalWatchMinutes = parseInt(json['totalWatchMinutes']);
+    totalCreatorFollowers = parseInt(json['totalCreatorFollowers']);
+    creatorJoinedAt = json['creatorJoinedAt'];
+
+    // Other mapping
+    isPremium = json['isPremium'] ?? false;
+    verificationType = json['verificationType'];
+    planId = json['planId'];
   }
 
   Map<String, dynamic> toJson() {
@@ -104,6 +153,19 @@ class UserModel {
     data['blueTick'] = blueTick;
     data['createdAt'] = createdAt;
     data['updatedAt'] = updatedAt;
+    data['isCreator'] = isCreator;
+    data['creatorStatus'] = creatorStatus;
+    data['creatorCategory'] = creatorCategory;
+    data['qualityScore'] = qualityScore;
+    data['creatorLevel'] = creatorLevel;
+    data['totalEngagementPoints'] = totalEngagementPoints;
+    data['totalQualifiedViews'] = totalQualifiedViews;
+    data['totalWatchMinutes'] = totalWatchMinutes;
+    data['totalCreatorFollowers'] = totalCreatorFollowers;
+    data['creatorJoinedAt'] = creatorJoinedAt;
+    data['isPremium'] = isPremium;
+    data['verificationType'] = verificationType;
+    data['planId'] = planId;
     return data;
   }
 }

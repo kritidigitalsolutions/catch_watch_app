@@ -7,6 +7,7 @@ import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
 import '../../../view_model/after_login_provider/profile_provider.dart';
 import '../../../view_model/after_login_provider/verification_provider.dart';
+import '../../../view_model/after_login_provider/wallet_provider.dart';
 import 'wallet_screen.dart';
 import '../leaderboard_screen.dart';
 
@@ -27,6 +28,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<VerificationProvider>().fetchVerificationStatus();
+      context.read<WalletProvider>().fetchDashboardData();
     });
     _headerController = AnimationController(
       vsync: this,
@@ -52,39 +54,47 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<ProfileProvider>();
+    final profileProvider = context.watch<ProfileProvider>();
+    final walletProvider = context.watch<WalletProvider>();
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: CustomScrollView(
-        slivers: [
-          _buildSliverHeader(provider),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildTimeFilter(provider),
-                  const SizedBox(height: 24),
-                  _buildPerformanceScore(),
-                  const SizedBox(height: 24),
-                  _buildLeaderboardCard(),
-                  const SizedBox(height: 32),
-                  _buildSectionTitle("Performance Summary"),
-                  const SizedBox(height: 16),
-                  _buildStatsGrid(provider),
-                  const SizedBox(height: 40),
+      body: walletProvider.isLoading && walletProvider.dashboardData == null
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: () async {
+                await walletProvider.fetchDashboardData();
+              },
+              child: CustomScrollView(
+                slivers: [
+                  _buildSliverHeader(profileProvider, walletProvider),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildTimeFilter(walletProvider),
+                          const SizedBox(height: 24),
+                          _buildPerformanceScore(walletProvider),
+                          const SizedBox(height: 24),
+                          _buildLeaderboardCard(),
+                          const SizedBox(height: 32),
+                          _buildSectionTitle("Performance Summary"),
+                          const SizedBox(height: 16),
+                          _buildStatsGrid(walletProvider),
+                          const SizedBox(height: 40),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
-          ),
-        ],
-      ),
     );
   }
 
-  Widget _buildSliverHeader(ProfileProvider provider) {
+  Widget _buildSliverHeader(ProfileProvider profileProvider, WalletProvider walletProvider) {
     return SliverAppBar(
       expandedHeight: 220,
       pinned: true,
@@ -132,10 +142,10 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                           decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
                           child: CircleAvatar(
                             radius: 35,
-                            backgroundImage: provider.user?.profileImage != null && provider.user!.profileImage!.isNotEmpty
-                                ? NetworkImage(provider.user!.profileImage!)
+                            backgroundImage: profileProvider.user?.profileImage != null && profileProvider.user!.profileImage!.isNotEmpty
+                                ? NetworkImage(profileProvider.user!.profileImage!)
                                 : null,
-                            child: provider.user?.profileImage == null || provider.user!.profileImage!.isEmpty
+                            child: profileProvider.user?.profileImage == null || profileProvider.user!.profileImage!.isEmpty
                                 ? const Icon(Icons.person, size: 40)
                                 : null,
                           ),
@@ -149,10 +159,10 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                               Row(
                                 children: [
                                   Text(
-                                    "👋 Welcome ${provider.name.split(' ')[0]}",
+                                    "👋 Welcome ${profileProvider.name.split(' ')[0]}",
                                     style: text18(color: Colors.white, fontWeight: FontWeight.w800),
                                   ),
-                                  if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
+                                  if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || profileProvider.user?.isVerified == true || profileProvider.user?.blueTick == true) ...[
                                     const SizedBox(width: 6),
                                     const Icon(Icons.verified_rounded, 
                                         color: Colors.blue, size: 18),
@@ -175,7 +185,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                                       const Icon(Icons.stars_rounded, color: AppColors.yellow, size: 16),
                                       const SizedBox(width: 6),
                                       Text(
-                                        "${provider.totalPoints} Points",
+                                        "${walletProvider.availablePoints} Points",
                                         style: text12(color: Colors.white, fontWeight: FontWeight.bold),
                                       ),
                                     ],
@@ -197,7 +207,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     );
   }
 
-  Widget _buildTimeFilter(ProfileProvider provider) {
+  Widget _buildTimeFilter(WalletProvider provider) {
     return Container(
       height: 50,
       padding: const EdgeInsets.all(4),
@@ -267,7 +277,8 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     }
   }
 
-  Widget _buildPerformanceScore() {
+  Widget _buildPerformanceScore(WalletProvider provider) {
+    final score = (provider.dashboardData?.qualityScore ?? 0).toDouble();
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -290,7 +301,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                 width: 80,
                 height: 80,
                 child: TweenAnimationBuilder<double>(
-                  tween: Tween<double>(begin: 0, end: 0.92),
+                  tween: Tween<double>(begin: 0, end: score / 100),
                   duration: const Duration(seconds: 2),
                   builder: (context, value, child) {
                     return CircularProgressIndicator(
@@ -303,7 +314,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                 ),
               ),
               Text(
-                "92%",
+                "${score.toInt()}%",
                 style: text18(color: Colors.white, fontWeight: FontWeight.w900),
               ),
             ],
@@ -314,12 +325,12 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Excellent Performance",
+                  score >= 80 ? "Excellent Performance" : score >= 50 ? "Good Performance" : "Keep Growing!",
                   style: text16(color: Colors.white, fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  "Your content engagement is 15% higher than last week.",
+                  "Your creator level is ${provider.dashboardData?.creatorLevel ?? 'Standard'}.",
                   style: text12(color: Colors.white70),
                 ),
               ],
@@ -330,7 +341,8 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     );
   }
 
-  Widget _buildStatsGrid(ProfileProvider provider) {
+  Widget _buildStatsGrid(WalletProvider provider) {
+    final data = provider.dashboardData;
     return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -339,12 +351,12 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
       mainAxisSpacing: 16,
       childAspectRatio: 1.1,
       children: [
-        _buildStatCard("Total Reels", provider.totalReels.toString(), provider.reelsGrowth, Icons.play_circle_fill_rounded, const Color(0xFF6366F1), 0),
-        _buildStatCard("Total Views", provider.totalViews.toString(), provider.viewsGrowth, Icons.remove_red_eye_rounded, const Color(0xFFEC4899), 1),
-        _buildStatCard("Total Likes", provider.totalLikes.toString(), provider.likesGrowth, Icons.favorite_rounded, const Color(0xFFEF4444), 2),
-        _buildStatCard("Total Comments", provider.totalComments.toString(), provider.commentsGrowth, Icons.comment_rounded, const Color(0xFFF59E0B), 3),
-        _buildStatCard("Total Shares", provider.totalShares.toString(), provider.sharesGrowth, Icons.share_rounded, const Color(0xFF10B981), 4),
-        _buildStatCard("Total Saves", provider.totalSaves.toString(), provider.savesGrowth, Icons.bookmark_rounded, const Color(0xFF8B5CF6), 5),
+        _buildStatCard("Qualified Views", (data?.qualifiedViews ?? 0).toString(), 0, Icons.play_circle_fill_rounded, const Color(0xFF6366F1), 0),
+        _buildStatCard("Watch Minutes", (data?.watchMinutes ?? 0).toString(), 0, Icons.remove_red_eye_rounded, const Color(0xFFEC4899), 1),
+        _buildStatCard("Total Likes", (data?.likes ?? 0).toString(), 0, Icons.favorite_rounded, const Color(0xFFEF4444), 2),
+        _buildStatCard("Total Comments", (data?.comments ?? 0).toString(), 0, Icons.comment_rounded, const Color(0xFFF59E0B), 3),
+        _buildStatCard("Total Shares", (data?.shares ?? 0).toString(), 0, Icons.share_rounded, const Color(0xFF10B981), 4),
+        _buildStatCard("Total Saves", (data?.saves ?? 0).toString(), 0, Icons.bookmark_rounded, const Color(0xFF8B5CF6), 5),
       ],
     );
   }

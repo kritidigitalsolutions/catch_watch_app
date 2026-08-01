@@ -72,4 +72,15 @@ class AppUrl {
   /// payment
   static const String createOrder = '$baseUrl/payment/create-order';
   static const String verifyPayment = '$baseUrl/payment/verify';
+
+  /// ads
+  static const String adEvent = '$baseUrl/ads/event';
+
+  /// creator & wallet
+  static const String creatorDashboard = '$baseUrl/creator/dashboard';
+  static const String creatorWallet = '$baseUrl/creator/wallet';
+  static const String creatorRedeem = '$baseUrl/creator/redeem';
+  static const String creatorRedeemHistory = '$baseUrl/creator/redeem/history';
+  static const String creatorPoints = '$baseUrl/creator/points';
+  static const String creatorPointHistory = '$baseUrl/creator/point-history';
 }

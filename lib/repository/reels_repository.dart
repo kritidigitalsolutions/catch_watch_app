@@ -74,4 +74,26 @@ class ReelsRepository {
       rethrow;
     }
   }
+
+  Future<dynamic> recordAdEvent({
+    required String adId,
+    required String campaignId,
+    required String eventType,
+    int? watchDuration,
+  }) async {
+    try {
+      final response = await _apiService.postApi(
+        AppUrl.adEvent,
+        {
+          'adId': adId,
+          'campaignId': campaignId,
+          'eventType': eventType,
+          if (watchDuration != null) 'watchDuration': watchDuration,
+        },
+      );
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
 }

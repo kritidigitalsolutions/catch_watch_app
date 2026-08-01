@@ -17,6 +17,16 @@ class ReelModel {
   String? status;
   String? createdAt;
 
+  // Ad fields
+  bool? isAd;
+  String? adId;
+  String? campaignId;
+  String? advertiserId;
+  String? adType;
+  String? ctaText;
+  String? destinationUrl;
+  int? durationSeconds;
+
   ReelModel({
     this.id,
     this.user,
@@ -32,6 +42,14 @@ class ReelModel {
     this.isBookmarked,
     this.status,
     this.createdAt,
+    this.isAd,
+    this.adId,
+    this.campaignId,
+    this.advertiserId,
+    this.adType,
+    this.ctaText,
+    this.destinationUrl,
+    this.durationSeconds,
   });
 
   factory ReelModel.fromContent(Content content) {
@@ -71,9 +89,9 @@ class ReelModel {
       return 0;
     }
 
-    videoUrl = fixUrl(json['videoUrl']);
+    videoUrl = fixUrl(json['videoUrl'] ?? json['mediaUrl']);
     thumbnail = fixUrl(json['thumbnail'] ?? json['thumbnailUrl']);
-    caption = json['caption'];
+    caption = json['caption'] ?? json['title'];
     hashtags = json['hashtags'] != null ? List<String>.from(json['hashtags']) : [];
     viewsCount = parseInt(json['viewsCount']);
     commentsCount = parseInt(json['commentsCount']);
@@ -83,6 +101,21 @@ class ReelModel {
     isBookmarked = json['isBookmarked'] ?? false;
     status = json['status'];
     createdAt = json['createdAt'];
+
+    // Ad mapping
+    isAd = json['isAd'] ?? false;
+    adId = json['adId'];
+    campaignId = json['campaignId'];
+    advertiserId = json['advertiserId'];
+    adType = json['adType'];
+    ctaText = json['ctaText'];
+    destinationUrl = json['destinationUrl'];
+    durationSeconds = parseInt(json['durationSeconds']);
+    
+    // If it's an ad and we have an adId, ensure id is set to adId for consistency
+    if (isAd == true && adId != null) {
+      id = adId;
+    }
   }
 }
 

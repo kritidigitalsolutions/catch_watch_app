@@ -440,4 +440,22 @@ class ReelsProvider extends ChangeNotifier {
       debugPrint('Error recording reel view: $e');
     }
   }
+
+  Future<void> recordAdEvent({
+    required String adId,
+    required String campaignId,
+    required String eventType,
+    int? watchDuration,
+  }) async {
+    try {
+      await _reelsRepository.recordAdEvent(
+        adId: adId,
+        campaignId: campaignId,
+        eventType: eventType,
+        watchDuration: watchDuration,
+      );
+    } catch (e) {
+      debugPrint('Error recording ad event ($eventType): $e');
+    }
+  }
 }

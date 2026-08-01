@@ -27,6 +27,7 @@ import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.d
 import 'package:catch_watch/view_model/after_login_provider/user_profile_provider.dart';
 
 import 'package:catch_watch/view_model/after_login_provider/verification_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/wallet_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -62,6 +63,7 @@ void main() async {
         ChangeNotifierProvider(create: (_) => DownloadProvider()),
         ChangeNotifierProvider(create: (_) => UserProfileProvider()),
         ChangeNotifierProvider(create: (_) => VerificationProvider()),
+        ChangeNotifierProvider(create: (_) => WalletProvider()),
       ],
       child: const MyApp(),
     ),

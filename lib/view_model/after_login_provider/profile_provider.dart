@@ -17,8 +17,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 enum ProfileTab { videos, cuts, saved, liked }
-enum TimeFilter { today, week, month, year }
-enum DashboardMetric { reels, views, likes, comments, shares, saves, points }
 
 class ProfileProvider extends ChangeNotifier {
   final AuthRepository _authRepository = AuthRepository();
@@ -40,26 +38,6 @@ class ProfileProvider extends ChangeNotifier {
   List<UserModel> _followingList = [];
   final Set<String> _followingIds = {};
 
-  // Dashboard Stats (Dummy for now)
-  int _totalViews = 12500;
-  int _totalLikes = 4500;
-  int _totalShares = 850;
-  int _totalComments = 1200;
-  int _totalSaves = 620;
-  int _redeemedPoints = 0;
-  
-  // Growth percentages
-  double _reelsGrowth = 5.2;
-  double _viewsGrowth = 12.8;
-  double _likesGrowth = -2.4;
-  double _sharesGrowth = 15.0;
-  double _commentsGrowth = 8.3;
-  double _savesGrowth = 10.5;
-  double _pointsGrowth = 11.2;
-
-  TimeFilter _selectedTimeFilter = TimeFilter.week;
-  DashboardMetric _selectedGraphMetric = DashboardMetric.views;
-
   UserModel? get user => _user;
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -70,94 +48,6 @@ class ProfileProvider extends ChangeNotifier {
   List<ReelModel> get localDrafts => _localDrafts;
   List<UserModel> get followersList => _followersList;
   List<UserModel> get followingList => _followingList;
-
-  // Getters for Dashboard
-  int get totalViews => _totalViews;
-  int get totalLikes => _totalLikes;
-  int get totalShares => _totalShares;
-  int get totalComments => _totalComments;
-  int get totalSaves => _totalSaves;
-  int get totalReels => _myReels.length;
-
-  double get reelsGrowth => _reelsGrowth;
-  double get viewsGrowth => _viewsGrowth;
-  double get likesGrowth => _likesGrowth;
-  double get sharesGrowth => _sharesGrowth;
-  double get commentsGrowth => _commentsGrowth;
-  double get savesGrowth => _savesGrowth;
-  double get pointsGrowth => _pointsGrowth;
-
-  TimeFilter get selectedTimeFilter => _selectedTimeFilter;
-  DashboardMetric get selectedGraphMetric => _selectedGraphMetric;
-  
-  // Logic: Views*1 + Likes*2 + Comments*5 + Shares*10
-  int get totalPoints => ((_totalViews * 1) + (_totalLikes * 2) + (_totalComments * 5) + (_totalShares * 10) + (_totalSaves * 3)) - _redeemedPoints;
-
-  List<Map<String, dynamic>> _pointsHistory = [
-    {'title': 'Points Earned from Reels', 'amount': '+4,550', 'date': 'Today', 'isCredit': true},
-    {'title': 'Bonus for 10k Views', 'amount': '+10,000', 'date': 'Yesterday', 'isCredit': true},
-    {'title': 'Points Redeemed', 'amount': '-2,500', 'date': '28 Jul', 'isCredit': false},
-    {'title': 'Weekly Engagement Reward', 'amount': '+1,275', 'date': '25 Jul', 'isCredit': true},
-  ];
-
-  List<Map<String, dynamic>> get transactionHistory => _pointsHistory;
-
-  void redeemPoints(int points) {
-    if (points <= totalPoints && points > 0) {
-      _redeemedPoints += points;
-      _pointsHistory.insert(0, {
-        'title': 'Points Redeemed',
-        'amount': '-$points',
-        'date': 'Just now',
-        'isCredit': false,
-      });
-      notifyListeners();
-    }
-  }
-
-  void setTimeFilter(TimeFilter filter) {
-    _selectedTimeFilter = filter;
-    // In a real app, we would fetch new data here
-    notifyListeners();
-  }
-
-  void setGraphMetric(DashboardMetric metric) {
-    _selectedGraphMetric = metric;
-    notifyListeners();
-  }
-
-  List<double> getGraphData() {
-    final Random random = Random();
-    int count = 7;
-    double baseValue = 50.0;
-
-    switch (_selectedTimeFilter) {
-      case TimeFilter.today:
-        count = 12; // Every 2 hours
-        break;
-      case TimeFilter.week:
-        count = 7; // Days
-        break;
-      case TimeFilter.month:
-        count = 4; // Weeks
-        break;
-      case TimeFilter.year:
-        count = 12; // Months
-        break;
-    }
-
-    switch (_selectedGraphMetric) {
-      case DashboardMetric.reels: baseValue = 10.0; break;
-      case DashboardMetric.views: baseValue = 500.0; break;
-      case DashboardMetric.likes: baseValue = 100.0; break;
-      case DashboardMetric.comments: baseValue = 30.0; break;
-      case DashboardMetric.shares: baseValue = 20.0; break;
-      case DashboardMetric.saves: baseValue = 15.0; break;
-      case DashboardMetric.points: baseValue = 1000.0; break;
-    }
-
-    return List.generate(count, (i) => baseValue + random.nextDouble() * (baseValue / 2));
-  }
 
   bool isUserFollowed(String userId) => _followingIds.contains(userId);
 

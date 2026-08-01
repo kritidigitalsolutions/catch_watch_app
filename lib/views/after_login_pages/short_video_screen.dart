@@ -8,6 +8,8 @@ import 'package:catch_watch/views/after_login_pages/profile_page/user_profile_sc
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
 import '../../utils/hive_service/hive_service.dart';
 import '../../res/appUrl.dart' show AppUrl;
@@ -349,13 +351,18 @@ class _ShortVideoPage extends StatefulWidget {
 
 class _ShortVideoPageState extends State<_ShortVideoPage> {
   VideoPlayerController? _controller;
+  YoutubePlayerController? _ytController;
   bool _hasStarted = false;
   bool _showPlayIcon = false;
+  bool _isYoutube = false;
   
   // Tracking logic
   late final Stopwatch _watchStopwatch;
   bool _viewRecorded = false;
+  bool _impressionRecorded = false;
   static const int _viewThresholdSeconds = 3;
+  static const int _qualifiedViewThresholdSeconds = 10;
+  bool _qualifiedViewRecorded = false;
 
   @override
   void initState() {
@@ -367,6 +374,27 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   Future<void> _initializeVideo() async {
     final videoUrl = widget.reel.videoUrl ?? '';
     if (videoUrl.isEmpty) return;
+
+    if (videoUrl.contains('youtube.com') || videoUrl.contains('youtu.be')) {
+      _isYoutube = true;
+      final videoId = YoutubePlayer.convertUrlToId(videoUrl);
+      if (videoId != null) {
+        _ytController = YoutubePlayerController(
+          initialVideoId: videoId,
+          flags: const YoutubePlayerFlags(
+            autoPlay: false,
+            mute: false,
+            loop: true,
+            hideControls: true,
+            disableDragSeek: true,
+            showLiveFullscreenButton: false,
+          ),
+        );
+      }
+      if (mounted) setState(() {});
+      _syncPlayback();
+      return;
+    }
 
     if (_controller != null) {
       await _controller!.dispose();
@@ -412,6 +440,30 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   }
 
   void _syncPlayback() {
+    if (_isYoutube) {
+      if (_ytController == null) return;
+      if (mounted) {
+        setState(() {
+          if (widget.isActive) {
+            _ytController!.play();
+            _hasStarted = true;
+            _watchStopwatch.start();
+            _ytController!.addListener(_ytVideoListener);
+          } else {
+            _ytController!.pause();
+            _ytController!.seekTo(Duration.zero);
+            _hasStarted = false;
+            if (_watchStopwatch.isRunning) {
+              _watchStopwatch.stop();
+              _reportViewIfNecessary();
+            }
+            _ytController!.removeListener(_ytVideoListener);
+          }
+        });
+      }
+      return;
+    }
+
     if (_controller == null || !_controller!.value.isInitialized) return;
 
     if (mounted) {
@@ -438,9 +490,52 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   }
 
   void _videoListener() {
+    if (!_impressionRecorded && widget.reel.isAd == true && _watchStopwatch.elapsed.inMilliseconds > 100) {
+      _recordAdImpression();
+    }
+
     if (!_viewRecorded && _watchStopwatch.elapsed.inSeconds >= _viewThresholdSeconds) {
       _reportViewIfNecessary();
     }
+    
+    if (widget.reel.isAd == true && !_qualifiedViewRecorded && _watchStopwatch.elapsed.inSeconds >= _qualifiedViewThresholdSeconds) {
+      _recordAdQualifiedView();
+    }
+  }
+
+  void _ytVideoListener() {
+    if (!_impressionRecorded && widget.reel.isAd == true && _watchStopwatch.elapsed.inMilliseconds > 100) {
+      _recordAdImpression();
+    }
+
+    if (!_viewRecorded && _watchStopwatch.elapsed.inSeconds >= _viewThresholdSeconds) {
+      _reportViewIfNecessary();
+    }
+
+    if (widget.reel.isAd == true && !_qualifiedViewRecorded && _watchStopwatch.elapsed.inSeconds >= _qualifiedViewThresholdSeconds) {
+      _recordAdQualifiedView();
+    }
+  }
+
+  void _recordAdImpression() {
+    if (_impressionRecorded || widget.reel.adId == null) return;
+    _impressionRecorded = true;
+    context.read<ReelsProvider>().recordAdEvent(
+      adId: widget.reel.adId!,
+      campaignId: widget.reel.campaignId ?? '',
+      eventType: 'IMPRESSION',
+    );
+  }
+
+  void _recordAdQualifiedView() {
+    if (_qualifiedViewRecorded || widget.reel.adId == null) return;
+    _qualifiedViewRecorded = true;
+    context.read<ReelsProvider>().recordAdEvent(
+      adId: widget.reel.adId!,
+      campaignId: widget.reel.campaignId ?? '',
+      eventType: 'QUALIFIED_VIEW',
+      watchDuration: _watchStopwatch.elapsed.inSeconds,
+    );
   }
 
   void _reportViewIfNecessary() {
@@ -451,12 +546,36 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
       _viewRecorded = true;
       final reelId = widget.reel.id;
       if (reelId != null) {
-        context.read<ReelsProvider>().recordReelView(reelId, _watchStopwatch.elapsed.inSeconds);
+        if (widget.reel.isAd == true && widget.reel.adId != null) {
+          context.read<ReelsProvider>().recordAdEvent(
+            adId: widget.reel.adId!,
+            campaignId: widget.reel.campaignId ?? '',
+            eventType: 'VIEW',
+            watchDuration: _watchStopwatch.elapsed.inSeconds,
+          );
+        } else {
+          context.read<ReelsProvider>().recordReelView(reelId, _watchStopwatch.elapsed.inSeconds);
+        }
       }
     }
   }
 
   void _togglePlay() {
+    if (_isYoutube) {
+      if (_ytController == null) return;
+      setState(() {
+        if (_ytController!.value.isPlaying) {
+          _ytController!.pause();
+          _watchStopwatch.stop();
+        } else {
+          _ytController!.play();
+          _hasStarted = true;
+          _watchStopwatch.start();
+        }
+      });
+      return;
+    }
+
     if (_controller == null || !_controller!.value.isInitialized) return;
 
     setState(() {
@@ -477,23 +596,35 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   void dispose() {
     _controller?.removeListener(_videoListener);
     _controller?.dispose();
+    _ytController?.dispose();
     _watchStopwatch.stop();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final bool isAd = widget.reel.isAd == true;
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: _togglePlay,
+      onTap: isAd ? _handleAdClick : _togglePlay,
       child: Stack(
         fit: StackFit.expand,
         children: [
           _VideoBackground(
             controller: _controller,
+            ytController: _ytController,
             reel: widget.reel,
             hasStarted: _hasStarted,
           ),
+          if (isAd)
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _handleAdClick,
+                behavior: HitTestBehavior.opaque,
+                child: Container(color: Colors.transparent),
+              ),
+            ),
           const _ShortGradient(),
           Positioned(
             top: MediaQuery.paddingOf(context).top + 12,
@@ -502,7 +633,7 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
             child: Row(
               children: [
                 Text(
-                  'Reels',
+                  isAd ? 'Sponsored' : 'Reels',
                   style: text24(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
@@ -512,35 +643,38 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
               ],
             ),
           ),
-          Positioned(
-            right: 12,
-            bottom: 112 + MediaQuery.paddingOf(context).bottom,
-            child: _ShortActions(
-              reel: widget.reel,
-              onLike: widget.onLike,
-              onSave: widget.onSave,
-              onComment: widget.onComment,
+          if (!isAd)
+            Positioned(
+              right: 12,
+              bottom: 112 + MediaQuery.paddingOf(context).bottom,
+              child: _ShortActions(
+                reel: widget.reel,
+                onLike: widget.onLike,
+                onSave: widget.onSave,
+                onComment: widget.onComment,
+              ),
             ),
-          ),
           Positioned(
             left: 16,
-            right: 82,
+            right: isAd ? 16 : 82,
             bottom: 34 + MediaQuery.paddingOf(context).bottom,
             child: _ShortInfo(reel: widget.reel),
           ),
-          Positioned(
-            right: 18,
-            bottom: 40 + MediaQuery.paddingOf(context).bottom,
-            child: _MusicDisc(image: widget.reel.thumbnail),
-          ),
-          if (_controller == null || !_controller!.value.isInitialized)
-            const Center(
-              child: CircularProgressIndicator(
-                color: Colors.white,
-                strokeWidth: 2.5,
-              ),
+          if (!isAd)
+            Positioned(
+              right: 18,
+              bottom: 40 + MediaQuery.paddingOf(context).bottom,
+              child: _MusicDisc(image: widget.reel.thumbnail),
             ),
-          if (_showPlayIcon)
+          if (_controller == null || !_controller!.value.isInitialized)
+            if (!isAd || (widget.reel.videoUrl != null && !widget.reel.videoUrl!.contains('youtube.com')))
+              const Center(
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2.5,
+                ),
+              ),
+          if (_showPlayIcon && !isAd)
             Center(
               child: Container(
                 width: 74,
@@ -556,26 +690,65 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
                 ),
               ),
             ),
+          if (isAd)
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _handleAdClick,
+                behavior: HitTestBehavior.opaque,
+                child: Container(color: Colors.transparent),
+              ),
+            ),
         ],
       ),
     );
+  }
+
+  void _handleAdClick() async {
+    final reel = widget.reel;
+    if (reel.destinationUrl != null) {
+      final url = Uri.parse(reel.destinationUrl!);
+      if (await canLaunchUrl(url)) {
+        // Record CLICK event
+        if (reel.adId != null) {
+          context.read<ReelsProvider>().recordAdEvent(
+            adId: reel.adId!,
+            campaignId: reel.campaignId ?? '',
+            eventType: 'CLICK',
+          );
+        }
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      }
+    }
   }
 }
 
 
 class _VideoBackground extends StatelessWidget {
   final VideoPlayerController? controller;
+  final YoutubePlayerController? ytController;
   final ReelModel reel;
   final bool hasStarted;
 
   const _VideoBackground({
     required this.controller,
+    this.ytController,
     required this.reel,
     required this.hasStarted,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (ytController != null) {
+      return YoutubePlayer(
+        controller: ytController!,
+        showVideoProgressIndicator: false,
+      );
+    }
+
+    if (reel.isAd == true && (reel.videoUrl?.contains('magnific.com') == true || reel.videoUrl?.endsWith('.jpg') == true || reel.videoUrl?.endsWith('.png') == true)) {
+        return Image.network(reel.videoUrl!, fit: BoxFit.cover);
+    }
+
     if (controller == null || !controller!.value.isInitialized) {
       return reel.thumbnail != null && reel.thumbnail!.isNotEmpty
           ? Image.network(reel.thumbnail!, fit: BoxFit.cover)
@@ -732,42 +905,37 @@ class _ShortInfo extends StatelessWidget {
   Widget build(BuildContext context) {
     final reelsProvider = context.read<ReelsProvider>();
     final currentUser = HiveService.getUser();
-    final bool isSelf = currentUser?.sId == reel.user?.id;
+    final bool isAd = reel.isAd == true;
+    final bool isSelf = !isAd && currentUser?.sId == reel.user?.id;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            GestureDetector(
-              onTap: () {
-                if (reel.user?.username != null) {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => UserProfileScreen(username: reel.user!.username!),
-                    ),
-                  );
-                }
-              },
-              child: CircleAvatar(
-                radius: 20,
-                backgroundImage: reel.user?.profileImage != null && reel.user!.profileImage!.isNotEmpty
-                    ? NetworkImage(reel.user!.profileImage!)
-                    : null,
-                backgroundColor: AppColors.primary,
-                child: reel.user?.profileImage == null || reel.user!.profileImage!.isEmpty
-                    ? Text(
-                        reel.user?.name?[0] ?? '?',
-                        style: text16(color: Colors.white, fontWeight: FontWeight.w800),
-                      )
-                    : null,
+        if (isAd)
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: const BoxDecoration(
+                  color: Colors.white24,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.campaign_rounded, color: Colors.white, size: 20),
               ),
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: GestureDetector(
+              const SizedBox(width: 8),
+              Text(
+                'Sponsored',
+                style: text14(color: Colors.white, fontWeight: FontWeight.w800),
+              ),
+              const Spacer(),
+            ],
+          )
+        else
+          Row(
+            children: [
+              GestureDetector(
                 onTap: () {
                   if (reel.user?.username != null) {
                     Navigator.push(
@@ -778,53 +946,80 @@ class _ShortInfo extends StatelessWidget {
                     );
                   }
                 },
-                child: Text(
-                  reel.user?.username ?? '@unknown',
-                  overflow: TextOverflow.ellipsis,
-                  style: text14(color: Colors.white, fontWeight: FontWeight.w800),
+                child: CircleAvatar(
+                  radius: 20,
+                  backgroundImage: reel.user?.profileImage != null && reel.user!.profileImage!.isNotEmpty
+                      ? NetworkImage(reel.user!.profileImage!)
+                      : null,
+                  backgroundColor: AppColors.primary,
+                  child: reel.user?.profileImage == null || reel.user!.profileImage!.isEmpty
+                      ? Text(
+                          reel.user?.name?[0] ?? '?',
+                          style: text16(color: Colors.white, fontWeight: FontWeight.w800),
+                        )
+                      : null,
                 ),
               ),
-            ),
-            if (reel.user?.isVerified == true || reel.user?.blueTick == true) ...[
-              const SizedBox(width: 4),
-              const Icon(Icons.verified_rounded, color: Colors.blue, size: 14),
-            ],
-            if (!isSelf && reel.user?.id != null) ...[
-              const SizedBox(width: 12),
-              Selector<ProfileProvider, bool>(
-                selector: (_, p) => p.isUserFollowed(reel.user!.id!),
-                builder: (context, isFollowing, _) {
-                  return GestureDetector(
-                    onTap: () async {
-                      await reelsProvider.toggleFollow(reel.user!.id!, reel: reel);
-                      if (context.mounted) {
-                        context.read<ProfileProvider>().syncFollowStatus(
-                          reel.user!.id!, 
-                          reelsProvider.isUserFollowed(reel.user!.id!),
-                        );
-                      }
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: isFollowing ? Colors.white.withOpacity(0.5) : Colors.white,
-                          width: 1.2,
+              const SizedBox(width: 8),
+              Flexible(
+                child: GestureDetector(
+                  onTap: () {
+                    if (reel.user?.username != null) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => UserProfileScreen(username: reel.user!.username!),
                         ),
-                        color: isFollowing ? Colors.white.withOpacity(0.12) : AppColors.primary.withOpacity(0.9),
-                      ),
-                      child: Text(
-                        isFollowing ? 'Following' : 'Follow',
-                        style: text11(color: Colors.white, fontWeight: FontWeight.w800),
-                      ),
-                    ),
-                  );
-                },
+                      );
+                    }
+                  },
+                  child: Text(
+                    reel.user?.username ?? '@unknown',
+                    overflow: TextOverflow.ellipsis,
+                    style: text14(color: Colors.white, fontWeight: FontWeight.w800),
+                  ),
+                ),
               ),
+              if (reel.user?.isVerified == true || reel.user?.blueTick == true) ...[
+                const SizedBox(width: 4),
+                const Icon(Icons.verified_rounded, color: Colors.blue, size: 14),
+              ],
+              if (!isSelf && reel.user?.id != null) ...[
+                const SizedBox(width: 12),
+                Selector<ProfileProvider, bool>(
+                  selector: (_, p) => p.isUserFollowed(reel.user!.id!),
+                  builder: (context, isFollowing, _) {
+                    return GestureDetector(
+                      onTap: () async {
+                        await reelsProvider.toggleFollow(reel.user!.id!, reel: reel);
+                        if (context.mounted) {
+                          context.read<ProfileProvider>().syncFollowStatus(
+                            reel.user!.id!, 
+                            reelsProvider.isUserFollowed(reel.user!.id!),
+                          );
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isFollowing ? Colors.white.withOpacity(0.5) : Colors.white,
+                            width: 1.2,
+                          ),
+                          color: isFollowing ? Colors.white.withOpacity(0.12) : AppColors.primary.withOpacity(0.9),
+                        ),
+                        child: Text(
+                          isFollowing ? 'Following' : 'Follow',
+                          style: text11(color: Colors.white, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ],
-          ],
-        ),
+          ),
         const SizedBox(height: 12),
         Text(
           reel.caption ?? '',
@@ -832,6 +1027,34 @@ class _ShortInfo extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: text14(color: Colors.white.withValues(alpha: 0.86)),
         ),
+        if (isAd && reel.ctaText != null && reel.ctaText!.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withOpacity(0.4),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  reel.ctaText!,
+                  style: text14(color: Colors.white, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.open_in_new_rounded, color: Colors.white, size: 16),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 9),
         Row(
           children: [
@@ -839,7 +1062,7 @@ class _ShortInfo extends StatelessWidget {
             const SizedBox(width: 5),
             Expanded(
               child: Text(
-                'Original Audio - ${reel.user?.username ?? 'User'}',
+                isAd ? 'Sponsored Content' : 'Original Audio - ${reel.user?.username ?? 'User'}',
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12),
               ),

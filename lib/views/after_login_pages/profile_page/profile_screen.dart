@@ -24,6 +24,7 @@ import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
 import '../../../view_model/after_login_provider/profile_provider.dart';
 import '../../../view_model/after_login_provider/reels_provider.dart';
+import '../../../view_model/after_login_provider/wallet_provider.dart';
 import '../movie_details_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -46,7 +47,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ProfileProvider>().fetchProfile();
       context.read<VerificationProvider>().fetchVerificationStatus();
-      
+      context.read<WalletProvider>().fetchPointsSummary();
+      context.read<WalletProvider>().fetchWalletSummary();
+
       // Listen to page changes in HomeScreenProvider to refresh profile when navigating to it
       final homeProvider = context.read<HomeScreenProvider>();
       homeProvider.addListener(_homeProviderListener);
@@ -289,83 +292,89 @@ class _ExpandedHeader extends StatelessWidget {
     final topPadding = MediaQuery.of(context).padding.top;
 
     return Container(
-      padding: EdgeInsets.only(top: topPadding + 16, bottom: 20),
       decoration: const BoxDecoration(
         color: AppColors.primary,
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            // Avatar
-            Container(
-              padding: const EdgeInsets.all(2.5),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-              ),
-              child: provider.user?.profileImage != null && provider.user!.profileImage!.isNotEmpty
-                  ? CircleAvatar(
-                      radius: 35,
-                      backgroundImage: NetworkImage(provider.user!.profileImage!),
-                    )
-                  : CircleAvatar(
-                      radius: 35,
-                      backgroundColor: AppColors.grey200,
-                      child: const Icon(Icons.person, size: 40, color: Colors.white),
-                    ),
-            ),
-            const SizedBox(width: 14),
-            // Info & Buttons
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        provider.name,
-                        style: text18(color: Colors.white, fontWeight: FontWeight.w900),
-                      ),
-                      if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
-                        const SizedBox(width: 6),
-                        const Icon(Icons.verified_rounded, 
-                            color: Colors.blue, size: 18),
-                      ],
-                    ],
+      child: Stack(
+        children: [
+          Padding(
+            padding: EdgeInsets.only(top: topPadding + 16, bottom: 20, left: 14, right: 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Avatar
+                Container(
+                  padding: const EdgeInsets.all(2.5),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
                   ),
-                  Text(
-                    provider.handle,
-                    style: text13(color: Colors.white.withOpacity(0.8)),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      _actionPill(
-                        context,
-                        const Icon(Icons.stars_rounded, color: AppColors.yellow, size: 14),
-                        "${provider.totalPoints} Pts",
-                        () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WalletScreen())),
-                      ),
-                      if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.isVerified != true && provider.user?.blueTick != true) ...[
-                        const SizedBox(width: 8),
-                        _actionPill(
-                          context,
-                          const Icon(Icons.verified_rounded, color: Colors.blue, size: 12),
-                          "Get Blue Tick",
-                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VerificationMainScreen())),
-                          isPrimary: true,
+                  child: provider.user?.profileImage != null && provider.user!.profileImage!.isNotEmpty
+                      ? CircleAvatar(
+                          radius: 35,
+                          backgroundImage: NetworkImage(provider.user!.profileImage!),
+                        )
+                      : CircleAvatar(
+                          radius: 35,
+                          backgroundColor: AppColors.grey200,
+                          child: const Icon(Icons.person, size: 40, color: Colors.white),
                         ),
-                      ],
+                ),
+                const SizedBox(width: 14),
+                // Info & Buttons
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            provider.name,
+                            style: text18(color: Colors.white, fontWeight: FontWeight.w900),
+                          ),
+                          if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
+                            const SizedBox(width: 6),
+                            const Icon(Icons.verified_rounded, 
+                                color: Colors.blue, size: 18),
+                          ],
+                        ],
+                      ),
+                      Text(
+                        provider.handle,
+                        style: text13(color: Colors.white.withOpacity(0.8)),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          _actionPill(
+                            context,
+                            const Icon(Icons.stars_rounded, color: AppColors.yellow, size: 14),
+                            "${context.watch<WalletProvider>().availablePoints} Pts",
+                            () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WalletScreen())),
+                          ),
+                          if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.isVerified != true && provider.user?.blueTick != true) ...[
+                            const SizedBox(width: 8),
+                            _actionPill(
+                              context,
+                              const Icon(Icons.verified_rounded, color: Colors.blue, size: 12),
+                              "Get Blue Tick",
+                              () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VerificationMainScreen())),
+                              isPrimary: true,
+                            ),
+                          ],
+                        ],
+                      ),
                     ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            // Dashboard & Menu buttons on the same line but at the corner
-            Row(
+          ),
+          Positioned(
+            top: topPadding + 8,
+            right: 14,
+            child: Row(
               children: [
                 _glassIconButton(
                   Icons.grid_view_rounded,
@@ -378,8 +387,8 @@ class _ExpandedHeader extends StatelessWidget {
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
