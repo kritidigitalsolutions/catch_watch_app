@@ -7,9 +7,13 @@ import '../res/appUrl.dart';
 class WalletRepository {
   final BaseApiService _apiService = NetworkApiService();
 
-  Future<CreatorDashboardData> getDashboardData() async {
+  Future<CreatorDashboardData> getDashboardData({String? range}) async {
     try {
-      dynamic response = await _apiService.getApi(AppUrl.creatorDashboard);
+      String url = AppUrl.creatorDashboard;
+      if (range != null) {
+        url += '?range=$range';
+      }
+      dynamic response = await _apiService.getApi(url);
       return CreatorDashboardData.fromJson(response);
     } catch (e) {
       rethrow;

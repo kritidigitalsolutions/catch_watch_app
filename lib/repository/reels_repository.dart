@@ -75,6 +75,42 @@ class ReelsRepository {
     }
   }
 
+  Future<dynamic> incrementShares(String reelId) async {
+    try {
+      final response = await _apiService.postApi(AppUrl.shareReel(reelId), {});
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> getCommentCount(String reelId) async {
+    try {
+      final response = await _apiService.getApi(AppUrl.reelCommentCount(reelId));
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> saveReel(String reelId) async {
+    try {
+      final response = await _apiService.postApi(AppUrl.saveReel(reelId), {});
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> unsaveReel(String reelId) async {
+    try {
+      final response = await _apiService.postApi(AppUrl.unsaveReel(reelId), {});
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<dynamic> recordAdEvent({
     required String adId,
     required String campaignId,

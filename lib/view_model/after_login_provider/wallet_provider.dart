@@ -37,6 +37,16 @@ class WalletProvider extends ChangeNotifier {
     return 0;
   }
 
+  int get periodPoints {
+    if (_dashboardData == null) return 0;
+    switch (_selectedTimeFilter) {
+      case TimeFilter.today: return _dashboardData!.todayPoints ?? 0;
+      case TimeFilter.week: return _dashboardData!.weeklyPoints ?? 0;
+      case TimeFilter.month: return _dashboardData!.monthlyPoints ?? 0;
+      case TimeFilter.year: return _dashboardData!.totalPoints ?? 0;
+    }
+  }
+
   TimeFilter _selectedTimeFilter = TimeFilter.week;
   TimeFilter get selectedTimeFilter => _selectedTimeFilter;
 
@@ -91,7 +101,7 @@ class WalletProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _dashboardData = await _walletRepository.getDashboardData();
+      _dashboardData = await _walletRepository.getDashboardData(range: _selectedTimeFilter.name.toLowerCase());
       if (_dashboardData?.pointHistory != null) {
         _pointHistory = _dashboardData!.pointHistory!;
       }

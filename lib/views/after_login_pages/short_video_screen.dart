@@ -836,6 +836,7 @@ class _ShortActions extends StatelessWidget {
           icon: Icons.share_rounded,
           label: 'Share',
           onTap: () {
+            context.read<ReelsProvider>().incrementShares(reel.id!, reel: reel);
             ShareHelper.shareContent(
               title: 'Catch Watch Reel',
               text: 'Check out this Reel: ${reel.caption}',

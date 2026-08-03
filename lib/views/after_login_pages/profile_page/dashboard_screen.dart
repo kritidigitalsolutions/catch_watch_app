@@ -70,7 +70,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                   _buildSliverHeader(profileProvider, walletProvider),
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -82,12 +82,12 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                           const SizedBox(height: 32),
                           _buildSectionTitle("Performance Summary"),
                           const SizedBox(height: 16),
-                          _buildStatsGrid(walletProvider),
-                          const SizedBox(height: 40),
                         ],
                       ),
                     ),
                   ),
+                  _buildStatsGrid(walletProvider),
+                  const SliverToBoxAdapter(child: SizedBox(height: 40)),
                 ],
               ),
             ),
@@ -343,31 +343,47 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
 
   Widget _buildStatsGrid(WalletProvider provider) {
     final data = provider.dashboardData;
-    return GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
-      crossAxisSpacing: 16,
-      mainAxisSpacing: 16,
-      childAspectRatio: 1.1,
-      children: [
-        _buildStatCard("Qualified Views", (data?.qualifiedViews ?? 0).toString(), 0, Icons.play_circle_fill_rounded, const Color(0xFF6366F1), 0),
-        _buildStatCard("Watch Minutes", (data?.watchMinutes ?? 0).toString(), 0, Icons.remove_red_eye_rounded, const Color(0xFFEC4899), 1),
-        _buildStatCard("Total Likes", (data?.likes ?? 0).toString(), 0, Icons.favorite_rounded, const Color(0xFFEF4444), 2),
-        _buildStatCard("Total Comments", (data?.comments ?? 0).toString(), 0, Icons.comment_rounded, const Color(0xFFF59E0B), 3),
-        _buildStatCard("Total Shares", (data?.shares ?? 0).toString(), 0, Icons.share_rounded, const Color(0xFF10B981), 4),
-        _buildStatCard("Total Saves", (data?.saves ?? 0).toString(), 0, Icons.bookmark_rounded, const Color(0xFF8B5CF6), 5),
-      ],
+    final stats = [
+      ("Points Earned", provider.periodPoints.toString(), 0.0, Icons.stars_rounded, AppColors.yellow),
+      ("Qualified Views", (data?.qualifiedViews ?? 0).toString(), 0.0, Icons.play_circle_fill_rounded, const Color(0xFF6366F1)),
+      ("Watch Minutes", (data?.watchMinutes ?? 0).toString(), 0.0, Icons.remove_red_eye_rounded, const Color(0xFFEC4899)),
+      ("Total Likes", (data?.likes ?? 0).toString(), 0.0, Icons.favorite_rounded, const Color(0xFFEF4444)),
+      ("Total Comments", (data?.comments ?? 0).toString(), 0.0, Icons.comment_rounded, const Color(0xFFF59E0B)),
+      ("Total Shares", (data?.shares ?? 0).toString(), 0.0, Icons.share_rounded, const Color(0xFF10B981)),
+      ("Total Saves", (data?.saves ?? 0).toString(), 0.0, Icons.bookmark_rounded, const Color(0xFF8B5CF6)),
+    ];
+
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      sliver: SliverGrid(
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 16,
+          mainAxisSpacing: 16,
+          childAspectRatio: 1.1,
+        ),
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            final s = stats[index];
+            return _buildStatCard(s.$1, s.$2, s.$3, s.$4, s.$5, index);
+          },
+          childCount: stats.length,
+        ),
+      ),
     );
   }
 
   Widget _buildStatCard(String label, String value, double growth, IconData icon, Color color, int index) {
+    // Ensure animation interval is within [0, 1] bounds
+    final double start = (index * 0.1).clamp(0.0, 0.5);
+    final double end = (start + 0.5).clamp(0.0, 1.0);
+
     return SlideTransition(
       position: Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero).animate(
-        CurvedAnimation(parent: _contentController, curve: Interval(index * 0.1, 0.6, curve: Curves.easeOut)),
+        CurvedAnimation(parent: _contentController, curve: Interval(start, end, curve: Curves.easeOut)),
       ),
       child: FadeTransition(
-        opacity: CurvedAnimation(parent: _contentController, curve: Interval(index * 0.1, 0.6, curve: Curves.easeIn)),
+        opacity: CurvedAnimation(parent: _contentController, curve: Interval(start, end, curve: Curves.easeIn)),
         child: _StatCard(label: label, value: value, growth: growth, icon: icon, color: color),
       ),
     );

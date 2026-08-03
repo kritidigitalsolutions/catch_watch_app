@@ -287,10 +287,10 @@ class ReelsProvider extends ChangeNotifier {
     final mainIndex = _reels.indexWhere((r) => r.id == reelId);
     if (mainIndex != -1) targetReels.add(_reels[mainIndex]);
 
-    final bool wasBookmarked = _bookmarkedIds.contains(reelId);
+    final bool currentlyBookmarked = _bookmarkedIds.contains(reelId);
 
     // Optimistic UI update
-    if (wasBookmarked) {
+    if (currentlyBookmarked) {
       _bookmarkedIds.remove(reelId);
       for (var r in targetReels) r.isBookmarked = false;
     } else {
@@ -302,10 +302,16 @@ class ReelsProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final response = await _interactionRepository.toggleBookmark(reelId);
+      dynamic response;
+      if (currentlyBookmarked) {
+        response = await _reelsRepository.unsaveReel(reelId);
+      } else {
+        response = await _reelsRepository.saveReel(reelId);
+      }
+      
       if (response['success'] != true) {
         // Rollback
-        if (wasBookmarked) {
+        if (currentlyBookmarked) {
           _bookmarkedIds.add(reelId);
           for (var r in targetReels) r.isBookmarked = true;
         } else {
@@ -317,7 +323,7 @@ class ReelsProvider extends ChangeNotifier {
       }
     } catch (e) {
       // Rollback
-      if (wasBookmarked) {
+      if (currentlyBookmarked) {
         _bookmarkedIds.add(reelId);
         for (var r in targetReels) r.isBookmarked = true;
       } else {
@@ -357,14 +363,16 @@ class ReelsProvider extends ChangeNotifier {
     try {
       final response = await _interactionRepository.postComment(reelId, text);
       if (response['success'] == true) {
-        // Update local counts
-        if (reel != null) {
-          reel.commentsCount = (reel.commentsCount ?? 0) + 1;
-        }
+        // Collect all instances of this reel to update counts
+        final Set<ReelModel> targetReels = {};
+        if (reel != null) targetReels.add(reel);
         final index = _reels.indexWhere((r) => r.id == reelId);
-        if (index != -1) {
-          _reels[index].commentsCount = (_reels[index].commentsCount ?? 0) + 1;
+        if (index != -1) targetReels.add(_reels[index]);
+
+        for (var r in targetReels) {
+          r.commentsCount = (r.commentsCount ?? 0) + 1;
         }
+
         _reels = List.from(_reels);
 
         // Add to list if current
@@ -456,6 +464,50 @@ class ReelsProvider extends ChangeNotifier {
       );
     } catch (e) {
       debugPrint('Error recording ad event ($eventType): $e');
+    }
+  }
+
+  Future<void> incrementShares(String reelId, {ReelModel? reel}) async {
+    try {
+      final response = await _reelsRepository.incrementShares(reelId);
+      if (response['success'] == true) {
+        final newShares = response['sharesCount'];
+        
+        final Set<ReelModel> targetReels = {};
+        if (reel != null) targetReels.add(reel);
+        final index = _reels.indexWhere((r) => r.id == reelId);
+        if (index != -1) targetReels.add(_reels[index]);
+
+        for (var r in targetReels) {
+          r.sharesCount = newShares ?? (r.sharesCount ?? 0) + 1;
+        }
+
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error incrementing shares: $e');
+    }
+  }
+
+  Future<void> syncCommentCount(String reelId, {ReelModel? reel}) async {
+    try {
+      final response = await _reelsRepository.getCommentCount(reelId);
+      if (response['success'] == true) {
+        final count = response['commentCount'];
+        
+        final Set<ReelModel> targetReels = {};
+        if (reel != null) targetReels.add(reel);
+        final index = _reels.indexWhere((r) => r.id == reelId);
+        if (index != -1) targetReels.add(_reels[index]);
+
+        for (var r in targetReels) {
+          r.commentsCount = count;
+        }
+
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error syncing comment count: $e');
     }
   }
 }

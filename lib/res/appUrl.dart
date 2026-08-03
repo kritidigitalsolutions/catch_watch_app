@@ -1,5 +1,5 @@
 class AppUrl {
-  static const String serverUrl = 'http://192.168.1.28:5000';
+  static const String serverUrl = 'http://192.168.1.9:5000';
   // static const String serverUrl = 'https://api.catchandwatch.com';
   static const String baseUrl = '$serverUrl/api';
 
@@ -42,6 +42,9 @@ class AppUrl {
   static String deleteReel(String id) => '$baseUrl/reels/$id';
   static String viewReel(String id) => '$baseUrl/reels/$id/view';
   static String shareReel(String id) => '$baseUrl/reels/$id/share';
+  static String saveReel(String id) => '$baseUrl/reels/$id/save';
+  static String unsaveReel(String id) => '$baseUrl/reels/$id/unsave';
+  static String reelCommentCount(String id) => '$baseUrl/reels/$id/comment-count';
   static const String myReels = '$baseUrl/reels/my-reels';
   static String getUserReels(String userId) => '$baseUrl/reels/user/$userId';
   static const String searchReels = '$baseUrl/reels/search';
