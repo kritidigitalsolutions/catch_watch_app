@@ -116,4 +116,12 @@ class InteractionRepository {
       rethrow;
     }
   }
+
+  Future<dynamic> pinComment(String commentId, bool isPinned) async {
+    try {
+      return await _apiServices.postApi(AppUrl.pinComment(commentId), {'isPinned': isPinned});
+    } catch (e) {
+      rethrow;
+    }
+  }
 }

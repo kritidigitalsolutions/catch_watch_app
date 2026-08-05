@@ -6,6 +6,7 @@ import 'package:catch_watch/utils/share_helper.dart';
 import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/user_profile_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -88,6 +89,8 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
 
   void _showComments(ReelModel reel) {
     final provider = context.read<ReelsProvider>();
+    final String? currentUserId = HiveService.userId;
+    final bool isOwner = currentUserId != null && reel.user?.id == currentUserId;
     provider.fetchComments(reel.id!);
     final TextEditingController commentController = TextEditingController();
 
@@ -158,40 +161,61 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
                           itemBuilder: (context, index) {
                             final comment = p.currentComments[index];
                             final user = comment['user'];
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 16),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  CircleAvatar(
-                                    radius: 16,
-                                    backgroundImage: user?['profileImage'] != null && user['profileImage'].toString().isNotEmpty
-                                        ? NetworkImage(user['profileImage'].toString().startsWith('http') 
-                                            ? user['profileImage'] 
-                                            : '${AppUrl.serverUrl}/${user['profileImage']}')
-                                        : null,
-                                    child: user?['profileImage'] == null || user!['profileImage'].toString().isEmpty
-                                        ? Text(user?['name']?[0] ?? '?')
-                                        : null,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          user?['username'] ?? 'User',
-                                          style: text12(color: Colors.white70, fontWeight: FontWeight.bold),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          comment['text'] ?? '',
-                                          style: text14(color: Colors.white),
-                                        ),
-                                      ],
+                            final String? commentAuthorId = user is Map ? user['_id']?.toString() : user?.toString();
+                            final bool isAuthor = currentUserId != null && commentAuthorId == currentUserId;
+                            final bool isPinned = comment['isPinned'] ?? false;
+
+                            return GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onLongPress: (isOwner || isAuthor) ? () {
+                                HapticFeedback.mediumImpact();
+                                _showCommentOptions(context, comment, reel.id!, p);
+                              } : null,
+                              child: Padding(
+                                padding: const EdgeInsets.only(bottom: 16),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 16,
+                                      backgroundImage: user?['profileImage'] != null && user['profileImage'].toString().isNotEmpty
+                                          ? NetworkImage(user['profileImage'].toString().startsWith('http') 
+                                              ? user['profileImage'] 
+                                              : '${AppUrl.serverUrl}/${user['profileImage']}')
+                                          : null,
+                                      child: user?['profileImage'] == null || user!['profileImage'].toString().isEmpty
+                                          ? Text(user?['name']?[0] ?? '?')
+                                          : null,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Text(
+                                                user?['username'] ?? 'User',
+                                                style: text12(color: Colors.white70, fontWeight: FontWeight.bold),
+                                              ),
+                                              if (isPinned) ...[
+                                                const SizedBox(width: 8),
+                                                const Icon(Icons.push_pin_rounded, color: AppColors.primary, size: 12),
+                                                const SizedBox(width: 4),
+                                                Text('Pinned', style: text10(color: AppColors.primary)),
+                                              ]
+                                            ],
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            comment['text'] ?? '',
+                                            style: text14(color: Colors.white),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             );
                           },
@@ -241,6 +265,34 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
                 ],
               ),
             ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showCommentOptions(BuildContext context, dynamic comment, String reelId, ReelsProvider p) {
+    final bool isPinned = comment['isPinned'] ?? false;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A1A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(isPinned ? Icons.pin_end_rounded : Icons.push_pin_rounded, color: Colors.white),
+                title: Text(isPinned ? 'Unpin your comment' : 'Pin your comment', style: const TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  p.pinComment(comment['_id'], !isPinned, reelId);
+                },
+              ),
+            ],
           ),
         );
       },
@@ -305,9 +357,16 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: PageView.builder(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.black,
+        systemNavigationBarIconBrightness: Brightness.light,
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: PageView.builder(
         controller: _pageController,
         scrollDirection: Axis.vertical,
         itemCount: reels.length,
@@ -325,7 +384,7 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
           );
         },
       ),
-    );
+    ));
   }
 }
 

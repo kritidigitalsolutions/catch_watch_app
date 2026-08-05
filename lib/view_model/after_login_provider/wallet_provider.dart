@@ -142,7 +142,7 @@ class WalletProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      debugPrint("Fetching Leaderboard for range: $range");
+      debugPrint("Fetching Leaderboard for timeframe: $range");
       
       _leaderboardData = await _walletRepository.getLeaderboard(range: range);
       

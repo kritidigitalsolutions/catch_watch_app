@@ -1,6 +1,6 @@
 class AppUrl {
-  static const String serverUrl = 'http://192.168.1.39:5000';
-  // static const String serverUrl = 'https://api.catchandwatch.com';
+  // static const String serverUrl = 'http://192.168.1.39:5000';
+  static const String serverUrl = 'https://api.catchandwatch.com';
   // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
 
@@ -65,6 +65,7 @@ class AppUrl {
   /// comments
   static String reelComments(String reelId) => '$baseUrl/comments/$reelId';
   static String deleteComment(String commentId) => '$baseUrl/comments/$commentId';
+  static String pinComment(String commentId) => '$baseUrl/comments/pin/$commentId';
   /// fcm
   static const String updateFcmToken = '$baseUrl/user/fcm-token';
   /// notifications

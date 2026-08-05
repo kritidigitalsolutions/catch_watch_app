@@ -386,6 +386,43 @@ class ReelsProvider extends ChangeNotifier {
     return false;
   }
 
+  Future<void> pinComment(String commentId, bool isPinned, String reelId) async {
+    try {
+      final response = await _interactionRepository.pinComment(commentId, isPinned);
+      if (response['success'] == true) {
+        // Update local comment list
+        final index = _currentComments.indexWhere((c) => c['_id'] == commentId);
+        if (index != -1) {
+          // If we are pinning, unpin all others (as only one can be pinned usually)
+          if (isPinned) {
+            for (var c in _currentComments) {
+              c['isPinned'] = false;
+            }
+          }
+          _currentComments[index]['isPinned'] = isPinned;
+          
+          // Re-sort comments: Pinned first, then by date
+          _currentComments.sort((a, b) {
+            bool aPinned = a['isPinned'] ?? false;
+            bool bPinned = b['isPinned'] ?? false;
+            if (aPinned && !bPinned) return -1;
+            if (!aPinned && bPinned) return 1;
+            
+            // Default sort by date (newest first)
+            DateTime aTime = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
+            DateTime bTime = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
+            return bTime.compareTo(aTime);
+          });
+          
+          _currentComments = List.from(_currentComments);
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error pinning comment: $e');
+    }
+  }
+
   Future<void> toggleFollow(String userId, {ReelModel? reel}) async {
     final bool wasFollowing = _followingIds.contains(userId);
 
