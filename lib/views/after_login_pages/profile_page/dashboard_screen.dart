@@ -222,7 +222,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
             curve: Curves.easeInOutBack,
             alignment: _getAlignment(provider.selectedTimeFilter),
             child: FractionallySizedBox(
-              widthFactor: 0.25,
+              widthFactor: 0.2,
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.white,
@@ -270,9 +270,10 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
 
   Alignment _getAlignment(TimeFilter filter) {
     switch (filter) {
-      case TimeFilter.today: return Alignment.centerLeft;
-      case TimeFilter.week: return const Alignment(-0.33, 0);
-      case TimeFilter.month: return const Alignment(0.33, 0);
+      case TimeFilter.all: return Alignment.centerLeft;
+      case TimeFilter.today: return const Alignment(-0.5, 0);
+      case TimeFilter.week: return Alignment.center;
+      case TimeFilter.month: return const Alignment(0.5, 0);
       case TimeFilter.year: return Alignment.centerRight;
     }
   }
@@ -343,14 +344,17 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
 
   Widget _buildStatsGrid(WalletProvider provider) {
     final data = provider.dashboardData;
+    final filter = provider.selectedTimeFilter;
+    final isTotal = filter == TimeFilter.year;
+    
     final stats = [
       ("Points Earned", provider.periodPoints.toString(), 0.0, Icons.stars_rounded, AppColors.yellow),
-      ("Qualified Views", (data?.qualifiedViews ?? 0).toString(), 0.0, Icons.play_circle_fill_rounded, const Color(0xFF6366F1)),
+      (isTotal ? "Total Views" : "Views", provider.currentViews.toString(), 0.0, Icons.play_circle_fill_rounded, const Color(0xFF6366F1)),
       ("Watch Minutes", (data?.watchMinutes ?? 0).toString(), 0.0, Icons.remove_red_eye_rounded, const Color(0xFFEC4899)),
-      ("Total Likes", (data?.likes ?? 0).toString(), 0.0, Icons.favorite_rounded, const Color(0xFFEF4444)),
-      ("Total Comments", (data?.comments ?? 0).toString(), 0.0, Icons.comment_rounded, const Color(0xFFF59E0B)),
-      ("Total Shares", (data?.shares ?? 0).toString(), 0.0, Icons.share_rounded, const Color(0xFF10B981)),
-      ("Total Saves", (data?.saves ?? 0).toString(), 0.0, Icons.bookmark_rounded, const Color(0xFF8B5CF6)),
+      (isTotal ? "Total Likes" : "Likes", provider.currentLikes.toString(), 0.0, Icons.favorite_rounded, const Color(0xFFEF4444)),
+      (isTotal ? "Total Comments" : "Comments", provider.currentComments.toString(), 0.0, Icons.comment_rounded, const Color(0xFFF59E0B)),
+      (isTotal ? "Total Shares" : "Shares", provider.currentShares.toString(), 0.0, Icons.share_rounded, const Color(0xFF10B981)),
+      (isTotal ? "Total Saves" : "Saves", provider.currentSaves.toString(), 0.0, Icons.bookmark_rounded, const Color(0xFF8B5CF6)),
     ];
 
     return SliverPadding(

@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import '../../models/creator_dashboard_model.dart';
+import '../../models/leaderboard_model.dart';
 import '../../models/wallet_model.dart';
 import '../../repository/wallet_repository.dart';
 import 'dart:math';
 
-enum TimeFilter { today, week, month, year }
+enum TimeFilter { all, today, week, month, year }
 enum DashboardMetric { reels, views, likes, comments, shares, saves, points }
 
 class WalletProvider extends ChangeNotifier {
@@ -18,6 +19,9 @@ class WalletProvider extends ChangeNotifier {
 
   CreatorDashboardData? _dashboardData;
   CreatorDashboardData? get dashboardData => _dashboardData;
+
+  LeaderboardResponse? _leaderboardData;
+  LeaderboardResponse? get leaderboardData => _leaderboardData;
 
   WalletSummary? _walletSummary;
   WalletSummary? get walletSummary => _walletSummary;
@@ -40,6 +44,7 @@ class WalletProvider extends ChangeNotifier {
   int get periodPoints {
     if (_dashboardData == null) return 0;
     switch (_selectedTimeFilter) {
+      case TimeFilter.all: return _dashboardData!.totalPoints ?? 0;
       case TimeFilter.today: return _dashboardData!.todayPoints ?? 0;
       case TimeFilter.week: return _dashboardData!.weeklyPoints ?? 0;
       case TimeFilter.month: return _dashboardData!.monthlyPoints ?? 0;
@@ -47,7 +52,25 @@ class WalletProvider extends ChangeNotifier {
     }
   }
 
-  TimeFilter _selectedTimeFilter = TimeFilter.week;
+  DashboardTimeStats get _currentTimeStats {
+    if (_dashboardData?.timeStats == null) {
+      return DashboardTimeStats(likes: 0, comments: 0, views: 0, saves: 0, shares: 0);
+    }
+    String key = _selectedTimeFilter.name.toLowerCase();
+    if (key == 'all') key = 'total';
+    
+    return _dashboardData!.timeStats![key] ?? 
+           _dashboardData!.timeStats!['total'] ??
+           DashboardTimeStats(likes: 0, comments: 0, views: 0, saves: 0, shares: 0);
+  }
+
+  int get currentLikes => _currentTimeStats.likes;
+  int get currentComments => _currentTimeStats.comments;
+  int get currentViews => _currentTimeStats.views;
+  int get currentSaves => _currentTimeStats.saves;
+  int get currentShares => _currentTimeStats.shares;
+
+  TimeFilter _selectedTimeFilter = TimeFilter.all;
   TimeFilter get selectedTimeFilter => _selectedTimeFilter;
 
   DashboardMetric _selectedGraphMetric = DashboardMetric.views;
@@ -107,6 +130,26 @@ class WalletProvider extends ChangeNotifier {
       }
     } catch (e) {
       _error = e.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> fetchLeaderboard({String range = 'all'}) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      debugPrint("Fetching Leaderboard for range: $range");
+      
+      _leaderboardData = await _walletRepository.getLeaderboard(range: range);
+      
+      debugPrint("Leaderboard fetch success: ${_leaderboardData?.leaderboard?.length} users");
+    } catch (e) {
+      _error = e.toString();
+      debugPrint("Leaderboard fetch error: $e");
     } finally {
       _isLoading = false;
       notifyListeners();

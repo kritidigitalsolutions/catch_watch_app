@@ -1,6 +1,7 @@
 class AppUrl {
-  static const String serverUrl = 'http://192.168.1.9:5000';
+  static const String serverUrl = 'http://192.168.1.39:5000';
   // static const String serverUrl = 'https://api.catchandwatch.com';
+  // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
 
   // Auth Endpoints
@@ -81,6 +82,7 @@ class AppUrl {
 
   /// creator & wallet
   static const String creatorDashboard = '$baseUrl/creator/dashboard';
+  static const String creatorLeaderboard = '$baseUrl/creator/leaderboard';
   static const String creatorWallet = '$baseUrl/creator/wallet';
   static const String creatorRedeem = '$baseUrl/creator/redeem';
   static const String creatorRedeemHistory = '$baseUrl/creator/redeem/history';

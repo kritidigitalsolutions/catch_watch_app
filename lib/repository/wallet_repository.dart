@@ -1,6 +1,7 @@
 import '../data/network/api_network_service.dart';
 import '../data/network/base_api_service.dart';
 import '../models/creator_dashboard_model.dart';
+import '../models/leaderboard_model.dart';
 import '../models/wallet_model.dart';
 import '../res/appUrl.dart';
 
@@ -15,6 +16,19 @@ class WalletRepository {
       }
       dynamic response = await _apiService.getApi(url);
       return CreatorDashboardData.fromJson(response);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<LeaderboardResponse> getLeaderboard({String? range}) async {
+    try {
+      String url = AppUrl.creatorLeaderboard;
+      if (range != null) {
+        url += '?range=$range';
+      }
+      dynamic response = await _apiService.getApi(url);
+      return LeaderboardResponse.fromJson(response);
     } catch (e) {
       rethrow;
     }

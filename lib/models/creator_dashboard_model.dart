@@ -18,6 +18,7 @@ class CreatorDashboardData {
   final int? followers;
   final int? redeemablePoints;
   final bool? blueTick;
+  final Map<String, DashboardTimeStats>? timeStats;
   final List<PointHistoryLog>? pointHistory;
   final List<TopReel>? topReels;
 
@@ -39,11 +40,20 @@ class CreatorDashboardData {
     this.followers,
     this.redeemablePoints,
     this.blueTick,
+    this.timeStats,
     this.pointHistory,
     this.topReels,
   });
 
   factory CreatorDashboardData.fromJson(Map<String, dynamic> json) {
+    Map<String, DashboardTimeStats>? parsedTimeStats;
+    if (json['timeStats'] != null) {
+      parsedTimeStats = {};
+      (json['timeStats'] as Map<String, dynamic>).forEach((key, value) {
+        parsedTimeStats![key] = DashboardTimeStats.fromJson(value);
+      });
+    }
+
     return CreatorDashboardData(
       success: json['success'],
       creatorLevel: json['creatorLevel'],
@@ -62,12 +72,39 @@ class CreatorDashboardData {
       followers: json['followers'],
       redeemablePoints: json['redeemablePoints'],
       blueTick: json['blueTick'],
+      timeStats: parsedTimeStats,
       pointHistory: json['pointHistory'] != null 
           ? (json['pointHistory'] as List).map((i) => PointHistoryLog.fromJson(i)).toList() 
           : null,
       topReels: json['topReels'] != null 
           ? (json['topReels'] as List).map((i) => TopReel.fromJson(i)).toList() 
           : null,
+    );
+  }
+}
+
+class DashboardTimeStats {
+  final int likes;
+  final int comments;
+  final int views;
+  final int saves;
+  final int shares;
+
+  DashboardTimeStats({
+    required this.likes,
+    required this.comments,
+    required this.views,
+    required this.saves,
+    required this.shares,
+  });
+
+  factory DashboardTimeStats.fromJson(Map<String, dynamic> json) {
+    return DashboardTimeStats(
+      likes: json['likes'] ?? 0,
+      comments: json['comments'] ?? 0,
+      views: json['views'] ?? 0,
+      saves: json['saves'] ?? 0,
+      shares: json['shares'] ?? 0,
     );
   }
 }
