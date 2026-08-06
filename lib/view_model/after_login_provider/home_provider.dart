@@ -5,7 +5,7 @@ import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/views/after_login_pages/home_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/profile_screen.dart';
 import 'package:catch_watch/views/after_login_pages/upload_video/reel_upload_screen.dart';
-import 'package:catch_watch/views/after_login_pages/search_screen.dart';
+import 'package:catch_watch/views/after_login_pages/message/message_list_screen.dart';
 import 'package:flutter/material.dart';
 
 import '../../views/after_login_pages/short_video_screen.dart';
@@ -74,7 +74,7 @@ class HomeScreenProvider extends ChangeNotifier {
     HomeScreen(), // Home Tab
     ShortVideoPlayerScreen(isVisible: _pageIndex == 1), // Short Tab
     UploadScreen(), // Empty (Floating button handled separately)
-    SearchScreen(), // Search Tab
+    MessageListScreen(), // Message Tab
     ProfileScreen(), // Profile Tab
   ];
 

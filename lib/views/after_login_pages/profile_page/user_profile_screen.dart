@@ -5,6 +5,7 @@ import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart'
 import 'package:catch_watch/view_model/after_login_provider/user_profile_provider.dart';
 import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/followers_following_screen.dart';
+import 'package:catch_watch/views/after_login_pages/message/chat_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -270,21 +271,21 @@ class _ExpandedHeader extends StatelessWidget {
             ),
           ),
 
-          // ── Back button top-left ──
-          Positioned(
-            top: 0,
-            left: 16,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ),
-          ),
+          // // ── Back button top-left ──
+          // Positioned(
+          //   top: 0,
+          //   left: 16,
+          //   child: Container(
+          //     decoration: BoxDecoration(
+          //       color: Colors.white.withValues(alpha: 0.15),
+          //       borderRadius: BorderRadius.circular(12),
+          //     ),
+          //     child: IconButton(
+          //       icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+          //       onPressed: () => Navigator.pop(context),
+          //     ),
+          //   ),
+          // ),
 
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -382,7 +383,18 @@ class _ExpandedHeader extends StatelessWidget {
                         'Message',
                         Colors.white.withOpacity(0.15),
                         Colors.white,
-                        () {}, // Message action
+                        () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => ChatScreen(
+                                name: user.name ?? '',
+                                username: user.username ?? '',
+                                image: user.profileImage ?? '',
+                              ),
+                            ),
+                          );
+                        }, // Message action
                       ),
                     ),
                   ],
@@ -495,10 +507,10 @@ class _CollapsedBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-            onPressed: () => Navigator.pop(context),
-          ),
+          // IconButton(
+          //   icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+          //   onPressed: () => Navigator.pop(context),
+          // ),
           Container(
             decoration: BoxDecoration(
               shape: BoxShape.circle,

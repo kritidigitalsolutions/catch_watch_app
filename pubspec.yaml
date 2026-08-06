@@ -51,7 +51,7 @@ dependencies:
   pinput: ^5.0.0
   sms_autofill: ^2.5.0
   youtube_player_flutter: ^9.1.1
-
+  lucide_icons_flutter: ^3.0.0
   video_player: ^2.11.1
   wakelock_plus: ^1.6.1
   share_plus: ^13.2.0

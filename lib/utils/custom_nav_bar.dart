@@ -1,4 +1,6 @@
 import 'package:catch_watch/utils/text_style.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/material.dart';
 import '../res/app_colors.dart';
 
@@ -36,8 +38,9 @@ class BottomNavBar extends StatelessWidget {
           label: "",
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.search),
-          label: "Search",
+          // icon: Icon(CupertinoIcons.chat_bubble_2),
+          icon: Icon(LucideIcons.messageCircle),
+          label: "Chat",
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.person),
