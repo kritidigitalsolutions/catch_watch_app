@@ -9,8 +9,10 @@ import 'package:catch_watch/views/after_login_pages/content_grid_screen.dart';
 import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/notification_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
+import 'package:catch_watch/views/after_login_pages/search_screen.dart';
 import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import '../../models/content_model.dart';
 import '../../res/app_colors.dart';
@@ -291,7 +293,10 @@ class _HomeScreenState extends State<HomeScreen> {
               CustomIconButton(
                 icon: Icons.search_rounded,
                 onPressed: () {
-                  provider.changePage(3);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SearchScreen()),
+                  );
                 },
               ),
               const SizedBox(width: 6),

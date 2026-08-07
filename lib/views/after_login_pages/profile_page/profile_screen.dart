@@ -6,7 +6,6 @@ import 'package:catch_watch/utils/custom_button.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/video_upload_provider.dart';
-import 'package:catch_watch/views/after_login_pages/profile_page/edit_profile_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/menu_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
 import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
@@ -15,6 +14,7 @@ import 'package:catch_watch/views/after_login_pages/profile_page/dashboard_scree
 import 'package:catch_watch/views/after_login_pages/profile_page/wallet_screen.dart';
 import 'package:catch_watch/view_model/after_login_provider/verification_provider.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/verification/verification_main_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/vip_support/vip_support_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
@@ -342,10 +342,12 @@ class _ExpandedHeader extends StatelessWidget {
                       ),
                       Text(
                         provider.handle,
-                        style: text13(color: Colors.white.withOpacity(0.8)),
+                        style: text13(color: Colors.white.withValues(alpha: 0.8)),
                       ),
                       const SizedBox(height: 8),
-                      Row(
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
                         children: [
                           _actionPill(
                             context,
@@ -354,7 +356,6 @@ class _ExpandedHeader extends StatelessWidget {
                             () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WalletScreen())),
                           ),
                           if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.isVerified != true && provider.user?.blueTick != true) ...[
-                            const SizedBox(width: 8),
                             _actionPill(
                               context,
                               const Icon(Icons.verified_rounded, color: Colors.blue, size: 12),
@@ -391,7 +392,6 @@ class _ExpandedHeader extends StatelessWidget {
         ],
       ),
     );
-  }
   }
 
   Widget _glassIconButton(IconData icon, VoidCallback onTap) {
@@ -433,6 +433,7 @@ class _ExpandedHeader extends StatelessWidget {
       ),
     );
   }
+}
 
 // ─── Collapsed sticky bar (slides in from top when scrolled) ───────────────
 class _CollapsedBar extends StatelessWidget {
@@ -484,7 +485,7 @@ class _CollapsedBar extends StatelessWidget {
                     radius: 18,
                     backgroundImage: NetworkImage(provider.user!.profileImage!),
                     backgroundColor: Colors.white,
-                    onBackgroundImageError: (_, __) {},
+                    onBackgroundImageError: (_, _) {},
                   )
                 : Container(
                     width: 36,

@@ -8,6 +8,9 @@ import 'package:catch_watch/views/after_login_pages/profile_page/policy_screen.d
 import 'package:catch_watch/view_model/after_login_provider/profile_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/verification_provider.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/verification/verification_main_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/verification/verified_status_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/vip_support/vip_support_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/legal_policies_list_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../res/app_colors.dart';
@@ -42,19 +45,21 @@ class MenuScreen extends StatelessWidget {
                     },
                   ),
                   _divider(),
-                  _menuItem(
-                    Icons.verified_user_outlined,
-                    'Get Blue Tick',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const VerificationMainScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                  _divider(),
+                  if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.isVerified != true && provider.user?.blueTick != true) ...[
+                    _menuItem(
+                      Icons.verified_user_outlined,
+                      'Get Blue Tick',
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const VerificationMainScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                    _divider(),
+                  ],
                   _menuItem(
                     Icons.workspace_premium_rounded,
                     'Subscription',
@@ -68,6 +73,21 @@ class MenuScreen extends StatelessWidget {
                     },
                   ),
                   _divider(),
+                  if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
+                    // _menuItem(
+                    //   Icons.verified_user_rounded,
+                    //   'Verified User',
+                    //   onTap: () {
+                    //     Navigator.push(
+                    //       context,
+                    //       MaterialPageRoute(
+                    //         builder: (_) => const VerifiedStatusScreen(),
+                    //       ),
+                    //     );
+                    //   },
+                    // ),
+                    // _divider(),
+                  ],
                   _menuItem(
                     Icons.download_outlined,
                     'Downloads',
@@ -109,38 +129,12 @@ class MenuScreen extends StatelessWidget {
                   _divider(),
                   _menuItem(
                     Icons.privacy_tip_outlined,
-                    'Privacy Policy',
+                    'Legal Policies',
                     onTap: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const PolicyScreen(type: 'privacy-policy'),
-                        ),
-                      );
-                    },
-                  ),
-                  _divider(),
-                  _menuItem(
-                    Icons.description_outlined,
-                    'Terms & Conditions',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const PolicyScreen(type: 'terms-conditions'),
-                        ),
-                      );
-                    },
-                  ),
-                  _divider(),
-                  _menuItem(
-                    Icons.assignment_return_outlined,
-                    'Refund Policy',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const PolicyScreen(type: 'refund-policy'),
+                          builder: (_) => const LegalPoliciesListScreen(),
                         ),
                       );
                     },
@@ -200,7 +194,7 @@ class MenuScreen extends StatelessWidget {
               height: 110,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.06),
+                color: Colors.white.withValues(alpha: 0.06),
               ),
             ),
           ),
@@ -330,7 +324,7 @@ class MenuScreen extends StatelessWidget {
 
   Widget _logoutItem(BuildContext context, ProfileProvider provider) {
     return InkWell(
-      onTap: () => provider.logout(context),
+      onTap: () => _showLogoutDialog(context, provider),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
         child: Row(
@@ -365,6 +359,36 @@ class MenuScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showLogoutDialog(BuildContext context, ProfileProvider provider) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Logout', style: text18(fontWeight: FontWeight.bold)),
+        content: Text('Are you sure you want to logout?', style: text14(color: AppColors.textSecondary)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: text14(color: AppColors.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              provider.logout(context);
+            },
+            child: Text(
+              'Logout',
+              style: text14(color: AppColors.error, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
       ),
     );
   }

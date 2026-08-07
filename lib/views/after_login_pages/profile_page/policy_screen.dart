@@ -33,7 +33,7 @@ class _PolicyScreenState extends State<PolicyScreen> {
       backgroundColor: AppColors.white,
       body: Column(
         children: [
-          _buildHeader(context, doc?.title ?? _getDefaultTitle()),
+          _buildHeader(context, doc?.title?.toUpperCase() ?? _getDefaultTitle()),
           Expanded(
             child: provider.isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -47,23 +47,61 @@ class _PolicyScreenState extends State<PolicyScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 _buildUpdatedCard(doc.updatedAt),
-                                const SizedBox(height: 18),
-                                HtmlWidget(
-                                  doc.content ?? '',
-                                  textStyle: text14(color: AppColors.textSecondary),
-                                ),
-                                const SizedBox(height: 20),
-                                Text(
-                                  'For questions about this policy, contact support@catchwatch.com.',
-                                  style: text13(
-                                    color: AppColors.textSecondary,
-                                    fontWeight: FontWeight.w500,
+                                const SizedBox(height: 24),
+                                if (doc.sections != null && doc.sections!.isNotEmpty)
+                                  ...doc.sections!.map((section) => _buildSection(section))
+                                else
+                                  HtmlWidget(
+                                    doc.content ?? '',
+                                    textStyle: text14(color: AppColors.textSecondary),
+                                  ),
+                                const SizedBox(height: 32),
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.grey50,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: AppColors.grey200),
+                                  ),
+                                  child: Text(
+                                    'For questions about this policy, contact support@catchwatch.com.',
+                                    style: text13(
+                                      color: AppColors.textSecondary,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    textAlign: TextAlign.center,
                                   ),
                                 ),
                               ],
                             ),
                           ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSection(LegalSection section) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (section.heading != null && section.heading!.isNotEmpty) ...[
+            Text(
+              section.heading!,
+              style: text16(fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (section.paragraphs != null)
+            ...section.paragraphs!.map((p) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: HtmlWidget(
+                    p,
+                    textStyle: text14(color: AppColors.textSecondary),
+                  ),
+                )),
         ],
       ),
     );
@@ -135,7 +173,7 @@ class _PolicyScreenState extends State<PolicyScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'How Catch Watch handles your data',
+                  'Legal Information & Policies',
                   style: text14(color: Colors.white70),
                 ),
               ],
@@ -151,7 +189,8 @@ class _PolicyScreenState extends State<PolicyScreen> {
     if (updatedAt != null) {
       try {
         final dateTime = DateTime.parse(updatedAt);
-        date = "${dateTime.day}/${dateTime.month}/${dateTime.year}";
+        final months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        date = "${dateTime.day} ${months[dateTime.month - 1]} ${dateTime.year}";
       } catch (e) {}
     }
 
@@ -173,7 +212,7 @@ class _PolicyScreenState extends State<PolicyScreen> {
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(
-              Icons.privacy_tip_outlined,
+              Icons.update_rounded,
               color: AppColors.primary,
               size: 20,
             ),

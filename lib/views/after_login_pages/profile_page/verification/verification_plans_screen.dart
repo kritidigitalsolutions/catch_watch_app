@@ -164,9 +164,15 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
 
   Widget _buildBenefitsSection() {
     final benefits = [
-      {'icon': Icons.security_rounded, 'title': 'Trust & Credibility', 'desc': 'Establish trust with your audience instantly.'},
-      {'icon': Icons.trending_up_rounded, 'title': 'Higher Visibility', 'desc': 'Get prioritized in search results and suggestions.'},
-      {'icon': Icons.star_rounded, 'title': 'Exclusive Features', 'desc': 'Access premium profile features and analytics.'},
+      'Official Verified Badge',
+      'Advanced Account Protection',
+      'Fake Account Protection',
+      'Priority Customer Support',
+      'Higher Search Ranking',
+      'Better Content Recommendations',
+      'Highlighted Comments',
+      'Exclusive Creator Tools',
+      'Early Access to New Features',
     ];
 
     return Container(
@@ -174,37 +180,25 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
       padding: const EdgeInsets.symmetric(vertical: 20),
       color: AppColors.grey50,
       child: Column(
-        children: benefits.map((b) => _buildBenefitItem(b['icon'] as IconData, b['title'] as String, b['desc'] as String)).toList(),
+        children: benefits.map((b) => _buildBenefitItem(b)).toList(),
       ),
     );
   }
 
-  Widget _buildBenefitItem(IconData icon, String title, String desc) {
+  Widget _buildBenefitItem(String title) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5, offset: const Offset(0, 2)),
-              ],
-            ),
-            child: Icon(icon, color: AppColors.primary, size: 24),
-          ),
-          const SizedBox(width: 16),
+          const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 20),
+          const SizedBox(width: 14),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: text14(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 2),
-                Text(desc, style: text12(color: AppColors.textSecondary)),
-              ],
+            child: Text(
+              title,
+              style: text14(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],

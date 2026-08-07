@@ -47,7 +47,7 @@ class ReelsRepository {
 
   Future<dynamic> searchReels(String query) async {
     try {
-      dynamic response = await _apiService.getApi('${AppUrl.searchReels}?caption=$query');
+      dynamic response = await _apiService.getApi('${AppUrl.searchReels}?q=$query');
       return response;
     } catch (e) {
       rethrow;

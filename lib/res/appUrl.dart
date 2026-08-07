@@ -1,7 +1,7 @@
 class AppUrl {
-  // static const String serverUrl = 'http://192.168.1.39:5000';
+  static const String serverUrl = 'http://192.168.1.44:5000';
   // static const String serverUrl = 'https://api.catchandwatch.com';
-  static const String serverUrl = 'https://catch-watch.vercel.app';
+  // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
 
   // Auth Endpoints
@@ -50,6 +50,7 @@ class AppUrl {
   static String getUserReels(String userId) => '$baseUrl/reels/user/$userId';
   static const String searchReels = '$baseUrl/reels/search';
   // user profile and interaction
+  static String searchUser(String query) => '$baseUrl/user/search?q=$query';
   static String toggleFollow(String userId) => '$baseUrl/user/toggle-follow/$userId';
   static String followUser(String userId) => '$baseUrl/user/follow/$userId';
   static String unfollowUser(String userId) => '$baseUrl/user/unfollow/$userId';
@@ -89,4 +90,10 @@ class AppUrl {
   static const String creatorRedeemHistory = '$baseUrl/creator/redeem/history';
   static const String creatorPoints = '$baseUrl/creator/points';
   static const String creatorPointHistory = '$baseUrl/creator/point-history';
+
+  /// vip support
+  static const String vipAccessCheck = '$baseUrl/support/vip/access-check';
+  static const String vipTickets = '$baseUrl/support/vip';
+  static String vipTicketDetail(String ticketId) => '$baseUrl/support/vip/$ticketId';
+  static String vipReplyTicket(String ticketId) => '$baseUrl/support/vip/reply/$ticketId';
 }

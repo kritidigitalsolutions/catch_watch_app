@@ -25,9 +25,11 @@ import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart'
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/user_profile_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/user_search_provider.dart';
 
 import 'package:catch_watch/view_model/after_login_provider/verification_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/wallet_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/vip_support_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -62,8 +64,10 @@ void main() async {
         ChangeNotifierProvider(create: (_) => ReelsProvider()),
         ChangeNotifierProvider(create: (_) => DownloadProvider()),
         ChangeNotifierProvider(create: (_) => UserProfileProvider()),
+        ChangeNotifierProvider(create: (_) => UserSearchProvider()),
         ChangeNotifierProvider(create: (_) => VerificationProvider()),
         ChangeNotifierProvider(create: (_) => WalletProvider()),
+        ChangeNotifierProvider(create: (_) => VipSupportProvider()),
       ],
       child: const MyApp(),
     ),

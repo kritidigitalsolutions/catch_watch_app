@@ -1,4 +1,7 @@
 import 'package:catch_watch/view_model/after_login_provider/help_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/profile_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/verification_provider.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/vip_support/vip_support_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../res/app_colors.dart';
@@ -116,6 +119,12 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
   }
 
   Widget _buildContactRow(HelpProvider provider) {
+    final profileProvider = context.watch<ProfileProvider>();
+    final verificationProvider = context.watch<VerificationProvider>();
+    final isVerified = verificationProvider.currentApplication?.status == 'approved' || 
+                       profileProvider.user?.isVerified == true || 
+                       profileProvider.user?.blueTick == true;
+
     // Manually add Live Chat as instructed not to change it
     final List<Map<String, dynamic>> staticOptions = [
       {
@@ -125,6 +134,21 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
         'badgeColor': AppColors.success,
         'onTap': () {},
       },
+      if (isVerified)
+        {
+          'icon': Icons.support_agent_rounded,
+          'title': 'VIP Support',
+          'badge': 'Priority',
+          'badgeColor': AppColors.primary,
+          'onTap': () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const VipSupportScreen(),
+              ),
+            );
+          },
+        },
     ];
 
     // Map support items from API
