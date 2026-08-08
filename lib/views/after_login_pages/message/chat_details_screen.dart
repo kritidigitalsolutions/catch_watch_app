@@ -1,15 +1,19 @@
+import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/text_style.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/user_profile_screen.dart';
+import 'package:provider/provider.dart';
 
 class ChatDetailsScreen extends StatelessWidget {
+  final String partnerId;
   final String name;
   final String username;
   final String image;
 
   const ChatDetailsScreen({
     super.key,
+    required this.partnerId,
     required this.name,
     required this.username,
     required this.image,
@@ -50,9 +54,18 @@ class ChatDetailsScreen extends StatelessWidget {
                       name,
                       style: text20(fontWeight: FontWeight.bold),
                     ),
-                    Text(
-                      "Active now",
-                      style: text14(color: Colors.green),
+                    Consumer<ChatProvider>(
+                      builder: (context, provider, child) {
+                        final status = provider.currentUserStatus;
+                        String statusText = "Offline";
+                        if (status != null && status.isOnline == true) {
+                          statusText = "Online";
+                        }
+                        return Text(
+                          statusText,
+                          style: text14(color: statusText == "Online" ? Colors.green : Colors.grey),
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -73,61 +86,6 @@ class ChatDetailsScreen extends StatelessWidget {
             const SizedBox(height: 30),
             const Divider(height: 1),
             
-            // Shared Reels Section
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Shared Reels",
-                    style: text16(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: 6,
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      crossAxisSpacing: 4,
-                      mainAxisSpacing: 4,
-                      childAspectRatio: 0.7,
-                    ),
-                    itemBuilder: (context, index) {
-                      return Container(
-                        decoration: BoxDecoration(
-                          color: AppColors.grey200,
-                          borderRadius: BorderRadius.circular(8),
-                          image: const DecorationImage(
-                            image: NetworkImage('https://picsum.photos/200/300'),
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                        child: Stack(
-                          children: [
-                            Positioned(
-                              bottom: 4,
-                              left: 4,
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.play_arrow_outlined, color: Colors.white, size: 14),
-                                  Text(
-                                    "${(index + 1) * 10}k",
-                                    style: text10(color: Colors.white),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-            
             // More Info
             const Divider(height: 1),
             ListTile(
@@ -140,11 +98,26 @@ class ChatDetailsScreen extends StatelessWidget {
               trailing: const Icon(Icons.chevron_right),
               onTap: () {},
             ),
-            ListTile(
-              title: const Text("Block", style: TextStyle(color: Colors.red)),
-              trailing: const Icon(Icons.block, color: Colors.red),
-              onTap: () {
-                _showBlockDialog(context);
+            Consumer<ChatProvider>(
+              builder: (context, chatProvider, child) {
+                final isBlocked = chatProvider.isUserBlocked(partnerId);
+                return ListTile(
+                  title: Text(
+                    isBlocked ? "Unblock" : "Block",
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                  trailing: Icon(
+                    isBlocked ? Icons.lock_open : Icons.block,
+                    color: Colors.red,
+                  ),
+                  onTap: () {
+                    if (isBlocked) {
+                      chatProvider.unblockUser(partnerId);
+                    } else {
+                      _showBlockDialog(context);
+                    }
+                  },
+                );
               },
             ),
             const SizedBox(height: 40),
@@ -166,7 +139,10 @@ class ChatDetailsScreen extends StatelessWidget {
             child: const Text("Cancel"),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              Provider.of<ChatProvider>(context, listen: false).blockUser(partnerId);
+              Navigator.pop(context);
+            },
             child: const Text("Block", style: TextStyle(color: Colors.red)),
           ),
         ],

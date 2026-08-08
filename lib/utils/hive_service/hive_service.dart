@@ -6,7 +6,6 @@ class HiveService {
   static const String boxName = 'userBox';
   static const String userKey = 'user';
   static const String historyBoxName = 'historyBox';
-  static const String downloadsBoxName = 'downloadsBox';
   static const String likesBoxName = 'likesBox';
   static const String statsBoxName = 'statsBox';
 
@@ -17,7 +16,6 @@ class HiveService {
     }
     await Hive.openBox<UserDetails>(boxName);
     await Hive.openBox(historyBoxName);
-    await Hive.openBox(downloadsBoxName);
     await Hive.openBox(likesBoxName);
     await Hive.openBox(statsBoxName);
   }
@@ -30,7 +28,6 @@ class HiveService {
   }
 
   static Box get _historyBox => Hive.box(historyBoxName);
-  static Box get _downloadsBox => Hive.box(downloadsBoxName);
   static Box get _likesBox => Hive.box(likesBoxName);
   static Box get _statsBox => Hive.box(statsBoxName);
 
@@ -62,15 +59,6 @@ class HiveService {
 
   static Map<dynamic, dynamic> getWatchHistory() {
     return _historyBox.toMap();
-  }
-
-  // --- Downloads ---
-  static Future<void> saveDownload(String contentId, Map<String, dynamic> data) async {
-    await _downloadsBox.put(contentId, data);
-  }
-
-  static Map<dynamic, dynamic> getDownloads() {
-    return _downloadsBox.toMap();
   }
 
   static UserDetails? getUser() {

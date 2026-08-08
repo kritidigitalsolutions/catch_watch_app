@@ -1,4 +1,3 @@
-import 'package:catch_watch/views/after_login_pages/profile_page/download_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/notification_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/edit_profile_screen.dart';
@@ -88,19 +87,6 @@ class MenuScreen extends StatelessWidget {
                     // ),
                     // _divider(),
                   ],
-                  _menuItem(
-                    Icons.download_outlined,
-                    'Downloads',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const DownloadsScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                  _divider(),
                   _menuItem(
                     Icons.notifications_outlined,
                     'Notifications',

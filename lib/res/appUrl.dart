@@ -1,5 +1,5 @@
 class AppUrl {
-  static const String serverUrl = 'http://192.168.1.44:5000';
+  static const String serverUrl = 'http://192.168.1.16:5000';
   // static const String serverUrl = 'https://api.catchandwatch.com';
   // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
@@ -81,6 +81,27 @@ class AppUrl {
 
   /// ads
   static const String adEvent = '$baseUrl/ads/event';
+
+  /// chat
+  static const String getConversations = '$baseUrl/chat/conversations';
+  static const String createConversation = '$baseUrl/chat/conversations';
+  static String markMessageRead(String conversationId) => '$baseUrl/chat/conversations/$conversationId/read';
+  static String pinConversation(String conversationId) => '$baseUrl/chat/conversations/$conversationId/pin';
+  static String clearChat(String conversationId) => '$baseUrl/chat/conversations/$conversationId';
+  static String getMessages(String conversationId) => '$baseUrl/chat/conversations/$conversationId/messages';
+  static const String sendMessage = '$baseUrl/chat/messages';
+  static const String uploadChatAttachment = '$baseUrl/chat/messages/upload';
+  static String editMessage(String messageId) => '$baseUrl/chat/messages/$messageId';
+  static String unsendMessage(String messageId) => '$baseUrl/chat/messages/$messageId/unsend';
+  static String deleteMessage(String messageId) => '$baseUrl/chat/messages/$messageId';
+  static String reactToMessage(String messageId) => '$baseUrl/chat/messages/$messageId/react';
+  static const String searchMessages = '$baseUrl/chat/messages/search';
+  static const String searchChatUsers = '$baseUrl/chat/users/search';
+  static String getChatUserStatus(String userId) => '$baseUrl/chat/users/$userId/status';
+  static String blockChatUser(String userId) => '$baseUrl/chat/block/$userId';
+  static String unblockChatUser(String userId) => '$baseUrl/chat/block/$userId';
+  static const String getBlockedUsers = '$baseUrl/chat/blocked-users';
+  static const String updateChatFcmToken = '$baseUrl/chat/fcm-token';
 
   /// creator & wallet
   static const String creatorDashboard = '$baseUrl/creator/dashboard';

@@ -3,6 +3,7 @@ import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/text_style.dart';
 import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/user_profile_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
 import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/followers_following_screen.dart';
 import 'package:catch_watch/views/after_login_pages/message/chat_screen.dart';
@@ -383,17 +384,23 @@ class _ExpandedHeader extends StatelessWidget {
                         'Message',
                         Colors.white.withOpacity(0.15),
                         Colors.white,
-                        () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => ChatScreen(
-                                name: user.name ?? '',
-                                username: user.username ?? '',
-                                image: user.profileImage ?? '',
+                        () async {
+                          final chatProvider = context.read<ChatProvider>();
+                          final convId = await chatProvider.createConversation(user.id!);
+                          if (convId != null && context.mounted) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ChatScreen(
+                                  conversationId: convId,
+                                  partnerId: user.id!,
+                                  name: user.name ?? '',
+                                  username: user.username ?? '',
+                                  image: user.profileImage ?? '',
+                                ),
                               ),
-                            ),
-                          );
+                            );
+                          }
                         }, // Message action
                       ),
                     ),

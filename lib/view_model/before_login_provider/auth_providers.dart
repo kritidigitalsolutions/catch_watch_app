@@ -12,9 +12,11 @@ import 'package:catch_watch/views/before_login_Pages/profile_setup_screen.dart';
 import 'package:dio/dio.dart' as dio;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 import 'package:sms_autofill/sms_autofill.dart';
 
 import '../../views/before_login_Pages/otp_verify_screen.dart';
+import '../after_login_provider/chat_provider.dart';
 
 class OnboardingProvider extends ChangeNotifier {
   final PageController pageController = PageController();
@@ -320,6 +322,11 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
             );
             await HiveService.saveUser(userDetail);
             NotificationService.syncTokenToServer(null); // Sync FCM token after login
+            
+            // Initialize Chat Socket
+            if (context.mounted) {
+              Provider.of<ChatProvider>(context, listen: false).initSocket();
+            }
           }
           _otpVerifying = false;
           Navigator.pushAndRemoveUntil(
@@ -506,6 +513,11 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
         );
         await HiveService.saveUser(userDetail);
         NotificationService.syncTokenToServer(null); // Sync FCM token after profile complete
+        
+        // Initialize Chat Socket
+        if (context.mounted) {
+          Provider.of<ChatProvider>(context, listen: false).initSocket();
+        }
 
         _profileSaving = false;
         _step = AuthStep.done;

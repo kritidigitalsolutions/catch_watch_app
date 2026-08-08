@@ -8,8 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
-import '../../view_model/after_login_provider/download_provider.dart';
-
 class MovieDetailScreen extends StatelessWidget {
   final Content content;
   const MovieDetailScreen({super.key, required this.content});
@@ -558,43 +556,6 @@ class _HeaderActions extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Consumer<DownloadProvider>(
-          builder: (context, downloadProvider, _) {
-            final contentId = provider.content.id!;
-            final isDownloaded = downloadProvider.isDownloaded(contentId);
-            final progress = downloadProvider.downloadProgress[contentId];
-
-            return _SmallActionBtn(
-              icon: progress != null
-                  ? Icons.downloading_rounded
-                  : (isDownloaded
-                      ? Icons.download_done_rounded
-                      : Icons.download_outlined),
-              label: progress != null
-                  ? '${(progress * 100).toInt()}%'
-                  : (isDownloaded ? 'Offline' : 'Download'),
-              onTap: () {
-                if (!isDownloaded && progress == null) {
-                  downloadProvider.downloadVideo(provider.content);
-                }
-              },
-              iconColor:
-                  isDownloaded ? AppColors.primary : AppColors.textPrimary,
-              overlay: progress != null
-                  ? SizedBox(
-                      width: 46,
-                      height: 46,
-                      child: CircularProgressIndicator(
-                        value: progress,
-                        strokeWidth: 2,
-                        color: AppColors.primary,
-                      ),
-                    )
-                  : null,
-            );
-          },
-        ),
-        const SizedBox(width: 8),
         Consumer<WatchlistProvider>(
           builder: (context, watchlistProvider, _) {
             // Check if this specific content ID is in the watchlist items

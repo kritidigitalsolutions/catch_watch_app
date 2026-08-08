@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:catch_watch/models/content_model.dart';
-import 'package:catch_watch/view_model/after_login_provider/download_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:catch_watch/repository/content_repository.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
@@ -171,15 +170,6 @@ class MovieDetailProvider extends ChangeNotifier {
     
     String? baseVideoUrl = _currentBaseUrl;
 
-    // Check for local file if we don't have a URL yet
-    if (baseVideoUrl == null && context != null) {
-      final downloadProvider = context!.read<DownloadProvider>();
-      final localPath = downloadProvider.getLocalVideoPath(content.id!);
-      if (localPath != null && File(localPath).existsSync()) {
-        baseVideoUrl = localPath;
-      }
-    }
-    
     baseVideoUrl ??= content.videoUrl;
     
     if (baseVideoUrl == null || baseVideoUrl.isEmpty) {
