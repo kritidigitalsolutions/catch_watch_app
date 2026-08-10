@@ -83,8 +83,8 @@ class PartnerModel {
     phone = json['phone'];
     name = json['name'];
     
-    String fixUrl(String? url) {
-      if (url == null || url.isEmpty) return '';
+    String? fixUrl(String? url) {
+      if (url == null || url.isEmpty || url == 'null') return null;
       if (url.startsWith('http')) {
         return url.replaceAll('http://localhost:5000', AppUrl.serverUrl);
       }
@@ -133,7 +133,7 @@ class MessageModel {
   bool? isEdited;
   bool? isUnsent;
   List<String>? deletedFor;
-  List<dynamic>? reactions;
+  List<ReactionModel>? reactions;
   String? createdAt;
   String? updatedAt;
   int? iV;
@@ -174,7 +174,13 @@ class MessageModel {
       }
     }
     
-    sender = json['sender'] != null ? Sender.fromJson(json['sender']) : null;
+    if (json['sender'] != null) {
+      if (json['sender'] is Map) {
+        sender = Sender.fromJson(json['sender']);
+      } else {
+        sender = Sender(sId: json['sender'].toString(), id: json['sender'].toString());
+      }
+    }
     
     if (json['recipient'] != null) {
       if (json['recipient'] is Map) {
@@ -187,14 +193,29 @@ class MessageModel {
     messageType = json['messageType'];
     text = json['text'];
     mediaUrl = json['mediaUrl'];
-    replyTo = json['replyTo'];
+    
+    if (json['replyTo'] != null) {
+      if (json['replyTo'] is Map) {
+        replyTo = json['replyTo']['_id'] ?? json['replyTo']['id'];
+      } else {
+        replyTo = json['replyTo'].toString();
+      }
+    }
+    
     isForwarded = json['isForwarded'];
     status = json['status'];
     deliveredAt = json['deliveredAt'];
     isEdited = json['isEdited'];
     isUnsent = json['isUnsent'];
     deletedFor = json['deletedFor']?.cast<String>();
-    reactions = json['reactions'];
+    if (json['reactions'] != null && json['reactions'] is List) {
+      reactions = <ReactionModel>[];
+      json['reactions'].forEach((v) {
+        if (v is Map<String, dynamic>) {
+          reactions!.add(ReactionModel.fromJson(v));
+        }
+      });
+    }
     createdAt = json['createdAt'];
     updatedAt = json['updatedAt'];
     iV = json['__v'];
@@ -231,8 +252,8 @@ class Sender {
     sId = json['_id'];
     name = json['name'];
     
-    String fixUrl(String? url) {
-      if (url == null || url.isEmpty) return '';
+    String? fixUrl(String? url) {
+      if (url == null || url.isEmpty || url == 'null') return null;
       if (url.startsWith('http')) {
         return url.replaceAll('http://localhost:5000', AppUrl.serverUrl);
       }
@@ -277,6 +298,32 @@ class PaginationModel {
     limit = json['limit'];
     total = json['total'];
     pages = json['pages'];
+  }
+}
+
+class ReactionModel {
+  String? userId;
+  String? emoji;
+
+  ReactionModel({this.userId, this.emoji});
+
+  ReactionModel.fromJson(Map<String, dynamic> json) {
+    userId = json['userId'];
+    if (userId == null && json['user'] != null) {
+      if (json['user'] is Map) {
+        userId = json['user']['_id'] ?? json['user']['id'];
+      } else {
+        userId = json['user'].toString();
+      }
+    }
+    emoji = json['emoji'];
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'userId': userId,
+      'emoji': emoji,
+    };
   }
 }
 

@@ -255,7 +255,7 @@ class _ExpandedHeader extends StatelessWidget {
               height: 130,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.06),
+                color: Colors.white.withOpacity(0.06),
               ),
             ),
           ),
@@ -267,7 +267,7 @@ class _ExpandedHeader extends StatelessWidget {
               height: 90,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.black.withValues(alpha: 0.08),
+                color: Colors.black.withOpacity(0.08),
               ),
             ),
           ),
@@ -278,7 +278,7 @@ class _ExpandedHeader extends StatelessWidget {
           //   left: 16,
           //   child: Container(
           //     decoration: BoxDecoration(
-          //       color: Colors.white.withValues(alpha: 0.15),
+          //       color: Colors.white.withOpacity(0.15),
           //       borderRadius: BorderRadius.circular(12),
           //     ),
           //     child: IconButton(
@@ -300,7 +300,7 @@ class _ExpandedHeader extends StatelessWidget {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.3),
+                          color: Colors.white.withOpacity(0.3),
                           width: 3,
                         ),
                       ),
@@ -521,7 +521,7 @@ class _CollapsedBar extends StatelessWidget {
           Container(
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 2),
+              border: Border.all(color: Colors.white.withOpacity(0.3), width: 2),
             ),
             child: user.profileImage != null && user.profileImage!.isNotEmpty
                 ? CircleAvatar(
@@ -565,9 +565,9 @@ class _CollapsedBar extends StatelessWidget {
             builder: (context, isFollowing, _) {
               return Container(
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
+                  color: Colors.white.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                  border: Border.all(color: Colors.white.withOpacity(0.2)),
                 ),
                 child: Material(
                   color: Colors.transparent,
@@ -647,7 +647,7 @@ class _GridCard extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Colors.transparent, Colors.black.withValues(alpha: 0.82)],
+                    colors: [Colors.transparent, Colors.black.withOpacity(0.82)],
                   ),
                 ),
                 child: Row(

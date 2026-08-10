@@ -1,10 +1,13 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:catch_watch/data/network/notification_service.dart';
 import 'package:catch_watch/data/network/socket_service.dart';
 import 'package:catch_watch/models/chat_model.dart';
 import 'package:catch_watch/repository/chat_repository.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:dio/dio.dart' as dio;
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -22,6 +25,7 @@ class ChatProvider extends ChangeNotifier {
   UserStatus? _currentUserStatus;
   Set<String> _blockedUserIds = {};
   String? _activeConversationId;
+  MessageModel? _replyingToMessage;
 
   List<ConversationModel> get conversations => _conversations;
   List<MessageModel> get messages => _messages;
@@ -32,11 +36,23 @@ class ChatProvider extends ChangeNotifier {
   PaginationModel? get pagination => _pagination;
   UserStatus? get currentUserStatus => _currentUserStatus;
   Set<String> get blockedUserIds => _blockedUserIds;
+  MessageModel? get replyingToMessage => _replyingToMessage;
 
   bool isUserBlocked(String userId) => _blockedUserIds.contains(userId);
 
+  void setReplyingMessage(MessageModel? message) {
+    _replyingToMessage = message;
+    notifyListeners();
+  }
+
+  void clearReplyingMessage() {
+    _replyingToMessage = null;
+    notifyListeners();
+  }
+
   ChatProvider() {
     _initSocket();
+    _initNotificationListener();
   }
 
   void initSocket() {
@@ -52,6 +68,46 @@ class ChatProvider extends ChangeNotifier {
     }, onError: (e) {
       debugPrint('Socket Stream Error: $e');
     });
+  }
+
+  void _initNotificationListener() {
+    NotificationService.foregroundMessageStream.listen((message) {
+      debugPrint('FCM Foreground Message Received in ChatProvider');
+      _handleForegroundNotification(message);
+    });
+  }
+
+  void _handleForegroundNotification(RemoteMessage message) {
+    try {
+      final type = message.data['type'];
+      final conversationId = message.data['conversationId'];
+      
+      if (type == 'CHAT_MESSAGE' || conversationId != null) {
+        debugPrint('Processing foreground notification: Type=$type, Conv=$conversationId');
+
+        if (!_socketService.isConnected) {
+          if (type == 'READ_RECEIPT' || type == 'MESSAGE_READ') {
+            _onMessageRead(message.data);
+          } else if (type == 'DELIVERED_RECEIPT' || type == 'MESSAGE_DELIVERED') {
+            _onMessageDelivered(message.data);
+          } else {
+            // New message fallback
+            final Map<String, dynamic> payload = Map<String, dynamic>.from(message.data);
+            if (payload['text'] == null && payload['body'] == null && payload['message'] == null) {
+              if (message.notification != null) {
+                payload['text'] = message.notification!.body;
+              }
+            }
+            _onNewMessage(payload);
+          }
+          
+          // Try to reconnect
+          _socketService.connect();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error handling foreground notification in ChatProvider: $e');
+    }
   }
 
   void _handleSocketMessage(Map<String, dynamic> data) {
@@ -70,10 +126,21 @@ class ChatProvider extends ChangeNotifier {
         break;
       case 'message_read':
       case 'read_receipt':
+      case 'READ_RECEIPT':
         _onMessageRead(payload);
+        break;
+      case 'message_delivered':
+      case 'delivered_receipt':
+      case 'DELIVERED_RECEIPT':
+        _onMessageDelivered(payload);
         break;
       case 'user_blocked':
         _onUserBlocked(payload);
+        break;
+      case 'message_reaction':
+      case 'new_reaction':
+      case 'reaction':
+        _onMessageReaction(payload);
         break;
       default:
         debugPrint('Unhandled Socket Event: $event');
@@ -82,9 +149,46 @@ class ChatProvider extends ChangeNotifier {
 
   void _onNewMessage(dynamic payload) {
     try {
-      final newMessage = MessageModel.fromJson(payload);
+      debugPrint('Processing New Message Payload: $payload');
+      final MessageModel newMessage;
+      
+      if (payload is Map<String, dynamic> && payload.containsKey('_id')) {
+        newMessage = MessageModel.fromJson(payload);
+      } else {
+        // Handle flat map from FCM (Map<String, String>)
+        // Some backends might send JSON strings for nested objects
+        dynamic senderData = payload['sender'];
+        if (senderData is String && senderData.startsWith('{')) {
+          try {
+            senderData = jsonDecode(senderData);
+          } catch (_) {}
+        }
+
+        newMessage = MessageModel(
+          sId: payload['_id'] ?? payload['messageId'] ?? payload['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
+          conversationId: payload['conversationId'],
+          text: payload['text'] ?? payload['body'] ?? payload['message'] ?? '',
+          messageType: payload['messageType'] ?? 'text',
+          mediaUrl: payload['mediaUrl'],
+          createdAt: payload['createdAt'] ?? DateTime.now().toIso8601String(),
+          sender: senderData is Map 
+            ? Sender.fromJson(Map<String, dynamic>.from(senderData))
+            : Sender(
+                sId: payload['senderId'] ?? payload['sender_id'],
+                name: payload['senderName'] ?? payload['sender_name'],
+                profileImage: payload['senderImage'] ?? payload['sender_image'],
+              ),
+          status: 'DELIVERED',
+        );
+      }
+
       final conversationId = newMessage.conversationId;
-      debugPrint('New Message Received for Conversation: $conversationId (Active: $_activeConversationId)');
+      debugPrint('Resolved Message: ID=${newMessage.sId}, Text=${newMessage.text}, Conv=${newMessage.conversationId}');
+      
+      if (conversationId == null) {
+        debugPrint('Warning: New message has no conversationId');
+        return;
+      }
 
       // Update conversations list
       final convIndex = _conversations.indexWhere((c) => c.sId == conversationId);
@@ -101,10 +205,16 @@ class ChatProvider extends ChangeNotifier {
 
       // Update current message list if it's the active conversation
       if (conversationId == _activeConversationId) {
+        debugPrint('Updating active conversation messages list');
         // Avoid duplicates if HTTP send also added it
         if (!_messages.any((m) => m.sId == newMessage.sId)) {
           _messages.insert(0, newMessage);
+          debugPrint('Message inserted into list');
+        } else {
+          debugPrint('Message already exists in list, skipping insertion');
         }
+      } else {
+        debugPrint('Message is not for active conversation, skipping list update');
       }
       notifyListeners();
     } catch (e) {
@@ -115,24 +225,112 @@ class ChatProvider extends ChangeNotifier {
   void _onStatusUpdate(dynamic payload) {
     try {
       final status = UserStatus.fromJson(payload);
+      
+      // Update partner status in conversations list
+      bool changed = false;
+      for (var conv in _conversations) {
+        if (conv.partner?.sId == status.userId || conv.partner?.id == status.userId) {
+          conv.partner?.isOnline = status.isOnline;
+          conv.partner?.lastSeen = status.lastSeen;
+          changed = true;
+        }
+      }
+
       if (_currentUserStatus?.userId == status.userId) {
         _currentUserStatus = status;
-        notifyListeners();
+        changed = true;
       }
+      
+      if (changed) notifyListeners();
     } catch (e) {
       debugPrint('Error handling status update socket event: $e');
     }
   }
 
   void _onMessageRead(dynamic payload) {
-    final conversationId = payload['conversationId'];
-    if (conversationId == _activeConversationId) {
-      for (var msg in _messages) {
-        if (msg.status != 'READ') {
-          msg.status = 'READ';
+    try {
+      final conversationId = payload['conversationId'] ?? payload['conversation_id'];
+      debugPrint('Message Read Event for Conversation: $conversationId (Active: $_activeConversationId)');
+      
+      if (conversationId == null) return;
+
+      // Update in conversation list
+      final convIndex = _conversations.indexWhere((c) => c.sId == conversationId);
+      if (convIndex != -1) {
+        _conversations[convIndex].unreadCount = 0;
+        if (_conversations[convIndex].lastMessage != null) {
+          _conversations[convIndex].lastMessage!.status = 'READ';
         }
       }
-      notifyListeners();
+
+      if (conversationId == _activeConversationId) {
+        debugPrint('Marking local messages as READ');
+        bool changed = false;
+        for (var msg in _messages) {
+          // If we receive a read receipt for the conversation, all previous messages are read
+          if (msg.status != 'READ') {
+            msg.status = 'READ';
+            changed = true;
+          }
+        }
+        if (changed) notifyListeners();
+      } else {
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error handling message read event: $e');
+    }
+  }
+
+  void _onMessageDelivered(dynamic payload) {
+    try {
+      final conversationId = payload['conversationId'] ?? payload['conversation_id'];
+      final messageId = payload['messageId'] ?? payload['message_id'] ?? payload['_id'];
+      
+      debugPrint('Message Delivered Event for Conversation: $conversationId, Message: $messageId');
+
+      if (conversationId == null) return;
+
+      if (conversationId == _activeConversationId) {
+        bool changed = false;
+        if (messageId != null) {
+          final index = _messages.indexWhere((m) => m.sId == messageId);
+          if (index != -1 && _messages[index].status != 'READ') {
+            _messages[index].status = 'DELIVERED';
+            changed = true;
+          }
+        } else {
+          // If no specific message ID, mark all 'SENT' as 'DELIVERED'
+          for (var msg in _messages) {
+            if (msg.status == 'SENT' || msg.status == null) {
+              msg.status = 'DELIVERED';
+              changed = true;
+            }
+          }
+        }
+        if (changed) notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error handling message delivered event: $e');
+    }
+  }
+
+  void _onMessageReaction(dynamic payload) {
+    try {
+      final messageId = payload['messageId'];
+      final reaction = ReactionModel.fromJson(payload['reaction'] ?? payload);
+      
+      final index = _messages.indexWhere((m) => m.sId == messageId);
+      if (index != -1) {
+        final reactions = _messages[index].reactions ?? [];
+        // Remove old reaction from same user if exists
+        reactions.removeWhere((r) => r.userId == reaction.userId);
+        reactions.add(reaction);
+        _messages[index].reactions = reactions;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error handling message reaction socket event: $e');
     }
   }
 
@@ -152,6 +350,7 @@ class ChatProvider extends ChangeNotifier {
 
   void setActiveConversation(String? id) {
     _activeConversationId = id;
+    NotificationService.activeChatId = id;
     if (id != null) {
       markAsRead(id);
     }
@@ -255,6 +454,9 @@ class ChatProvider extends ChangeNotifier {
 
   // Message Methods
   Future<void> fetchMessages(String conversationId, {int page = 1}) async {
+    // Ensure socket is connected when we enter a conversation
+    _socketService.connect();
+
     if (page == 1) {
       _messages = [];
       _isMessagesLoading = true;
@@ -274,8 +476,9 @@ class ChatProvider extends ChangeNotifier {
       } else {
         _messages.addAll(newMessages);
       }
-    } catch (e) {
-      debugPrint('Error fetching messages: $e');
+    } catch (e, stackTrace) {
+      debugPrint('Error fetching messages for $conversationId: $e');
+      debugPrint('Stacktrace: $stackTrace');
     } finally {
       _isMessagesLoading = false;
       notifyListeners();
@@ -296,18 +499,48 @@ class ChatProvider extends ChangeNotifier {
       };
       if (text != null) data['text'] = text;
       if (mediaUrl != null) data['mediaUrl'] = mediaUrl;
-      if (replyTo != null) data['replyTo'] = replyTo;
+      
+      // Use provided replyTo or the one in state
+      final actualReplyTo = replyTo ?? _replyingToMessage?.sId;
+      if (actualReplyTo != null) data['replyTo'] = actualReplyTo;
 
       final response = await _chatRepository.sendMessage(data);
       if (response['success'] == true) {
+        clearReplyingMessage();
         // Optionally add message to local list instead of re-fetching
         // for better UX if it's not a real-time socket system
         await fetchMessages(conversationId);
+        await fetchConversations();
         return true;
       }
       return false;
     } catch (e) {
       debugPrint('Error sending message: $e');
+      return false;
+    }
+  }
+
+  Future<bool> forwardMessage({
+    required String recipientId,
+    required MessageModel originalMessage,
+  }) async {
+    try {
+      final data = {
+        'recipientId': recipientId,
+        'messageType': originalMessage.messageType ?? 'text',
+        'text': originalMessage.text,
+        'mediaUrl': originalMessage.mediaUrl,
+        'isForwarded': true,
+      };
+
+      final response = await _chatRepository.sendMessage(data);
+      if (response['success'] == true) {
+        await fetchConversations();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('Error forwarding message: $e');
       return false;
     }
   }
@@ -351,8 +584,21 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> reactToMessage(String messageId, String emoji) async {
     try {
+      final currentUserId = HiveService.userId;
+      
+      // Update locally for immediate feedback
+      final index = _messages.indexWhere((m) => m.sId == messageId);
+      if (index != -1) {
+        final reactions = _messages[index].reactions ?? [];
+        // Remove existing reaction from this user
+        reactions.removeWhere((r) => r.userId == currentUserId);
+        // Add new reaction
+        reactions.add(ReactionModel(userId: currentUserId, emoji: emoji));
+        _messages[index].reactions = reactions;
+        notifyListeners();
+      }
+
       await _chatRepository.reactToMessage(messageId, emoji);
-      // Update local state if needed
     } catch (e) {
       debugPrint('Error reacting to message: $e');
     }

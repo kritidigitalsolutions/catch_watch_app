@@ -122,7 +122,7 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
                       width: 38,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.24),
+                        color: Colors.white.withOpacity(0.24),
                         borderRadius: BorderRadius.circular(99),
                       ),
                     ),
@@ -228,9 +228,9 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
                     margin: const EdgeInsets.only(top: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
+                      color: Colors.white.withOpacity(0.05),
                       borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                      border: Border.all(color: Colors.white.withOpacity(0.1)),
                     ),
                     child: Row(
                       children: [
@@ -739,7 +739,7 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
                 width: 74,
                 height: 74,
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.45),
+                  color: Colors.black.withOpacity(0.45),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -836,10 +836,10 @@ class _ShortGradient extends StatelessWidget {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Colors.black.withValues(alpha: 0.42),
+            Colors.black.withOpacity(0.42),
             Colors.transparent,
             Colors.transparent,
-            Colors.black.withValues(alpha: 0.9),
+            Colors.black.withOpacity(0.9),
           ],
           stops: const [0, 0.26, 0.55, 1],
         ),
@@ -934,7 +934,7 @@ class _ActionButton extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.38),
+              color: Colors.black.withOpacity(0.38),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: color, size: 29),
@@ -1085,7 +1085,7 @@ class _ShortInfo extends StatelessWidget {
           reel.caption ?? '',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: text14(color: Colors.white.withValues(alpha: 0.86)),
+          style: text14(color: Colors.white.withOpacity(0.86)),
         ),
         if (isAd && reel.ctaText != null && reel.ctaText!.isNotEmpty) ...[
           const SizedBox(height: 16),

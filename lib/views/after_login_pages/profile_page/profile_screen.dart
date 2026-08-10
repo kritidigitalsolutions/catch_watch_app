@@ -342,7 +342,7 @@ class _ExpandedHeader extends StatelessWidget {
                       ),
                       Text(
                         provider.handle,
-                        style: text13(color: Colors.white.withValues(alpha: 0.8)),
+                        style: text13(color: Colors.white.withOpacity(0.8)),
                       ),
                       const SizedBox(height: 8),
                       Wrap(
@@ -476,7 +476,7 @@ class _CollapsedBar extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                color: Colors.white.withValues(alpha: 0.3),
+                color: Colors.white.withOpacity(0.3),
                 width: 2,
               ),
             ),
@@ -535,7 +535,7 @@ class _CollapsedBar extends StatelessWidget {
           // Menu button
           Container(
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
+              color: Colors.white.withOpacity(0.15),
               borderRadius: BorderRadius.circular(12),
             ),
             child: CustomIconButton(
@@ -651,7 +651,7 @@ class _GridCard extends StatelessWidget {
                     end: Alignment.bottomCenter,
                     colors: [
                       Colors.transparent,
-                      Colors.black.withValues(alpha: 0.82),
+                      Colors.black.withOpacity(0.82),
                     ],
                   ),
                 ),

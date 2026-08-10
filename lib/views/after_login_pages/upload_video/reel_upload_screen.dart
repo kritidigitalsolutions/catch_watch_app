@@ -232,7 +232,7 @@ class _FilePreview extends StatelessWidget {
           width: 80,
           height: 80,
           decoration: BoxDecoration(
-            color: AppColors.primary.withValues(alpha: 0.12),
+            color: AppColors.primary.withOpacity(0.12),
             shape: BoxShape.circle,
           ),
           child: const Icon(

@@ -46,7 +46,12 @@ class ChatDetailsScreen extends StatelessWidget {
                   children: [
                     CircleAvatar(
                       radius: 50,
-                      backgroundImage: NetworkImage(image),
+                      backgroundImage: image != null && image.isNotEmpty
+                          ? NetworkImage(image)
+                          : null,
+                      child: image == null || image.isEmpty
+                          ? const Icon(Icons.person, size: 50)
+                          : null,
                       backgroundColor: AppColors.grey200,
                     ),
                     const SizedBox(height: 12),

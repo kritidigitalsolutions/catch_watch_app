@@ -283,7 +283,12 @@ class _MessageListScreenState extends State<MessageListScreen> {
                               children: [
                                 CircleAvatar(
                                   radius: 30,
-                                  backgroundImage: NetworkImage(chat.partner?.profileImage ?? ''),
+                                  backgroundImage: chat.partner?.profileImage != null && chat.partner!.profileImage!.isNotEmpty
+                                      ? NetworkImage(chat.partner!.profileImage!)
+                                      : null,
+                                  child: chat.partner?.profileImage == null || chat.partner!.profileImage!.isEmpty
+                                      ? const Icon(Icons.person, size: 30)
+                                      : null,
                                 ),
                                 Positioned(
                                   bottom: 0,
@@ -346,7 +351,12 @@ class _MessageListScreenState extends State<MessageListScreen> {
                           children: [
                             CircleAvatar(
                               radius: 25,
-                              backgroundImage: NetworkImage(chat.partner?.profileImage ?? ''),
+                              backgroundImage: chat.partner?.profileImage != null && chat.partner!.profileImage!.isNotEmpty
+                                  ? NetworkImage(chat.partner!.profileImage!)
+                                  : null,
+                              child: chat.partner?.profileImage == null || chat.partner!.profileImage!.isEmpty
+                                  ? const Icon(Icons.person, size: 25)
+                                  : null,
                             ),
                             if (chat.isPinned == true)
                               Positioned(
@@ -427,10 +437,10 @@ class _MessageListScreenState extends State<MessageListScreen> {
           ),
           ListTile(
             leading: const Icon(Icons.delete_outline, color: Colors.red),
-            title: const Text("Clear Chat", style: TextStyle(color: Colors.red)),
+            title: const Text("Delete Chat", style: TextStyle(color: Colors.red)),
             onTap: () {
               Navigator.pop(context);
-              _showClearChatConfirm(context, chat, provider);
+              _showDeleteChatConfirm(context, chat, provider);
             },
           ),
         ],
@@ -438,12 +448,12 @@ class _MessageListScreenState extends State<MessageListScreen> {
     );
   }
 
-  void _showClearChatConfirm(BuildContext context, ConversationModel chat, ChatProvider provider) {
+  void _showDeleteChatConfirm(BuildContext context, ConversationModel chat, ChatProvider provider) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Clear Chat?"),
-        content: const Text("This will delete all messages in this conversation."),
+        title: const Text("Delete Chat?"),
+        content: const Text("This will permanently delete this conversation and all its messages."),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
           TextButton(
@@ -451,7 +461,7 @@ class _MessageListScreenState extends State<MessageListScreen> {
               provider.clearChat(chat.sId!);
               Navigator.pop(context);
             },
-            child: const Text("Clear", style: TextStyle(color: Colors.red)),
+            child: const Text("Delete", style: TextStyle(color: Colors.red)),
           ),
         ],
       ),

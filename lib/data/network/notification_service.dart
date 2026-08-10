@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -16,6 +17,13 @@ class NotificationService {
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   static final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
   static final BaseApiService _apiService = NetworkApiService();
+
+  // Track the active conversation to suppress notifications
+  static String? activeChatId;
+
+  // Stream for foreground message processing
+  static final StreamController<RemoteMessage> _foregroundMessageController = StreamController<RemoteMessage>.broadcast();
+  static Stream<RemoteMessage> get foregroundMessageStream => _foregroundMessageController.stream;
 
   // 🔥 BACKGROUND HANDLE
   @pragma('vm:entry-point')
@@ -81,6 +89,7 @@ class NotificationService {
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       debugPrint("📩 FOREGROUND MESSAGE RECEIVED");
+      _foregroundMessageController.add(message);
       _showNotificationInternal(message);
     });
 
@@ -137,15 +146,42 @@ class NotificationService {
                       notification?.android?.imageUrl ??
                       notification?.apple?.imageUrl;
 
+    // Suppression logic: Don't show if the chat is already open
+    String? conversationId = message.data['conversationId'];
+    if (conversationId != null && activeChatId == conversationId) {
+      debugPrint("🚀 Chat active ($conversationId), suppressing notification.");
+      return;
+    }
+
     if (title.isEmpty && body.isEmpty) {
       debugPrint("⚠️ Title and Body are empty, skipping notification.");
       return;
     }
 
+    String? senderName = message.data['senderName'] ?? title;
+    String? senderImage = message.data['senderImage'];
+
+    MessagingStyleInformation? messagingStyle;
+    if (conversationId != null) {
+      final person = Person(
+        name: senderName,
+        key: message.data['senderId'],
+        icon: senderImage != null ? BitmapFilePathAndroidIcon(senderImage) : null,
+      );
+      
+      messagingStyle = MessagingStyleInformation(
+        person,
+        conversationTitle: message.data['groupName'],
+        messages: [
+          Message(body, DateTime.now(), person),
+        ],
+      );
+    }
+
     BigPictureStyleInformation? bigPictureStyleInformation;
     String? localImagePath;
 
-    if (imageUrl != null && imageUrl.isNotEmpty) {
+    if (imageUrl != null && imageUrl.isNotEmpty && messagingStyle == null) {
       try {
         final String fileName = 'notification_img_${DateTime.now().millisecondsSinceEpoch}.jpg';
         localImagePath = await _downloadAndSaveFile(imageUrl, fileName);
@@ -167,8 +203,9 @@ class NotificationService {
       importance: Importance.max,
       priority: Priority.high,
       icon: '@mipmap/ic_launcher',
-      styleInformation: bigPictureStyleInformation,
+      styleInformation: messagingStyle ?? bigPictureStyleInformation,
       largeIcon: localImagePath != null ? FilePathAndroidBitmap(localImagePath) : null,
+      category: AndroidNotificationCategory.message,
     );
 
     await _localNotifications.show(
