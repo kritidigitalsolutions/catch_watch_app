@@ -13,7 +13,9 @@ class UserModel {
   String? status;
   String? fcmToken;
   String? username;
+  String? publicKey;
   int? followersCount;
+
   int? followingCount;
   int? reelsCount;
   bool? isFollowing;
@@ -104,7 +106,9 @@ class UserModel {
     status = json['status'];
     fcmToken = json['fcmToken'];
     username = json['username'];
+    publicKey = json['publicKey'];
     followersCount = parseInt(json['followersCount'] ?? json['followers']);
+
     followingCount = parseInt(json['followingCount'] ?? json['following']);
     reelsCount = parseInt(json['reelsCount'] ?? json['postsCount'] ?? json['totalReels']);
     isFollowing = json['isFollowing'] ?? false;
@@ -145,7 +149,9 @@ class UserModel {
     data['status'] = status;
     data['fcmToken'] = fcmToken;
     data['username'] = username;
+    data['publicKey'] = publicKey;
     data['followersCount'] = followersCount;
+
     data['followingCount'] = followingCount;
     data['reelsCount'] = reelsCount;
     data['isFollowing'] = isFollowing;

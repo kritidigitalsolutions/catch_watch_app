@@ -67,6 +67,7 @@ class PartnerModel {
   String? username;
   bool? isOnline;
   String? lastSeen;
+  String? publicKey;
   String? id;
 
   PartnerModel({
@@ -80,6 +81,7 @@ class PartnerModel {
     this.username,
     this.isOnline,
     this.lastSeen,
+    this.publicKey,
     this.id,
   });
 
@@ -103,6 +105,7 @@ class PartnerModel {
     username = json['username'];
     isOnline = json['isOnline'];
     lastSeen = json['lastSeen'];
+    publicKey = json['publicKey'];
     id = json['id'];
   }
 }
@@ -146,7 +149,12 @@ class MessageModel {
   String? readAt;
   bool? isPinned;
 
+  // E2EE fields
+  bool isDecrypted = false;
+  String? cipherText;
+
   MessageModel({
+
     this.mediaMeta,
     this.sId,
     this.conversationId,

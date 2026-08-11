@@ -323,10 +323,13 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
             await HiveService.saveUser(userDetail);
             NotificationService.syncTokenToServer(null); // Sync FCM token after login
             
-            // Initialize Chat Socket
+            // Initialize Chat Socket & E2EE
             if (context.mounted) {
-              Provider.of<ChatProvider>(context, listen: false).initSocket();
+              final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+              chatProvider.initSocket();
+              chatProvider.initE2EE();
             }
+
           }
           _otpVerifying = false;
           Navigator.pushAndRemoveUntil(
@@ -514,10 +517,13 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
         await HiveService.saveUser(userDetail);
         NotificationService.syncTokenToServer(null); // Sync FCM token after profile complete
         
-        // Initialize Chat Socket
+        // Initialize Chat Socket & E2EE
         if (context.mounted) {
-          Provider.of<ChatProvider>(context, listen: false).initSocket();
+          final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+          chatProvider.initSocket();
+          chatProvider.initE2EE();
         }
+
 
         _profileSaving = false;
         _step = AuthStep.done;

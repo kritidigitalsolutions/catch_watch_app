@@ -225,4 +225,36 @@ class ChatRepository {
       rethrow;
     }
   }
+
+  // E2EE Methods
+  Future<dynamic> savePublicKey(String publicKeyJwk) async {
+    try {
+      dynamic response = await _apiService.postApi(
+        AppUrl.savePublicKey,
+        {'publicKey': publicKeyJwk},
+      );
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> getUserPublicKey(String userId) async {
+    try {
+      dynamic response = await _apiService.getApi(AppUrl.getUserPublicKey(userId));
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> getMyProfile() async {
+    try {
+      dynamic response = await _apiService.getApi(AppUrl.getProfile);
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
 }
+

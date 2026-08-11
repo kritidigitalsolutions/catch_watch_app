@@ -5,8 +5,11 @@ import 'package:catch_watch/data/network/notification_service.dart';
 import 'package:catch_watch/data/network/socket_service.dart';
 import 'package:catch_watch/models/chat_model.dart';
 import 'package:catch_watch/repository/chat_repository.dart';
+import 'package:catch_watch/utils/encryption_helper.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
+import 'package:cryptography/cryptography.dart';
 import 'package:dio/dio.dart' as dio;
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -28,7 +31,18 @@ class ChatProvider extends ChangeNotifier {
   Set<String> _blockedByPartnerIds = {};
   Set<String> _mutedConversationIds = {};
   String? _activeConversationId;
+  String? _activePartnerId;
   MessageModel? _replyingToMessage;
+
+
+  // E2EE state
+  EcKeyPair? _myKeyPair;
+  final Map<String, EcPublicKey> _partnerPublicKeys = {};
+  final Map<String, SecretKey> _sharedSecrets = {};
+  bool _isPublicKeySyncing = false;
+  bool _publicKeySavedOnServer = false;
+
+
 
   List<ConversationModel> get conversations => _conversations;
   List<MessageModel> get messages => _messages;
@@ -71,12 +85,164 @@ class ChatProvider extends ChangeNotifier {
   ChatProvider() {
     _initSocket();
     _initNotificationListener();
+    initE2EE();
+  }
+
+  Future<void> initE2EE() async {
+    debugPrint('🚀 E2EE: Starting initialization...');
+    try {
+      final privateKeyBytes = HiveService.getPrivateKey();
+      final savedJwk = HiveService.getPublicKey();
+      
+      if (privateKeyBytes != null && savedJwk != null) {
+        debugPrint('E2EE: Found saved keys. Loading...');
+        _myKeyPair = await EncryptionHelper.loadKeyPair(privateKeyBytes, savedJwk);
+        debugPrint('E2EE: KeyPair loaded successfully');
+      } else {
+        debugPrint('E2EE: No saved keys found. Generating new KeyPair...');
+        _myKeyPair = await EncryptionHelper.generateKeyPair();
+        debugPrint('E2EE: KeyPair generation call completed');
+        
+        debugPrint('E2EE: Extracting KeyPair data...');
+        final keyPairData = await _myKeyPair!.extract();
+        debugPrint('E2EE: KeyPair data extracted successfully');
+        
+        await HiveService.savePrivateKey(keyPairData.d);
+        debugPrint('E2EE: Private key saved to Hive');
+        
+        final jwk = await EncryptionHelper.exportPublicKey(_myKeyPair!);
+        await HiveService.savePublicKey(jwk);
+        
+        debugPrint('E2EE: New KeyPair generated and saved locally');
+      }
+
+      // Explicitly log the public key that will be sent
+      final currentJwk = await EncryptionHelper.exportPublicKey(_myKeyPair!);
+      debugPrint('🔑 GENERATED PUBLIC KEY: $currentJwk');
+
+      // Now send to server
+      await syncPublicKey();
+    } catch (e) {
+      debugPrint('❌ E2EE Initialization Error: $e');
+    }
+  }
+
+  Future<void> syncPublicKey() async {
+    if (_isPublicKeySyncing) return;
+    
+    if (_myKeyPair == null) {
+      debugPrint('⚠️ E2EE Sync: KeyPair is missing. Cannot send public key.');
+      return;
+    }
+    
+    final token = HiveService.getToken();
+    if (token == null || token.isEmpty) {
+      debugPrint('⚠️ E2EE Sync: User token is missing. Please login first.');
+      return;
+    }
+
+    _isPublicKeySyncing = true;
+    try {
+      final jwk = await EncryptionHelper.exportPublicKey(_myKeyPair!);
+      
+      debugPrint('📡 API CALL: POST /api/chat/keys');
+      debugPrint('📡 Request Body: {"publicKey": "$jwk"}');
+
+      final response = await _chatRepository.savePublicKey(jwk);
+      
+      if (response['success'] == true) {
+        _publicKeySavedOnServer = true;
+        debugPrint('✅ SUCCESS: Public key sent to server successfully');
+      } else {
+        debugPrint('❌ FAILED: Server rejected public key: ${response['message']}');
+      }
+    } catch (e) {
+      debugPrint('❌ ERROR during API call /api/chat/keys: $e');
+    } finally {
+      _isPublicKeySyncing = false;
+    }
+  }
+
+  Future<void> checkServerSyncStatus() async {
+    if (_myKeyPair == null) {
+      debugPrint('E2EE Sync Check: KeyPair not ready. Postponing check.');
+      return;
+    }
+
+    try {
+      debugPrint('E2EE Sync Check: Verifying public key status on server...');
+      final response = await _chatRepository.getMyProfile();
+      if (response['success'] == true) {
+        final serverKey = response['user']['publicKey'];
+        if (serverKey == null || serverKey.isEmpty) {
+          debugPrint('E2EE Sync Check: Public key MISSING on server. Triggering sync...');
+          _publicKeySavedOnServer = false;
+          await syncPublicKey();
+        } else {
+          _publicKeySavedOnServer = true;
+          debugPrint('E2EE Sync Check: Public key ALREADY present on server');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ E2EE Sync Check ERROR: $e');
+    }
+  }
+
+  Future<SecretKey?> _getSharedSecret(String partnerId) async {
+
+
+    if (_myKeyPair == null) return null;
+    if (_sharedSecrets.containsKey(partnerId)) return _sharedSecrets[partnerId];
+
+    try {
+      EcPublicKey? partnerPublicKey;
+      
+      if (_partnerPublicKeys.containsKey(partnerId)) {
+        partnerPublicKey = _partnerPublicKeys[partnerId];
+      } else {
+        // Check if we have it in the conversation model
+        final conv = _conversations.firstWhere(
+          (c) => (c.partner?.sId == partnerId || c.partner?.id == partnerId) && 
+                 (c.partner?.publicKey != null && c.partner!.publicKey!.isNotEmpty),
+          orElse: () => ConversationModel(),
+        );
+
+        if (conv.partner?.publicKey != null) {
+          debugPrint('E2EE: Using public key from conversation model for $partnerId');
+          partnerPublicKey = EncryptionHelper.importPublicKey(conv.partner!.publicKey!);
+          _partnerPublicKeys[partnerId] = partnerPublicKey;
+        } else {
+          debugPrint('E2EE: Fetching public key for partner: $partnerId');
+          final response = await _chatRepository.getUserPublicKey(partnerId);
+          if (response['success'] == true && response['data'] != null) {
+            final jwk = response['data']['publicKey'];
+            debugPrint('E2EE: Received public key for $partnerId: $jwk');
+            partnerPublicKey = EncryptionHelper.importPublicKey(jwk);
+            _partnerPublicKeys[partnerId] = partnerPublicKey;
+          } else {
+            debugPrint('E2EE: Failed to get public key for $partnerId: ${response['message']}');
+          }
+        }
+      }
+
+      if (partnerPublicKey != null) {
+        final secret = await EncryptionHelper.deriveSharedSecret(_myKeyPair!, partnerPublicKey);
+        _sharedSecrets[partnerId] = secret;
+        return secret;
+      }
+    } catch (e) {
+      debugPrint('E2EE Error deriving shared secret for $partnerId: $e');
+    }
+    return null;
   }
 
   void initSocket() {
+    checkServerSyncStatus(); // Check sync status when starting socket
     _socketService.disconnect();
     _socketService.connect();
   }
+
+
 
   void _initSocket() {
     _socketService.connect();
@@ -174,7 +340,7 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  void _onNewMessage(dynamic payload) {
+  void _onNewMessage(dynamic payload) async {
     try {
       debugPrint('Processing New Message Payload: $payload');
       final MessageModel newMessage;
@@ -183,7 +349,7 @@ class ChatProvider extends ChangeNotifier {
         newMessage = MessageModel.fromJson(payload);
       } else {
         // Handle flat map from FCM (Map<String, String>)
-        // Some backends might send JSON strings for nested objects
+        // ... (rest of existing code)
         dynamic senderData = payload['sender'];
         if (senderData is String && senderData.startsWith('{')) {
           try {
@@ -209,7 +375,31 @@ class ChatProvider extends ChangeNotifier {
         );
       }
 
+      // Decrypt message if it's text
+      if (newMessage.messageType == 'text' && newMessage.text != null && newMessage.text!.isNotEmpty) {
+        final senderId = newMessage.sender?.sId ?? newMessage.sender?.id;
+        if (senderId != null && senderId != HiveService.userId) {
+          debugPrint('E2EE: Incoming message from $senderId. Attempting decryption...');
+          final secret = await _getSharedSecret(senderId);
+          if (secret != null) {
+            newMessage.cipherText = newMessage.text;
+            final decrypted = await EncryptionHelper.decrypt(newMessage.text!, secret);
+            if (decrypted != newMessage.text) {
+              newMessage.text = decrypted;
+              newMessage.isDecrypted = true;
+              debugPrint('E2EE: Decryption successful');
+            } else {
+              debugPrint('E2EE: Decryption returned original text (maybe already plain?)');
+            }
+          } else {
+            debugPrint('E2EE: Could not obtain shared secret for $senderId');
+          }
+        }
+      }
+
+
       final conversationId = newMessage.conversationId;
+
       debugPrint('Resolved Message: ID=${newMessage.sId}, Text=${newMessage.text}, Conv=${newMessage.conversationId}');
       
       if (conversationId == null) {
@@ -375,13 +565,15 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setActiveConversation(String? id) {
+  void setActiveConversation(String? id, [String? partnerId]) {
     _activeConversationId = id;
+    _activePartnerId = partnerId;
     NotificationService.activeChatId = id;
     if (id != null) {
       markAsRead(id);
     }
   }
+
 
   int get totalUnreadCount {
     int count = 0;
@@ -398,15 +590,35 @@ class ChatProvider extends ChangeNotifier {
 
     // Ensure socket is connected when we start interacting with chat
     _socketService.connect();
+    
+    // Check key sync status
+    if (!_publicKeySavedOnServer) {
+      checkServerSyncStatus();
+    }
+
 
     try {
+
       final response = await _chatRepository.fetchConversations();
       _conversations = response;
 
-      // Sync block status from conversation data
+      // Sync block status and cache public keys from conversation data
       for (var conv in _conversations) {
         final partnerId = conv.partner?.sId ?? conv.partner?.id;
         if (partnerId != null) {
+          // Cache Public Key if present
+          if (conv.partner?.publicKey != null && conv.partner!.publicKey!.isNotEmpty) {
+            try {
+              if (!_partnerPublicKeys.containsKey(partnerId)) {
+                final partnerPublicKey = EncryptionHelper.importPublicKey(conv.partner!.publicKey!);
+                _partnerPublicKeys[partnerId] = partnerPublicKey;
+                debugPrint('E2EE: Cached public key for partner $partnerId from conversation list');
+              }
+            } catch (e) {
+              debugPrint('E2EE Error caching key for $partnerId: $e');
+            }
+          }
+
           if (conv.isBlockedByMe == true) {
             _blockedUserIds.add(partnerId);
           } else {
@@ -517,7 +729,29 @@ class ChatProvider extends ChangeNotifier {
       // Reverse the list because API returns Oldest First, but we want Newest at index 0 for reverse ListView
       final List<MessageModel> newMessages = (response.data ?? []).reversed.toList();
       
+      // Decrypt messages
+      final partnerId = _activePartnerId ?? _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel()).partner?.sId;
+      if (partnerId != null) {
+        debugPrint('E2EE: Fetching messages for partner $partnerId. Deriving secret...');
+        final secret = await _getSharedSecret(partnerId);
+        if (secret != null) {
+          for (var msg in newMessages) {
+            if (msg.messageType == 'text' && msg.text != null && msg.text!.isNotEmpty) {
+              msg.cipherText = msg.text;
+              final decrypted = await EncryptionHelper.decrypt(msg.text!, secret);
+              if (decrypted != msg.text) {
+                msg.text = decrypted;
+                msg.isDecrypted = true;
+              }
+            }
+          }
+          debugPrint('E2EE: Decrypted ${newMessages.where((m) => m.isDecrypted).length} messages');
+        }
+      }
+
+
       if (page == 1) {
+
         _messages = newMessages;
       } else {
         _messages.addAll(newMessages);
@@ -540,12 +774,50 @@ class ChatProvider extends ChangeNotifier {
   }) async {
     _error = null;
     try {
+      // Find partner ID from conversation
+      String? partnerId = _activePartnerId;
+      if (partnerId == null) {
+        final conv = _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel());
+        partnerId = conv.partner?.sId ?? conv.partner?.id;
+      }
+
+      String? encryptedText = text;
+      if (messageType == 'text' && text != null && partnerId != null) {
+        debugPrint('E2EE: Attempting to encrypt message for partner $partnerId');
+        
+        if (_myKeyPair == null) {
+          debugPrint('E2EE WARNING: My KeyPair is NULL. Initialization might have failed.');
+        }
+
+        // Ensure our own key is synced before encrypting (fail-safe)
+        if (!_publicKeySavedOnServer) {
+          debugPrint('E2EE: Public key not confirmed on server. Syncing now...');
+          await syncPublicKey();
+        }
+
+        final secret = await _getSharedSecret(partnerId);
+
+        if (secret != null) {
+          debugPrint('E2EE: Shared secret obtained. Encrypting...');
+          encryptedText = await EncryptionHelper.encrypt(text, secret);
+          if (encryptedText != text) {
+            debugPrint('E2EE: Encryption successful. Ciphertext length: ${encryptedText.length}');
+          } else {
+            debugPrint('E2EE WARNING: Encryption returned original text. Something went wrong inside EncryptionHelper.');
+          }
+        } else {
+          debugPrint('E2EE WARNING: Failed to get secret for $partnerId. Sending PLAIN TEXT.');
+        }
+      }
+
+
       final data = {
         'conversationId': conversationId,
         'messageType': messageType,
       };
-      if (text != null) data['text'] = text;
+      if (encryptedText != null) data['text'] = encryptedText;
       if (mediaUrl != null) data['mediaUrl'] = mediaUrl;
+
       
       // Use provided replyTo or the one in state
       final actualReplyTo = replyTo ?? _replyingToMessage?.sId;
@@ -591,15 +863,25 @@ class ChatProvider extends ChangeNotifier {
     required MessageModel originalMessage,
   }) async {
     try {
+      String? textToForward = originalMessage.text;
+      
+      if (originalMessage.messageType == 'text' && textToForward != null) {
+        final secret = await _getSharedSecret(recipientId);
+        if (secret != null) {
+          textToForward = await EncryptionHelper.encrypt(textToForward, secret);
+        }
+      }
+
       final data = {
         'recipientId': recipientId,
         'messageType': originalMessage.messageType ?? 'text',
-        'text': originalMessage.text,
+        'text': textToForward,
         'mediaUrl': originalMessage.mediaUrl,
         'isForwarded': true,
       };
 
       final response = await _chatRepository.sendMessage(data);
+
       if (response['success'] == true) {
         await fetchConversations();
         return true;
@@ -613,7 +895,18 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> editMessage(String conversationId, String messageId, String newText) async {
     try {
-      await _chatRepository.editMessage(messageId, newText);
+      final conv = _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel());
+      final partnerId = conv.partner?.sId ?? conv.partner?.id;
+      
+      String encryptedText = newText;
+      if (partnerId != null) {
+        final secret = await _getSharedSecret(partnerId);
+        if (secret != null) {
+          encryptedText = await EncryptionHelper.encrypt(newText, secret);
+        }
+      }
+
+      await _chatRepository.editMessage(messageId, encryptedText);
       final index = _messages.indexWhere((m) => m.sId == messageId);
       if (index != -1) {
         _messages[index].text = newText;
@@ -624,6 +917,7 @@ class ChatProvider extends ChangeNotifier {
       debugPrint('Error editing message: $e');
     }
   }
+
 
   Future<void> unsendMessage(String conversationId, String messageId) async {
     try {

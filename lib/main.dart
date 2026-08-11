@@ -32,9 +32,11 @@ import 'package:catch_watch/view_model/after_login_provider/vip_support_provider
 import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
 import 'package:catch_watch/views/after_login_pages/message/call_overlay.dart';
+import 'package:cryptography_flutter/cryptography_flutter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  FlutterCryptography.enable();
   await Firebase.initializeApp();
   await HiveService.init();
   await NotificationService.init();

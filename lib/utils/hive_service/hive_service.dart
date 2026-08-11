@@ -8,6 +8,8 @@ class HiveService {
   static const String historyBoxName = 'historyBox';
   static const String likesBoxName = 'likesBox';
   static const String statsBoxName = 'statsBox';
+  static const String keysBoxName = 'keysBox';
+
 
   static Future<void> init() async {
     await Hive.initFlutter();
@@ -18,7 +20,9 @@ class HiveService {
     await Hive.openBox(historyBoxName);
     await Hive.openBox(likesBoxName);
     await Hive.openBox(statsBoxName);
+    await Hive.openBox(keysBoxName);
   }
+
 
   static Box<UserDetails> get _box {
     if (!Hive.isBoxOpen(boxName)) {
@@ -30,6 +34,8 @@ class HiveService {
   static Box get _historyBox => Hive.box(historyBoxName);
   static Box get _likesBox => Hive.box(likesBoxName);
   static Box get _statsBox => Hive.box(statsBoxName);
+  static Box get _keysBox => Hive.box(keysBoxName);
+
 
   static Future<void> saveUser(UserDetails user) async {
     await _box.put(userKey, user);
@@ -78,7 +84,9 @@ class HiveService {
     await _historyBox.clear();
     await _likesBox.clear();
     await _statsBox.clear();
+    await _keysBox.clear();
   }
+
 
   // --- User Stats Cache ---
   static Future<void> saveUserStats(String userId, int followers, int following, int reels) async {
@@ -95,7 +103,25 @@ class HiveService {
     return Map<String, int>.from(data);
   }
 
+  // --- E2EE Keys ---
+  static Future<void> savePrivateKey(List<int> bytes) async {
+    await _keysBox.put('privateKey', bytes);
+  }
+
+  static List<int>? getPrivateKey() {
+    return _keysBox.get('privateKey');
+  }
+
+  static Future<void> savePublicKey(String jwk) async {
+    await _keysBox.put('publicKey', jwk);
+  }
+
+  static String? getPublicKey() {
+    return _keysBox.get('publicKey');
+  }
+
   static bool isLogin() {
+
     final user = getUser();
     return user != null && user.token != null && user.token!.isNotEmpty;
   }

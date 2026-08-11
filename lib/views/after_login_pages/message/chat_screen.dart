@@ -51,8 +51,9 @@ class _ChatScreenState extends State<ChatScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       NotificationService.activeChatId = widget.conversationId;
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-      chatProvider.setActiveConversation(widget.conversationId);
+      chatProvider.setActiveConversation(widget.conversationId, widget.partnerId);
       chatProvider.fetchMessages(widget.conversationId);
+
       chatProvider.fetchPinnedMessages(widget.conversationId);
       chatProvider.fetchUserStatus(widget.partnerId);
       chatProvider.fetchBlockedUsers();
@@ -283,7 +284,13 @@ class _ChatScreenState extends State<ChatScreen> {
                   chatProvider.pinMessage(widget.conversationId, message.sId!);
                 }
               ),
+              if (message.cipherText != null)
+                _actionTile(Icons.enhanced_encryption_outlined, "Show Encrypted", () {
+                  Navigator.pop(context);
+                  _showEncryptedDialog(message);
+                }),
               _actionTile(Icons.copy, "Copy", () {
+
                 Navigator.pop(context);
                 // Implement copy logic
               }),
@@ -389,6 +396,56 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
+
+  void _showEncryptedDialog(MessageModel message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.lock, color: AppColors.primary, size: 20),
+            const SizedBox(width: 10),
+            const Text("Encrypted Content"),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("Plain Text:", style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(message.text ?? ""),
+              const SizedBox(height: 16),
+              const Text("Ciphertext (from Server):", style: TextStyle(fontWeight: FontWeight.bold)),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  message.cipherText ?? "Not available",
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                "This message is secured with AES-256-GCM encryption. Only you and the recipient can read its contents.",
+                style: TextStyle(fontSize: 10, color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Close"),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   void _showSearchUI() {
     final chatProvider = Provider.of<ChatProvider>(context, listen: false);
@@ -1068,10 +1125,28 @@ class _ChatScreenState extends State<ChatScreen> {
                                       ),
                                     ),
                                   if (message.text != null && message.text!.isNotEmpty)
-                                    Text(
-                                      message.text!,
-                                      style: text14(color: isHighlighted ? Colors.black : (isMe ? Colors.white : Colors.black)),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        if (message.isDecrypted)
+                                          Padding(
+                                            padding: const EdgeInsets.only(right: 4, bottom: 2),
+                                            child: Icon(
+                                              Icons.lock_outline,
+                                              size: 10,
+                                              color: isHighlighted ? Colors.black54 : (isMe ? Colors.white70 : Colors.black54),
+                                            ),
+                                          ),
+                                        Flexible(
+                                          child: Text(
+                                            message.text!,
+                                            style: text14(color: isHighlighted ? Colors.black : (isMe ? Colors.white : Colors.black)),
+                                          ),
+                                        ),
+                                      ],
                                     ),
+
                                   if (message.isPinned == true)
                                     Padding(
                                       padding: const EdgeInsets.only(top: 4),
