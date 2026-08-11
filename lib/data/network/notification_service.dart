@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
@@ -9,6 +10,11 @@ import 'package:catch_watch/data/network/base_api_service.dart';
 import 'package:catch_watch/res/appUrl.dart';
 import 'package:timezone/data/latest.dart' as tz_latest;
 import 'package:flutter/foundation.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
+import 'package:flutter_callkit_incoming/entities/android_params.dart';
+import 'package:flutter_callkit_incoming/entities/ios_params.dart';
+import 'package:uuid/uuid.dart';
 
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -31,9 +37,62 @@ class NotificationService {
     await Firebase.initializeApp();
     debugPrint("📩 BACKGROUND MESSAGE RECEIVED: ${message.messageId}");
     
-    // We only show local notification if it's a data-only message
-    // or if we want to customize the look (like with images)
-    _showNotificationInternal(message);
+    final type = message.data['type'];
+    if (type == 'CALL' || type == 'INCOMING_CALL' || message.data['callId'] != null) {
+      _showIncomingCallKit(message.data);
+    } else {
+      _showNotificationInternal(message);
+    }
+  }
+
+  static Future<void> _showIncomingCallKit(Map<String, dynamic> data) async {
+    final String uuid = const Uuid().v4();
+    final String callerName = data['callerName'] ?? data['senderName'] ?? "Unknown Caller";
+    final String callType = data['type'] ?? "audio";
+    
+    final params = CallKitParams(
+      id: uuid,
+      nameCaller: callerName,
+      appName: 'CatchWatch',
+      avatar: data['callerImage'] ?? data['senderImage'],
+      handle: data['callerPhone'] ?? 'Calling...',
+      type: callType == 'video' ? 1 : 0,
+      duration: 30000,
+      missedCallNotification: const NotificationParams(
+        showNotification: true,
+        isShowCallback: true,
+        subtitle: 'Missed call',
+        callbackText: 'Call back',
+      ),
+      extra: <String, dynamic>{'callId': data['callId'] ?? data['_id']},
+      headers: <String, dynamic>{'apiKey': 'Abc@123!', 'platform': 'flutter'},
+      android: const AndroidParams(
+        isCustomNotification: true,
+        isShowLogo: false,
+        backgroundColor: '#0955fa',
+        backgroundUrl: 'https://i.pravatar.cc/500',
+        actionColor: '#4CAF50',
+        textAccept: 'Accept',
+        textDecline: 'Decline',
+      ),
+      ios: const IOSParams(
+        iconName: 'CatchWatch',
+        handleType: 'generic',
+        supportsVideo: true,
+        maximumCallGroups: 2,
+        maximumCallsPerCallGroup: 1,
+        audioSessionMode: 'default',
+        audioSessionActive: true,
+        audioSessionPreferredSampleRate: 44100.0,
+        audioSessionPreferredIOBufferDuration: 0.005,
+        supportsDTMF: true,
+        supportsHolding: true,
+        supportsGrouping: false,
+        supportsUngrouping: false,
+      ),
+    );
+
+    await FlutterCallkitIncoming.showCallkitIncoming(params);
   }
 
   // 🔥 INIT
@@ -88,14 +147,23 @@ class NotificationService {
     });
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      debugPrint("📩 FOREGROUND MESSAGE RECEIVED");
+      debugPrint("📩 FOREGROUND MESSAGE RECEIVED: ${message.data}");
       _foregroundMessageController.add(message);
       _showNotificationInternal(message);
     });
 
     // ✅ BACKGROUND CLICK (APP OPEN FROM NOTIFICATION)
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      debugPrint("📲 NOTIFICATION CLICKED (BACKGROUND)");
+      debugPrint("📲 NOTIFICATION CLICKED (BACKGROUND): ${message.data}");
+      _foregroundMessageController.add(message);
+    });
+
+    // Handle initial message (app launched from terminated state)
+    FirebaseMessaging.instance.getInitialMessage().then((message) {
+      if (message != null) {
+        debugPrint("📲 APP LAUNCHED FROM NOTIFICATION: ${message.data}");
+        _foregroundMessageController.add(message);
+      }
     });
 
     // Request permission
@@ -146,8 +214,9 @@ class NotificationService {
                       notification?.android?.imageUrl ??
                       notification?.apple?.imageUrl;
 
-    // Suppression logic: Don't show if the chat is already open
+    // Suppression logic: Don't show local notification if the app is already in the specific chat
     String? conversationId = message.data['conversationId'];
+    
     if (conversationId != null && activeChatId == conversationId) {
       debugPrint("🚀 Chat active ($conversationId), suppressing notification.");
       return;

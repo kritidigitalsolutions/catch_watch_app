@@ -5,6 +5,7 @@ import 'package:catch_watch/models/chat_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/utils/text_style.dart';
+import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -59,8 +60,8 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     NotificationService.activeChatId = null;
+    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final chatProvider = Provider.of<ChatProvider>(context, listen: false);
       chatProvider.setActiveConversation(null);
       chatProvider.clearReplyingMessage();
     });
@@ -134,12 +135,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _handleCall(bool isVideo) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("${isVideo ? 'Video' : 'Audio'} call feature coming soon!"),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    final callProvider = Provider.of<CallProvider>(context, listen: false);
+    callProvider.startCall(widget.partnerId, isVideo ? 'video' : 'audio');
   }
 
   void _scrollToBottom() {
@@ -750,6 +747,26 @@ class _ChatScreenState extends State<ChatScreen> {
 
                 final messages = chatProvider.messages;
 
+                // Find indices for status display
+                int? lastMyMessageIndex;
+                int? lastReadMyMessageIndex;
+
+                for (int i = 0; i < messages.length; i++) {
+                  final msg = messages[i];
+                  final bool isMe = (currentUserId != null && (msg.sender?.sId == currentUserId || msg.sender?.id == currentUserId)) ||
+                                   (msg.sender != null && msg.sender?.sId != widget.partnerId && msg.sender?.id != widget.partnerId);
+                  
+                  if (isMe) {
+                    if (lastMyMessageIndex == null) {
+                      lastMyMessageIndex = i;
+                    }
+                    if (msg.status == 'READ' && lastReadMyMessageIndex == null) {
+                      lastReadMyMessageIndex = i;
+                    }
+                    if (lastMyMessageIndex != null && lastReadMyMessageIndex != null) break;
+                  }
+                }
+
                 return ScrollablePositionedList.builder(
                   itemScrollController: _itemScrollController,
                   itemPositionsListener: _itemPositionsListener,
@@ -763,6 +780,16 @@ class _ChatScreenState extends State<ChatScreen> {
                     
                     final bool isHighlighted = _highlightedMessageId == message.sId;
                     
+                    // Status display logic
+                    bool shouldShowStatus = false;
+                    if (isMe) {
+                      if (index == lastMyMessageIndex) {
+                        shouldShowStatus = true;
+                      } else if (index == lastReadMyMessageIndex && lastReadMyMessageIndex != lastMyMessageIndex) {
+                        shouldShowStatus = true;
+                      }
+                    }
+
                     if (message.isUnsent == true) {
                       return Align(
                         alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -923,7 +950,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             ),
                             if (message.reactions != null && message.reactions!.isNotEmpty)
                               _buildReactionsDisplay(message.reactions as List<ReactionModel>, isMe),
-                            if (isMe)
+                            if (shouldShowStatus)
                               Padding(
                                 padding: const EdgeInsets.only(right: 4, bottom: 4),
                                 child: Text(

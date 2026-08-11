@@ -1,6 +1,7 @@
 import 'package:catch_watch/models/chat_model.dart';
 import 'package:catch_watch/models/user_model.dart';
 import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
+import 'package:catch_watch/views/after_login_pages/message/call_history_screen.dart';
 import 'package:catch_watch/view_model/after_login_provider/profile_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:catch_watch/res/app_colors.dart';
@@ -203,6 +204,15 @@ class _MessageListScreenState extends State<MessageListScreen> {
           style: text20(fontWeight: FontWeight.bold),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.call_outlined, color: Colors.black),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const CallHistoryScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.group_add_rounded, color: Colors.black),
             onPressed: () => _showUserSelection(context),

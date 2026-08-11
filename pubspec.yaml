@@ -67,6 +67,12 @@ dependencies:
   socket_io_client: ^3.0.0
   scrollable_positioned_list: ^0.3.8
   emoji_picker_flutter: ^4.5.3
+  agora_rtc_engine: ^6.4.0
+  permission_handler: ^11.3.1
+  flutter_callkit_incoming: ^3.1.5
+  flutter_ringtone_player: ^4.0.0
+  vibration: ^3.2.0
+  uuid: ^4.5.1
 
 dev_dependencies:
   flutter_test:

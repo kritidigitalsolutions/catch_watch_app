@@ -103,6 +103,18 @@ class AppUrl {
   static const String getBlockedUsers = '$baseUrl/chat/blocked-users';
   static const String updateChatFcmToken = '$baseUrl/chat/fcm-token';
 
+  /// calls
+  static const String startCall = '$baseUrl/calls';
+  static const String getCallHistory = '$baseUrl/calls/history';
+  static String getCallDetails(String callId) => '$baseUrl/calls/$callId';
+  static String acceptCall(String callId) => '$baseUrl/calls/$callId/accept';
+  static String rejectCall(String callId) => '$baseUrl/calls/$callId/reject';
+  static String busyCall(String callId) => '$baseUrl/calls/$callId/busy';
+  static String cancelCall(String callId) => '$baseUrl/calls/$callId/cancel';
+  static String missedCall(String callId) => '$baseUrl/calls/$callId/missed';
+  static String endCall(String callId) => '$baseUrl/calls/$callId/end';
+  static String getCallToken(String callId) => '$baseUrl/calls/$callId/token';
+
   /// creator & wallet
   static const String creatorDashboard = '$baseUrl/creator/dashboard';
   static const String creatorLeaderboard = '$baseUrl/creator/leaderboard';

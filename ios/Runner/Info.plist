@@ -68,7 +68,10 @@
 	</array>
 
 	<key>NSCameraUsageDescription</key>
-    <string>This app needs camera access to capture photos.</string>
+    <string>We need camera access for video calls and capturing photos.</string>
+
+    <key>NSMicrophoneUsageDescription</key>
+    <string>We need microphone access for audio and video calls.</string>
 
     <key>NSPhotoLibraryUsageDescription</key>
     <string>This app needs gallery access to select photos.</string>

@@ -30,6 +30,8 @@ import 'package:catch_watch/view_model/after_login_provider/verification_provide
 import 'package:catch_watch/view_model/after_login_provider/wallet_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/vip_support_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
+import 'package:catch_watch/views/after_login_pages/message/call_overlay.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -68,6 +70,7 @@ void main() async {
         ChangeNotifierProvider(create: (_) => WalletProvider()),
         ChangeNotifierProvider(create: (_) => VipSupportProvider()),
         ChangeNotifierProvider(create: (_) => ChatProvider()),
+        ChangeNotifierProvider(create: (_) => CallProvider()),
       ],
       child: const MyApp(),
     ),
@@ -82,6 +85,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      navigatorKey: Provider.of<CallProvider>(context, listen: false).navigatorKey,
       theme: ThemeData(
         textTheme: GoogleFonts.poppinsTextTheme(),
         appBarTheme: const AppBarTheme(
@@ -91,6 +95,9 @@ class MyApp extends StatelessWidget {
           scrolledUnderElevation: 0,
         ),
       ),
+      builder: (context, child) {
+        return CallOverlay(child: child!);
+      },
       initialRoute: '/',
       routes: {
         '/': (context) => const SplashScreen(),

@@ -56,14 +56,16 @@ class SocketService {
         debugPrint('Socket.io Error: $data');
       });
 
-      // Listen to all common chat events and pipe them to the stream
+      // Listen to all common chat and call events and pipe them to the stream
       final events = [
         'new_message', 'receive_message', 'message',
         'status_update', 'user_status',
         'message_read', 'read_receipt', 'READ_RECEIPT',
         'message_delivered', 'delivered_receipt', 'DELIVERED_RECEIPT',
         'user_blocked',
-        'message_reaction', 'new_reaction', 'reaction'
+        'message_reaction', 'new_reaction', 'reaction',
+        'incoming_call', 'call_accepted', 'call_rejected', 'call_ended', 
+        'call_cancelled', 'call_busy', 'call_missed'
       ];
 
       for (var event in events) {

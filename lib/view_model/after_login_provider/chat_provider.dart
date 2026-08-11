@@ -142,6 +142,15 @@ class ChatProvider extends ChangeNotifier {
       case 'reaction':
         _onMessageReaction(payload);
         break;
+      case 'incoming_call':
+      case 'call_accepted':
+      case 'call_rejected':
+      case 'call_ended':
+      case 'call_cancelled':
+      case 'call_busy':
+      case 'call_missed':
+        // Handled by CallProvider
+        break;
       default:
         debugPrint('Unhandled Socket Event: $event');
     }

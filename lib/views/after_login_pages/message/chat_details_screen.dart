@@ -1,3 +1,4 @@
+import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:catch_watch/res/app_colors.dart';
@@ -82,9 +83,15 @@ class ChatDetailsScreen extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildActionButton(Icons.notifications_off_outlined, "Mute"),
-                _buildActionButton(Icons.search, "Search"),
-                _buildActionButton(Icons.ios_share, "Share"),
+                _buildActionButton(Icons.call_outlined, "Audio", () {
+                  Provider.of<CallProvider>(context, listen: false)
+                      .startCall(partnerId, 'audio');
+                }),
+                _buildActionButton(Icons.videocam_outlined, "Video", () {
+                  Provider.of<CallProvider>(context, listen: false)
+                      .startCall(partnerId, 'video');
+                }),
+                _buildActionButton(Icons.notifications_off_outlined, "Mute", () {}),
               ],
             ),
             
@@ -155,20 +162,23 @@ class ChatDetailsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildActionButton(IconData icon, String label) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey[100],
-            shape: BoxShape.circle,
+  Widget _buildActionButton(IconData icon, String label, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: Colors.black),
           ),
-          child: Icon(icon, color: Colors.black),
-        ),
-        const SizedBox(height: 4),
-        Text(label, style: text12()),
-      ],
+          const SizedBox(height: 4),
+          Text(label, style: text12()),
+        ],
+      ),
     );
   }
 }
