@@ -95,12 +95,14 @@ class AppUrl {
   static String unsendMessage(String messageId) => '$baseUrl/chat/messages/$messageId/unsend';
   static String deleteMessage(String messageId) => '$baseUrl/chat/messages/$messageId';
   static String reactToMessage(String messageId) => '$baseUrl/chat/messages/$messageId/react';
+  static String pinMessage(String messageId) => '$baseUrl/chat/messages/$messageId/pin';
   static const String searchMessages = '$baseUrl/chat/messages/search';
   static const String searchChatUsers = '$baseUrl/chat/users/search';
   static String getChatUserStatus(String userId) => '$baseUrl/chat/users/$userId/status';
   static String blockChatUser(String userId) => '$baseUrl/chat/block/$userId';
   static String unblockChatUser(String userId) => '$baseUrl/chat/block/$userId';
   static const String getBlockedUsers = '$baseUrl/chat/blocked-users';
+  static String getPinnedMessages(String conversationId) => '$baseUrl/chat/conversations/$conversationId/pinned-messages';
   static const String updateChatFcmToken = '$baseUrl/chat/fcm-token';
 
   /// calls

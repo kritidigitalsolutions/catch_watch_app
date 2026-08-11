@@ -1,5 +1,6 @@
 import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
+import 'package:catch_watch/views/after_login_pages/message/media_preview_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/text_style.dart';
@@ -11,6 +12,7 @@ class ChatDetailsScreen extends StatelessWidget {
   final String name;
   final String username;
   final String image;
+  final String conversationId;
 
   const ChatDetailsScreen({
     super.key,
@@ -18,6 +20,7 @@ class ChatDetailsScreen extends StatelessWidget {
     required this.name,
     required this.username,
     required this.image,
+    required this.conversationId,
   });
 
   @override
@@ -27,9 +30,31 @@ class ChatDetailsScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Details"),
         centerTitle: true,
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == 'profile') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => UserProfileScreen(username: username),
+                  ),
+                );
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'profile',
+                child: Text('View Profile'),
+              ),
+            ],
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 20),
             // Profile Image in Center
@@ -62,6 +87,8 @@ class ChatDetailsScreen extends StatelessWidget {
                     ),
                     Consumer<ChatProvider>(
                       builder: (context, provider, child) {
+                        if (provider.isUserBlocked(partnerId)) return const SizedBox.shrink();
+                        
                         final status = provider.currentUserStatus;
                         String statusText = "Offline";
                         if (status != null && status.isOnline == true) {
@@ -91,40 +118,105 @@ class ChatDetailsScreen extends StatelessWidget {
                   Provider.of<CallProvider>(context, listen: false)
                       .startCall(partnerId, 'video');
                 }),
-                _buildActionButton(Icons.notifications_off_outlined, "Mute", () {}),
+                _buildActionButton(Icons.search, "Search", () {
+                  Navigator.pop(context);
+                  // In ChatScreen, we could trigger the search UI. 
+                  // Since we are popping, we might need a way to tell ChatScreen to open search.
+                  // For now, it just goes back.
+                }),
+                Consumer<ChatProvider>(
+                  builder: (context, provider, child) {
+                    final isMuted = provider.isMuted(conversationId);
+                    return _buildActionButton(
+                      isMuted ? Icons.notifications_off : Icons.notifications_active_outlined, 
+                      isMuted ? "Unmute" : "Mute", 
+                      () => provider.toggleMute(conversationId)
+                    );
+                  },
+                ),
               ],
             ),
             
             const SizedBox(height: 30),
             const Divider(height: 1),
             
-            // More Info
-            const Divider(height: 1),
-            ListTile(
-              title: const Text("Privacy & Safety"),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () {},
-            ),
-            ListTile(
-              title: const Text("Notifications"),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () {},
+            // Shared Media Section
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text("Images & Videos", style: text16(fontWeight: FontWeight.bold)),
             ),
             Consumer<ChatProvider>(
+              builder: (context, provider, child) {
+                final mediaMessages = provider.messages.where((m) => 
+                  (m.messageType == 'image' || m.messageType == 'video' || m.messageType == 'gif') && 
+                  m.mediaUrl != null && m.mediaUrl!.isNotEmpty
+                ).toList();
+
+                if (mediaMessages.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: Text("No media shared yet", style: text14(color: Colors.grey)),
+                  );
+                }
+
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                  ),
+                  itemCount: mediaMessages.length > 6 ? 6 : mediaMessages.length,
+                  itemBuilder: (context, index) {
+                    final msg = mediaMessages[index];
+                    return GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => MediaPreviewScreen(
+                              url: msg.mediaUrl!,
+                              type: msg.messageType == 'video' ? 'video' : 'image',
+                            ),
+                          ),
+                        );
+                      },
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: msg.messageType == 'video'
+                          ? Container(
+                              color: Colors.black87,
+                              child: const Icon(Icons.play_circle_fill, color: Colors.white),
+                            )
+                          : Image.network(msg.mediaUrl!, fit: BoxFit.cover),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+
+            const SizedBox(height: 20),
+            const Divider(height: 1),
+            
+            Consumer<ChatProvider>(
               builder: (context, chatProvider, child) {
-                final isBlocked = chatProvider.isUserBlocked(partnerId);
+                final blockedByMe = chatProvider.isBlockedByMe(partnerId);
+
                 return ListTile(
                   title: Text(
-                    isBlocked ? "Unblock" : "Block",
+                    blockedByMe ? "Unblock" : "Block",
                     style: const TextStyle(color: Colors.red),
                   ),
                   trailing: Icon(
-                    isBlocked ? Icons.lock_open : Icons.block,
+                    blockedByMe ? Icons.lock_open : Icons.block,
                     color: Colors.red,
                   ),
                   onTap: () {
-                    if (isBlocked) {
-                      chatProvider.unblockUser(partnerId);
+                    if (blockedByMe) {
+                      _showUnblockConfirmation(context, chatProvider);
                     } else {
                       _showBlockDialog(context);
                     }
@@ -135,6 +227,29 @@ class ChatDetailsScreen extends StatelessWidget {
             const SizedBox(height: 40),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showUnblockConfirmation(BuildContext context, ChatProvider provider) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Unblock"),
+        content: Text("Do you want to unblock $name?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () {
+              provider.unblockUser(partnerId);
+              Navigator.pop(context);
+            },
+            child: const Text("OK"),
+          ),
+        ],
       ),
     );
   }

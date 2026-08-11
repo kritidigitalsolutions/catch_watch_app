@@ -8,6 +8,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_windows
   firebase_core
   flutter_inappwebview_windows
+  gal
   iris_method_channel
   permission_handler_windows
   share_plus

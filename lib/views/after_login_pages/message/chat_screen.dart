@@ -13,6 +13,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'chat_details_screen.dart';
+import 'media_preview_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final String conversationId;
@@ -52,6 +53,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
       chatProvider.setActiveConversation(widget.conversationId);
       chatProvider.fetchMessages(widget.conversationId);
+      chatProvider.fetchPinnedMessages(widget.conversationId);
       chatProvider.fetchUserStatus(widget.partnerId);
       chatProvider.fetchBlockedUsers();
     });
@@ -72,7 +74,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isNotEmpty) {
-      final success = await Provider.of<ChatProvider>(context, listen: false).sendMessage(
+      final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+      final success = await chatProvider.sendMessage(
         conversationId: widget.conversationId,
         messageType: 'text',
         text: text,
@@ -80,6 +83,10 @@ class _ChatScreenState extends State<ChatScreen> {
       if (success) {
         _messageController.clear();
         _scrollToBottom();
+      } else if (chatProvider.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(chatProvider.error!)),
+        );
       }
     }
   }
@@ -268,11 +275,21 @@ class _ChatScreenState extends State<ChatScreen> {
                 Navigator.pop(context);
                 _showReactionPicker(message);
               }),
+              _actionTile(
+                message.isPinned == true ? Icons.push_pin : Icons.push_pin_outlined, 
+                message.isPinned == true ? "Unpin" : "Pin", 
+                () {
+                  Navigator.pop(context);
+                  chatProvider.pinMessage(widget.conversationId, message.sId!);
+                }
+              ),
               _actionTile(Icons.copy, "Copy", () {
                 Navigator.pop(context);
                 // Implement copy logic
               }),
-              if (message.messageType == 'text' && isMe)
+              if (message.messageType == 'text' && isMe && 
+                  message.createdAt != null && 
+                  DateTime.now().difference(DateTime.parse(message.createdAt!)).inMinutes <= 5)
                 _actionTile(Icons.edit_outlined, "Edit", () {
                   Navigator.pop(context);
                   _showEditDialog(message);
@@ -495,7 +512,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _showChatOptions() {
     final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-    final isBlocked = chatProvider.isUserBlocked(widget.partnerId);
+    final blockedByMe = chatProvider.isBlockedByMe(widget.partnerId);
+    final partnerBlockedMe = chatProvider.isPartnerBlockedMe(widget.partnerId);
+    
     final conv = chatProvider.conversations.firstWhere(
       (c) => c.sId == widget.conversationId,
       orElse: () => ConversationModel(),
@@ -542,22 +561,53 @@ class _ChatScreenState extends State<ChatScreen> {
               Navigator.pop(context);
               _showDeleteChatConfirm();
             }, color: Colors.red),
-            _actionTile(
-              isBlocked ? Icons.lock_open : Icons.block,
-              isBlocked ? "Unblock User" : "Block User",
-              () {
-                Navigator.pop(context);
-                if (isBlocked) {
-                  chatProvider.unblockUser(widget.partnerId);
-                } else {
+            
+            if (blockedByMe)
+              _actionTile(
+                Icons.lock_open,
+                "Unblock User",
+                () {
+                  Navigator.pop(context);
+                  _showUnblockConfirmation(context, chatProvider);
+                },
+                color: Colors.red,
+              )
+            else
+              _actionTile(
+                Icons.block,
+                "Block User",
+                () {
+                  Navigator.pop(context);
                   _showBlockDialog(context);
-                }
-              },
-              color: Colors.red,
-            ),
+                },
+                color: Colors.red,
+              ),
             const SizedBox(height: 20),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showUnblockConfirmation(BuildContext context, ChatProvider provider) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Unblock"),
+        content: Text("Do you want to unblock ${widget.name}?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () {
+              provider.unblockUser(widget.partnerId);
+              Navigator.pop(context);
+            },
+            child: const Text("OK"),
+          ),
+        ],
       ),
     );
   }
@@ -678,6 +728,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   name: widget.name,
                   username: widget.username,
                   image: widget.image,
+                  conversationId: widget.conversationId,
                 ),
               ),
             );
@@ -696,6 +747,9 @@ class _ChatScreenState extends State<ChatScreen> {
               const SizedBox(width: 10),
               Consumer<ChatProvider>(
                 builder: (context, provider, child) {
+                  final isBlocked = provider.isUserBlocked(widget.partnerId);
+                  if (isBlocked) return const SizedBox.shrink();
+
                   final status = provider.currentUserStatus;
                   String statusText = "Offline";
                   Color statusColor = Colors.grey;
@@ -738,6 +792,53 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
+          Consumer<ChatProvider>(
+            builder: (context, chatProvider, child) {
+              final pinned = chatProvider.pinnedMessages;
+              if (pinned.isEmpty) return const SizedBox.shrink();
+
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.push_pin, size: 16, color: AppColors.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => _scrollToOriginalMessage(pinned.first.sId!),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              pinned.first.sender?.name ?? "Pinned Message",
+                              style: text10(fontWeight: FontWeight.bold, color: AppColors.primary),
+                            ),
+                            Text(
+                              pinned.first.text ?? (pinned.first.messageType == 'image' ? 'Photo' : 'Pinned Message'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: text12(fontWeight: FontWeight.w400),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (pinned.length > 1)
+                      Text(
+                        "+${pinned.length - 1}",
+                        style: text10(color: Colors.grey),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
           Expanded(
             child: Consumer<ChatProvider>(
               builder: (context, chatProvider, child) {
@@ -904,26 +1005,64 @@ class _ChatScreenState extends State<ChatScreen> {
                                       message.mediaUrl != null && message.mediaUrl!.isNotEmpty)
                                     Padding(
                                       padding: const EdgeInsets.only(bottom: 6.0),
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: Image.network(
-                                          message.mediaUrl!,
-                                          width: 200,
-                                          fit: BoxFit.cover,
-                                          loadingBuilder: (context, child, loadingProgress) {
-                                            if (loadingProgress == null) return child;
-                                            return Container(
+                                      child: GestureDetector(
+                                        onTap: () => Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) => MediaPreviewScreen(
+                                              url: message.mediaUrl!,
+                                              type: 'image',
+                                            ),
+                                          ),
+                                        ),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(12),
+                                          child: Image.network(
+                                            message.mediaUrl!,
+                                            width: 200,
+                                            fit: BoxFit.cover,
+                                            loadingBuilder: (context, child, loadingProgress) {
+                                              if (loadingProgress == null) return child;
+                                              return Container(
+                                                width: 200,
+                                                height: 150,
+                                                color: Colors.grey[300],
+                                                child: const Center(child: CircularProgressIndicator()),
+                                              );
+                                            },
+                                            errorBuilder: (context, error, stackTrace) => Container(
                                               width: 200,
                                               height: 150,
                                               color: Colors.grey[300],
-                                              child: const Center(child: CircularProgressIndicator()),
-                                            );
-                                          },
-                                          errorBuilder: (context, error, stackTrace) => Container(
+                                              child: const Icon(Icons.broken_image, color: Colors.grey),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  if (message.messageType == 'video' && 
+                                      message.mediaUrl != null && message.mediaUrl!.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 6.0),
+                                      child: GestureDetector(
+                                        onTap: () => Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) => MediaPreviewScreen(
+                                              url: message.mediaUrl!,
+                                              type: 'video',
+                                            ),
+                                          ),
+                                        ),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(12),
+                                          child: Container(
                                             width: 200,
                                             height: 150,
-                                            color: Colors.grey[300],
-                                            child: const Icon(Icons.broken_image, color: Colors.grey),
+                                            color: Colors.black87,
+                                            child: const Center(
+                                              child: Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -932,6 +1071,15 @@ class _ChatScreenState extends State<ChatScreen> {
                                     Text(
                                       message.text!,
                                       style: text14(color: isHighlighted ? Colors.black : (isMe ? Colors.white : Colors.black)),
+                                    ),
+                                  if (message.isPinned == true)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Icon(
+                                        Icons.push_pin,
+                                        size: 12,
+                                        color: isMe ? Colors.white70 : Colors.black54,
+                                      ),
                                     ),
                                   if (message.isEdited == true)
                                     Padding(
@@ -976,6 +1124,7 @@ class _ChatScreenState extends State<ChatScreen> {
               final isBlocked = chatProvider.isUserBlocked(widget.partnerId);
 
               if (isBlocked) {
+                final blockedByMe = chatProvider.isBlockedByMe(widget.partnerId);
                 return Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(20),
@@ -988,17 +1137,19 @@ class _ChatScreenState extends State<ChatScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          "You have blocked this user",
+                          blockedByMe ? "You have blocked this user" : "This user has blocked you",
                           style: text14(color: Colors.red, fontWeight: FontWeight.bold),
                         ),
-                        const SizedBox(height: 8),
-                        GestureDetector(
-                          onTap: () => chatProvider.unblockUser(widget.partnerId),
-                          child: Text(
-                            "Tap to Unblock",
-                            style: text14(color: AppColors.primary, fontWeight: FontWeight.bold),
+                        if (blockedByMe) ...[
+                          const SizedBox(height: 8),
+                          GestureDetector(
+                            onTap: () => _showUnblockConfirmation(context, chatProvider),
+                            child: Text(
+                              "Tap to Unblock",
+                              style: text14(color: AppColors.primary, fontWeight: FontWeight.bold),
+                            ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),

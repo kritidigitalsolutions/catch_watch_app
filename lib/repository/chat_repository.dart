@@ -141,6 +141,18 @@ class ChatRepository {
     }
   }
 
+  Future<dynamic> pinMessage(String messageId) async {
+    try {
+      dynamic response = await _apiService.postApi(
+        AppUrl.pinMessage(messageId),
+        {},
+      );
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<UserStatus> getUserStatus(String userId) async {
     try {
       dynamic response = await _apiService.getApi(AppUrl.getChatUserStatus(userId));
@@ -183,6 +195,17 @@ class ChatRepository {
     try {
       dynamic response = await _apiService.getApi(AppUrl.getBlockedUsers);
       return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<List<MessageModel>> fetchPinnedMessages(String conversationId) async {
+    try {
+      dynamic response = await _apiService.getApi(AppUrl.getPinnedMessages(conversationId));
+      return (response['data'] as List)
+          .map((e) => MessageModel.fromJson(e))
+          .toList();
     } catch (e) {
       rethrow;
     }

@@ -17,6 +17,7 @@ class ChatProvider extends ChangeNotifier {
 
   List<ConversationModel> _conversations = [];
   List<MessageModel> _messages = [];
+  List<MessageModel> _pinnedMessages = [];
   List<PartnerModel> _searchedUsers = [];
   bool _isLoading = false;
   bool _isMessagesLoading = false;
@@ -24,11 +25,14 @@ class ChatProvider extends ChangeNotifier {
   PaginationModel? _pagination;
   UserStatus? _currentUserStatus;
   Set<String> _blockedUserIds = {};
+  Set<String> _blockedByPartnerIds = {};
+  Set<String> _mutedConversationIds = {};
   String? _activeConversationId;
   MessageModel? _replyingToMessage;
 
   List<ConversationModel> get conversations => _conversations;
   List<MessageModel> get messages => _messages;
+  List<MessageModel> get pinnedMessages => _pinnedMessages;
   List<PartnerModel> get searchedUsers => _searchedUsers;
   bool get isLoading => _isLoading;
   bool get isMessagesLoading => _isMessagesLoading;
@@ -36,9 +40,23 @@ class ChatProvider extends ChangeNotifier {
   PaginationModel? get pagination => _pagination;
   UserStatus? get currentUserStatus => _currentUserStatus;
   Set<String> get blockedUserIds => _blockedUserIds;
+  Set<String> get blockedByPartnerIds => _blockedByPartnerIds;
+  Set<String> get mutedConversationIds => _mutedConversationIds;
   MessageModel? get replyingToMessage => _replyingToMessage;
 
-  bool isUserBlocked(String userId) => _blockedUserIds.contains(userId);
+  bool isUserBlocked(String userId) => _blockedUserIds.contains(userId) || _blockedByPartnerIds.contains(userId);
+  bool isBlockedByMe(String userId) => _blockedUserIds.contains(userId);
+  bool isPartnerBlockedMe(String userId) => _blockedByPartnerIds.contains(userId);
+  bool isMuted(String conversationId) => _mutedConversationIds.contains(conversationId);
+
+  void toggleMute(String conversationId) {
+    if (_mutedConversationIds.contains(conversationId)) {
+      _mutedConversationIds.remove(conversationId);
+    } else {
+      _mutedConversationIds.add(conversationId);
+    }
+    notifyListeners();
+  }
 
   void setReplyingMessage(MessageModel? message) {
     _replyingToMessage = message;
@@ -344,15 +362,15 @@ class ChatProvider extends ChangeNotifier {
   }
 
   void _onUserBlocked(dynamic payload) {
-    final blockedUserId = payload['blockedUserId'];
+    final blockedId = payload['blockedId'] ?? payload['blockedUserId'];
     final blockerId = payload['blockerId'];
     final currentUserId = HiveService.userId;
 
     if (blockerId == currentUserId) {
-      _blockedUserIds.add(blockedUserId);
-    } else if (blockedUserId == currentUserId) {
+      _blockedUserIds.add(blockedId);
+    } else if (blockedId == currentUserId) {
       // Current user was blocked by someone
-      // You might want to track who blocked you or just handle UI
+      _blockedByPartnerIds.add(blockerId);
     }
     notifyListeners();
   }
@@ -384,6 +402,25 @@ class ChatProvider extends ChangeNotifier {
     try {
       final response = await _chatRepository.fetchConversations();
       _conversations = response;
+
+      // Sync block status from conversation data
+      for (var conv in _conversations) {
+        final partnerId = conv.partner?.sId ?? conv.partner?.id;
+        if (partnerId != null) {
+          if (conv.isBlockedByMe == true) {
+            _blockedUserIds.add(partnerId);
+          } else {
+            _blockedUserIds.remove(partnerId);
+          }
+          
+          if (conv.isBlockedByPartner == true) {
+            _blockedByPartnerIds.add(partnerId);
+          } else {
+            _blockedByPartnerIds.remove(partnerId);
+          }
+        }
+      }
+
       // Sort: pinned first, then by last message time
       _sortConversations();
     } catch (e) {
@@ -501,6 +538,7 @@ class ChatProvider extends ChangeNotifier {
     String? mediaUrl,
     String? replyTo,
   }) async {
+    _error = null;
     try {
       final data = {
         'conversationId': conversationId,
@@ -523,8 +561,27 @@ class ChatProvider extends ChangeNotifier {
         return true;
       }
       return false;
+    } on dio.DioException catch (e) {
+      if (e.response?.statusCode == 403) {
+        _error = e.response?.data['message'] ?? "Cannot send message to blocked user";
+        
+        // Immediately update local blocked status to hide typing bar
+        final conv = _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel());
+        if (conv.partner?.sId != null) {
+          _blockedByPartnerIds.add(conv.partner!.sId!);
+        } else if (conv.partner?.id != null) {
+          _blockedByPartnerIds.add(conv.partner!.id!);
+        }
+      } else {
+        _error = e.message;
+      }
+      debugPrint('Dio Error sending message: $e');
+      notifyListeners();
+      return false;
     } catch (e) {
+      _error = e.toString();
       debugPrint('Error sending message: $e');
+      notifyListeners();
       return false;
     }
   }
@@ -624,7 +681,7 @@ class ChatProvider extends ChangeNotifier {
 
       final response = await _chatRepository.uploadAttachment(formData);
       if (response['success'] == true) {
-        return response['mediaUrl'] ?? response['url'] ?? response['data']?['url'];
+        return response['mediaUrl'] ?? response['url'] ?? response['data']?['mediaUrl'] ?? response['data']?['url'];
       }
       return null;
     } catch (e) {
@@ -694,6 +751,34 @@ class ChatProvider extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error fetching blocked users: $e');
+    }
+  }
+
+  Future<void> fetchPinnedMessages(String conversationId) async {
+    try {
+      final response = await _chatRepository.fetchPinnedMessages(conversationId);
+      _pinnedMessages = response;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error fetching pinned messages: $e');
+    }
+  }
+
+  Future<void> pinMessage(String conversationId, String messageId) async {
+    try {
+      final response = await _chatRepository.pinMessage(messageId);
+      if (response['success'] == true) {
+        // Update local message state
+        final updatedMsg = MessageModel.fromJson(response['data']);
+        final index = _messages.indexWhere((m) => m.sId == messageId);
+        if (index != -1) {
+          _messages[index].isPinned = updatedMsg.isPinned;
+          notifyListeners();
+        }
+        await fetchPinnedMessages(conversationId);
+      }
+    } catch (e) {
+      debugPrint('Error pinning message: $e');
     }
   }
 

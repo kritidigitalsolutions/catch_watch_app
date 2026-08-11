@@ -24,6 +24,9 @@ class ConversationModel {
   String? lastMessageAt;
   int? unreadCount;
   bool? isPinned;
+  bool? isBlockedByMe;
+  bool? isBlockedByPartner;
+  bool? isBlocked;
   String? createdAt;
   String? updatedAt;
 
@@ -45,6 +48,9 @@ class ConversationModel {
     lastMessageAt = json['lastMessageAt'];
     unreadCount = json['unreadCount'];
     isPinned = json['isPinned'];
+    isBlockedByMe = json['isBlockedByMe'];
+    isBlockedByPartner = json['isBlockedByPartner'];
+    isBlocked = json['isBlocked'];
     createdAt = json['createdAt'];
     updatedAt = json['updatedAt'];
   }
@@ -138,6 +144,7 @@ class MessageModel {
   String? updatedAt;
   int? iV;
   String? readAt;
+  bool? isPinned;
 
   MessageModel({
     this.mediaMeta,
@@ -220,6 +227,7 @@ class MessageModel {
     updatedAt = json['updatedAt'];
     iV = json['__v'];
     readAt = json['readAt'];
+    isPinned = json['isPinned'];
   }
 }
 
