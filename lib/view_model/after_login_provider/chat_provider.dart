@@ -36,8 +36,8 @@ class ChatProvider extends ChangeNotifier {
 
 
   // E2EE state
-  EcKeyPair? _myKeyPair;
-  final Map<String, EcPublicKey> _partnerPublicKeys = {};
+  KeyPair? _myKeyPair;
+  final Map<String, PublicKey> _partnerPublicKeys = {};
   final Map<String, SecretKey> _sharedSecrets = {};
   bool _isPublicKeySyncing = false;
   bool _publicKeySavedOnServer = false;
@@ -90,25 +90,51 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> initE2EE() async {
     debugPrint('🚀 E2EE: Starting initialization...');
+    // Clear in-memory caches to prevent stale keys/secrets from causing derivation errors
+    _partnerPublicKeys.clear();
+    _sharedSecrets.clear();
+    
     try {
       final privateKeyBytes = HiveService.getPrivateKey();
       final savedJwk = HiveService.getPublicKey();
       
       if (privateKeyBytes != null && savedJwk != null) {
         debugPrint('E2EE: Found saved keys. Loading...');
+        debugPrint('E2EE: Saved JWK: $savedJwk');
+        
         _myKeyPair = await EncryptionHelper.loadKeyPair(privateKeyBytes, savedJwk);
-        debugPrint('E2EE: KeyPair loaded successfully');
+        final myPublicKey = await _myKeyPair!.extractPublicKey();
+        debugPrint('E2EE: Loaded key type: ${myPublicKey.type.name}');
+
+        // MIGRATION CHECK: Ensure we are on P-256
+        if (myPublicKey.type != KeyPairType.p256 || savedJwk.contains('"X25519"') || savedJwk.contains('"OKP"')) {
+          debugPrint('E2EE: Non P-256 keys detected. Migrating to P-256...');
+          _myKeyPair = await EncryptionHelper.generateKeyPair();
+          final keyPairData = await _myKeyPair!.extract();
+          if (keyPairData is SimpleKeyPairData) {
+            await HiveService.savePrivateKey(keyPairData.bytes);
+          } else if (keyPairData is EcKeyPairData) {
+            await HiveService.savePrivateKey(keyPairData.d);
+          }
+          final jwk = await EncryptionHelper.exportPublicKey(_myKeyPair!);
+          await HiveService.savePublicKey(jwk);
+          
+          // Force immediate sync after migration
+          await syncPublicKey();
+        }
+        debugPrint('E2EE: KeyPair loaded/migrated successfully');
       } else {
         debugPrint('E2EE: No saved keys found. Generating new KeyPair...');
         _myKeyPair = await EncryptionHelper.generateKeyPair();
-        debugPrint('E2EE: KeyPair generation call completed');
         
         debugPrint('E2EE: Extracting KeyPair data...');
         final keyPairData = await _myKeyPair!.extract();
-        debugPrint('E2EE: KeyPair data extracted successfully');
         
-        await HiveService.savePrivateKey(keyPairData.d);
-        debugPrint('E2EE: Private key saved to Hive');
+        if (keyPairData is SimpleKeyPairData) {
+           await HiveService.savePrivateKey(keyPairData.bytes);
+        } else if (keyPairData is EcKeyPairData) {
+           await HiveService.savePrivateKey(keyPairData.d);
+        }
         
         final jwk = await EncryptionHelper.exportPublicKey(_myKeyPair!);
         await HiveService.savePublicKey(jwk);
@@ -116,9 +142,10 @@ class ChatProvider extends ChangeNotifier {
         debugPrint('E2EE: New KeyPair generated and saved locally');
       }
 
-      // Explicitly log the public key that will be sent
+      // Always re-export and save to ensure latest JWK format
       final currentJwk = await EncryptionHelper.exportPublicKey(_myKeyPair!);
-      debugPrint('🔑 GENERATED PUBLIC KEY: $currentJwk');
+      await HiveService.savePublicKey(currentJwk);
+      debugPrint('🔑 CURRENT PUBLIC KEY: $currentJwk');
 
       // Now send to server
       await syncPublicKey();
@@ -189,49 +216,81 @@ class ChatProvider extends ChangeNotifier {
   }
 
   Future<SecretKey?> _getSharedSecret(String partnerId) async {
+    debugPrint('E2EE: Attempting to get shared secret for partnerId: $partnerId');
 
-
-    if (_myKeyPair == null) return null;
-    if (_sharedSecrets.containsKey(partnerId)) return _sharedSecrets[partnerId];
+    if (_myKeyPair == null) {
+      debugPrint('E2EE ERROR: _myKeyPair is NULL in _getSharedSecret. User might not be initialized.');
+      return null;
+    }
+    
+    if (_sharedSecrets.containsKey(partnerId)) {
+      debugPrint('E2EE: Returning cached secret for $partnerId');
+      return _sharedSecrets[partnerId];
+    }
 
     try {
-      EcPublicKey? partnerPublicKey;
+      PublicKey? partnerPublicKey;
       
       if (_partnerPublicKeys.containsKey(partnerId)) {
         partnerPublicKey = _partnerPublicKeys[partnerId];
-      } else {
-        // Check if we have it in the conversation model
-        final conv = _conversations.firstWhere(
-          (c) => (c.partner?.sId == partnerId || c.partner?.id == partnerId) && 
-                 (c.partner?.publicKey != null && c.partner!.publicKey!.isNotEmpty),
-          orElse: () => ConversationModel(),
-        );
+        debugPrint('E2EE: Using cached public key for $partnerId');
+      }
 
-        if (conv.partner?.publicKey != null) {
-          debugPrint('E2EE: Using public key from conversation model for $partnerId');
-          partnerPublicKey = EncryptionHelper.importPublicKey(conv.partner!.publicKey!);
-          _partnerPublicKeys[partnerId] = partnerPublicKey;
-        } else {
-          debugPrint('E2EE: Fetching public key for partner: $partnerId');
-          final response = await _chatRepository.getUserPublicKey(partnerId);
-          if (response['success'] == true && response['data'] != null) {
-            final jwk = response['data']['publicKey'];
-            debugPrint('E2EE: Received public key for $partnerId: $jwk');
-            partnerPublicKey = EncryptionHelper.importPublicKey(jwk);
-            _partnerPublicKeys[partnerId] = partnerPublicKey;
-          } else {
-            debugPrint('E2EE: Failed to get public key for $partnerId: ${response['message']}');
+      if (partnerPublicKey == null) {
+        dynamic partnerPublicKeyJwk;
+        
+        // 1. Check conversations list with deep search
+        debugPrint('E2EE: Searching for public key in ${_conversations.length} conversations for ID: $partnerId');
+        for (var conv in _conversations) {
+          final p = conv.partner;
+          if (p != null) {
+            final pSid = p.sId?.toString();
+            final pId = p.id?.toString();
+            
+            if (pSid == partnerId || pId == partnerId) {
+              if (p.publicKey != null) {
+                debugPrint('E2EE: Found public key in conversation metadata for $partnerId');
+                partnerPublicKeyJwk = p.publicKey;
+                break;
+              }
+            }
           }
         }
+
+        // 2. Fallback to API
+        if (partnerPublicKeyJwk == null) {
+          debugPrint('E2EE: Public key not in cache/metadata. Fetching from API: $partnerId');
+          final response = await _chatRepository.getUserPublicKey(partnerId);
+          if (response['success'] == true && response['data'] != null) {
+            partnerPublicKeyJwk = response['data']['publicKey'];
+            debugPrint('E2EE: API returned public key for $partnerId');
+          } else {
+            debugPrint('E2EE: API failed to return public key for $partnerId. Error: ${response['message']}');
+          }
+        }
+
+      if (partnerPublicKeyJwk != null) {
+        debugPrint('E2EE: Importing partner public key. JWK type: ${partnerPublicKeyJwk.runtimeType}');
+        if (partnerPublicKeyJwk is Map) {
+          debugPrint('E2EE: JWK keys: ${partnerPublicKeyJwk.keys.toList()}');
+        }
+        partnerPublicKey = await EncryptionHelper.importPublicKey(partnerPublicKeyJwk);
+        _partnerPublicKeys[partnerId] = partnerPublicKey;
+      } else {
+        debugPrint('E2EE: Failed to obtain any public key for $partnerId. The user may not have E2EE set up.');
+      }
       }
 
       if (partnerPublicKey != null) {
+        debugPrint('E2EE: Deriving shared secret with EncryptionHelper...');
         final secret = await EncryptionHelper.deriveSharedSecret(_myKeyPair!, partnerPublicKey);
         _sharedSecrets[partnerId] = secret;
+        debugPrint('E2EE: Shared secret derived successfully for $partnerId');
         return secret;
       }
-    } catch (e) {
+    } catch (e, stack) {
       debugPrint('E2EE Error deriving shared secret for $partnerId: $e');
+      debugPrint('E2EE Stacktrace: $stack');
     }
     return null;
   }
@@ -383,7 +442,7 @@ class ChatProvider extends ChangeNotifier {
           final secret = await _getSharedSecret(senderId);
           if (secret != null) {
             newMessage.cipherText = newMessage.text;
-            final decrypted = await EncryptionHelper.decrypt(newMessage.text!, secret);
+            final decrypted = await EncryptionHelper.decrypt(newMessage.text!, secret, iv: newMessage.iv);
             if (decrypted != newMessage.text) {
               newMessage.text = decrypted;
               newMessage.isDecrypted = true;
@@ -607,10 +666,10 @@ class ChatProvider extends ChangeNotifier {
         final partnerId = conv.partner?.sId ?? conv.partner?.id;
         if (partnerId != null) {
           // Cache Public Key if present
-          if (conv.partner?.publicKey != null && conv.partner!.publicKey!.isNotEmpty) {
+          if (conv.partner?.publicKey != null) {
             try {
               if (!_partnerPublicKeys.containsKey(partnerId)) {
-                final partnerPublicKey = EncryptionHelper.importPublicKey(conv.partner!.publicKey!);
+                final partnerPublicKey = await EncryptionHelper.importPublicKey(conv.partner!.publicKey);
                 _partnerPublicKeys[partnerId] = partnerPublicKey;
                 debugPrint('E2EE: Cached public key for partner $partnerId from conversation list');
               }
@@ -738,7 +797,7 @@ class ChatProvider extends ChangeNotifier {
           for (var msg in newMessages) {
             if (msg.messageType == 'text' && msg.text != null && msg.text!.isNotEmpty) {
               msg.cipherText = msg.text;
-              final decrypted = await EncryptionHelper.decrypt(msg.text!, secret);
+              final decrypted = await EncryptionHelper.decrypt(msg.text!, secret, iv: msg.iv);
               if (decrypted != msg.text) {
                 msg.text = decrypted;
                 msg.isDecrypted = true;
@@ -782,11 +841,14 @@ class ChatProvider extends ChangeNotifier {
       }
 
       String? encryptedText = text;
+      String? iv;
+      bool isEncrypted = false;
       if (messageType == 'text' && text != null && partnerId != null) {
-        debugPrint('E2EE: Attempting to encrypt message for partner $partnerId');
+        debugPrint('E2EE: Attempting to encrypt message for partnerId: $partnerId');
         
         if (_myKeyPair == null) {
-          debugPrint('E2EE WARNING: My KeyPair is NULL. Initialization might have failed.');
+          debugPrint('E2EE WARNING: My KeyPair is NULL. Attempting re-initialization...');
+          await initE2EE();
         }
 
         // Ensure our own key is synced before encrypting (fail-safe)
@@ -798,30 +860,43 @@ class ChatProvider extends ChangeNotifier {
         final secret = await _getSharedSecret(partnerId);
 
         if (secret != null) {
-          debugPrint('E2EE: Shared secret obtained. Encrypting...');
-          encryptedText = await EncryptionHelper.encrypt(text, secret);
-          if (encryptedText != text) {
-            debugPrint('E2EE: Encryption successful. Ciphertext length: ${encryptedText.length}');
+          debugPrint('E2EE: Shared secret obtained. Calling EncryptionHelper.encrypt...');
+          final encryptionResult = await EncryptionHelper.encrypt(text, secret);
+          
+          final String? cipherText = encryptionResult['text'];
+          final String? nonce = encryptionResult['iv'];
+          
+          debugPrint('E2EE: Encryption Result - cipherText isNull: ${cipherText == null}, iv isNullOrEmpty: ${nonce == null || nonce.isEmpty}');
+
+          if (cipherText != null && cipherText != text && nonce != null && nonce.isNotEmpty) {
+            encryptedText = cipherText;
+            iv = nonce;
+            isEncrypted = true;
+            debugPrint('E2EE: Encryption successful. Final isEncrypted: $isEncrypted');
           } else {
-            debugPrint('E2EE WARNING: Encryption returned original text. Something went wrong inside EncryptionHelper.');
+            debugPrint('E2EE WARNING: Encryption helper output validation failed. Fallback to PLAIN TEXT.');
+            debugPrint('E2EE DEBUG: textMatch: ${cipherText == text}, ivEmpty: ${nonce?.isEmpty}');
           }
         } else {
-          debugPrint('E2EE WARNING: Failed to get secret for $partnerId. Sending PLAIN TEXT.');
+          debugPrint('E2EE WARNING: Failed to get shared secret for $partnerId. Encryption impossible. Fallback to PLAIN TEXT.');
         }
       }
 
 
-      final data = {
-        'conversationId': conversationId,
-        'messageType': messageType,
-      };
-      if (encryptedText != null) data['text'] = encryptedText;
-      if (mediaUrl != null) data['mediaUrl'] = mediaUrl;
-
-      
       // Use provided replyTo or the one in state
       final actualReplyTo = replyTo ?? _replyingToMessage?.sId;
-      if (actualReplyTo != null) data['replyTo'] = actualReplyTo;
+
+      final Map<String, dynamic> data = {
+        'conversationId': conversationId,
+        'recipientId': partnerId,
+        'isEncrypted': isEncrypted,
+        'iv': iv ?? '',
+        'mediaMeta': {},
+        'mediaUrl': mediaUrl ?? '',
+        'messageType': messageType,
+        'replyTo': actualReplyTo,
+        'text': encryptedText ?? '',
+      };
 
       final response = await _chatRepository.sendMessage(data);
       if (response['success'] == true) {
@@ -864,19 +939,31 @@ class ChatProvider extends ChangeNotifier {
   }) async {
     try {
       String? textToForward = originalMessage.text;
+      String? iv;
+      bool isEncrypted = false;
       
       if (originalMessage.messageType == 'text' && textToForward != null) {
         final secret = await _getSharedSecret(recipientId);
         if (secret != null) {
-          textToForward = await EncryptionHelper.encrypt(textToForward, secret);
+          final encryptionResult = await EncryptionHelper.encrypt(textToForward, secret);
+          textToForward = encryptionResult['text'];
+          iv = encryptionResult['iv'];
+          if (textToForward != originalMessage.text) {
+            isEncrypted = true;
+          }
         }
       }
 
-      final data = {
+      final Map<String, dynamic> data = {
+        'conversationId': originalMessage.conversationId,
         'recipientId': recipientId,
+        'isEncrypted': isEncrypted,
+        'iv': iv ?? '',
+        'mediaMeta': {},
+        'mediaUrl': originalMessage.mediaUrl ?? '',
         'messageType': originalMessage.messageType ?? 'text',
-        'text': textToForward,
-        'mediaUrl': originalMessage.mediaUrl,
+        'replyTo': null,
+        'text': textToForward ?? '',
         'isForwarded': true,
       };
 
@@ -899,18 +986,25 @@ class ChatProvider extends ChangeNotifier {
       final partnerId = conv.partner?.sId ?? conv.partner?.id;
       
       String encryptedText = newText;
+      String? iv;
+      bool isEncrypted = false;
       if (partnerId != null) {
         final secret = await _getSharedSecret(partnerId);
         if (secret != null) {
-          encryptedText = await EncryptionHelper.encrypt(newText, secret);
+          final encryptionResult = await EncryptionHelper.encrypt(newText, secret);
+          encryptedText = encryptionResult['text'] ?? newText;
+          iv = encryptionResult['iv'];
+          isEncrypted = encryptedText != newText;
         }
       }
 
-      await _chatRepository.editMessage(messageId, encryptedText);
+      await _chatRepository.editMessage(messageId, encryptedText, isEncrypted: isEncrypted, iv: iv);
       final index = _messages.indexWhere((m) => m.sId == messageId);
       if (index != -1) {
         _messages[index].text = newText;
         _messages[index].isEdited = true;
+        _messages[index].isEncrypted = isEncrypted;
+        _messages[index].iv = iv;
         notifyListeners();
       }
     } catch (e) {

@@ -67,7 +67,7 @@ class PartnerModel {
   String? username;
   bool? isOnline;
   String? lastSeen;
-  String? publicKey;
+  dynamic publicKey;
   String? id;
 
   PartnerModel({
@@ -148,13 +148,14 @@ class MessageModel {
   int? iV;
   String? readAt;
   bool? isPinned;
+  bool? isEncrypted;
+  String? iv;
 
   // E2EE fields
   bool isDecrypted = false;
   String? cipherText;
 
   MessageModel({
-
     this.mediaMeta,
     this.sId,
     this.conversationId,
@@ -175,6 +176,9 @@ class MessageModel {
     this.updatedAt,
     this.iV,
     this.readAt,
+    this.isPinned,
+    this.isEncrypted,
+    this.iv,
   });
 
   MessageModel.fromJson(Map<String, dynamic> json) {
@@ -236,6 +240,8 @@ class MessageModel {
     iV = json['__v'];
     readAt = json['readAt'];
     isPinned = json['isPinned'];
+    isEncrypted = json['isEncrypted'];
+    iv = json['iv'];
   }
 }
 
@@ -260,6 +266,7 @@ class Sender {
   String? name;
   String? profileImage;
   String? username;
+  dynamic publicKey;
   String? id;
 
   Sender({this.sId, this.name, this.profileImage, this.username, this.id});
@@ -278,6 +285,7 @@ class Sender {
 
     profileImage = fixUrl(json['profileImage']);
     username = json['username'];
+    publicKey = json['publicKey'];
     id = json['id'];
   }
 }

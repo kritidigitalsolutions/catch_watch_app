@@ -1,5 +1,4 @@
 import 'package:catch_watch/data/network/api_network_service.dart';
-import 'package:catch_watch/data/network/base_api_service.dart';
 import 'package:catch_watch/models/chat_model.dart';
 import 'package:catch_watch/res/appUrl.dart';
 import 'package:dio/dio.dart' as dio;
@@ -93,11 +92,15 @@ class ChatRepository {
     }
   }
 
-  Future<dynamic> editMessage(String messageId, String text) async {
+  Future<dynamic> editMessage(String messageId, String text, {bool? isEncrypted, String? iv}) async {
     try {
+      final Map<String, dynamic> data = {'text': text};
+      if (isEncrypted != null) data['isEncrypted'] = isEncrypted;
+      if (iv != null) data['iv'] = iv;
+      
       dynamic response = await _apiService.putApi(
         AppUrl.editMessage(messageId),
-        {'text': text},
+        data,
       );
       return response;
     } catch (e) {

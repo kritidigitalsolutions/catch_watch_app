@@ -2,17 +2,18 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 class EncryptionHelper {
-  // Use a more explicit way to ensure implementation availability
-  static final Ecdh _ecdh = Ecdh.p256(length: 32);
+  // Use P-256 for standard E2EE compatibility
+  static final _p256 = Ecdh.p256(length: 32);
   static final AesGcm _aesGcm = AesGcm.with256bits();
 
   // Generate a new key pair
-  static Future<EcKeyPair> generateKeyPair() async {
+  static Future<KeyPair> generateKeyPair() async {
     try {
-      debugPrint('EncryptionHelper: Generating new KeyPair...');
-      final keyPair = await _ecdh.newKeyPair();
+      debugPrint('EncryptionHelper: Generating new P-256 KeyPair...');
+      final keyPair = await _p256.newKeyPair();
       debugPrint('EncryptionHelper: KeyPair generated successfully');
       return keyPair;
     } catch (e) {
@@ -22,32 +23,123 @@ class EncryptionHelper {
   }
 
   // Export Public Key to JWK
-  static Future<String> exportPublicKey(EcKeyPair keyPair) async {
+  static Future<String> exportPublicKey(KeyPair keyPair) async {
     try {
       final publicKey = await keyPair.extractPublicKey();
       
-      final jwk = {
-        'kty': 'EC',
-        'crv': 'P-256',
-        'x': base64Url.encode(publicKey.x).replaceAll('=', ''),
-        'y': base64Url.encode(publicKey.y).replaceAll('=', ''),
-      };
+      Map<String, dynamic> jwk;
+      
+      if (publicKey is EcPublicKey) {
+        jwk = {
+          'crv': 'P-256',
+          'ext': true,
+          'key_ops': [],
+          'kty': 'EC',
+          'x': base64Url.encode(_normalizeBytes(Uint8List.fromList(publicKey.x), 32)).replaceAll('=', ''),
+          'y': base64Url.encode(_normalizeBytes(Uint8List.fromList(publicKey.y), 32)).replaceAll('=', ''),
+        };
+      } else if (publicKey is SimplePublicKey) {
+        if (publicKey.type == KeyPairType.p256) {
+          // Split 64-byte uncompressed EC key into X and Y
+          final bytes = publicKey.bytes;
+          if (bytes.length != 64) {
+            throw StateError('Expected 64-byte public key for P-256, got ${bytes.length}');
+          }
+          final x = bytes.sublist(0, 32);
+          final y = bytes.sublist(32);
+          
+          jwk = {
+            'crv': 'P-256',
+            'ext': true,
+            'key_ops': [],
+            'kty': 'EC',
+            'x': base64Url.encode(_normalizeBytes(Uint8List.fromList(x), 32)).replaceAll('=', ''),
+            'y': base64Url.encode(_normalizeBytes(Uint8List.fromList(y), 32)).replaceAll('=', ''),
+          };
+        } else {
+          throw UnsupportedError('Unsupported KeyPairType for JWK export: ${publicKey.type}');
+        }
+      } else {
+        throw UnsupportedError('Unsupported PublicKey type: ${publicKey.runtimeType}');
+      }
       
       return jsonEncode(jwk);
     } catch (e) {
-      print('EncryptionHelper: Failed to export public key: $e');
+      debugPrint('EncryptionHelper: Failed to export public key: $e');
       rethrow;
     }
   }
 
   // Import Public Key from JWK
-  static EcPublicKey importPublicKey(String jwkString) {
-    final jwk = jsonDecode(jwkString);
-    return EcPublicKey(
-      x: base64Url.decode(_padBase64(jwk['x'])),
-      y: base64Url.decode(_padBase64(jwk['y'])),
-      type: KeyPairType.p256,
-    );
+  static Future<PublicKey> importPublicKey(dynamic jwkInput) async {
+    try {
+      debugPrint('EncryptionHelper: Importing public key. Input type: ${jwkInput.runtimeType}');
+      Map<String, dynamic> jwk;
+      if (jwkInput is String) {
+        jwk = jsonDecode(jwkInput);
+      } else if (jwkInput is Map) {
+        jwk = Map<String, dynamic>.from(jwkInput);
+      } else {
+        throw ArgumentError('Invalid JWK format: ${jwkInput.runtimeType}');
+      }
+      
+      final String? crv = jwk['crv'];
+      final String? x = jwk['x'];
+      final String? y = jwk['y'];
+
+      debugPrint('EncryptionHelper: JWK details - crv: $crv, hasX: ${x != null}, hasY: ${y != null}');
+
+      if (crv == 'P-256') {
+        if (x == null || y == null) throw ArgumentError('Missing coordinates for P-256');
+        
+        final xBytes = _normalizeBytes(base64Url.decode(_padBase64(x)), 32);
+        final yBytes = _normalizeBytes(base64Url.decode(_padBase64(y)), 32);
+        
+        debugPrint('EncryptionHelper: P-256 coordinates normalized (32 bytes each)');
+        
+        // Use EcPublicKey for P-256 compatibility with sharedSecretKey
+        return EcPublicKey(x: xBytes, y: yBytes, type: KeyPairType.p256);
+      }
+      
+      throw ArgumentError('Unsupported JWK curve: $crv. Only P-256 is supported.');
+    } catch (e) {
+      debugPrint('EncryptionHelper: Error importing public key: $e');
+      rethrow;
+    }
+  }
+
+  static Uint8List _normalizeBytes(List<int> bytes, int length) {
+    if (bytes.length == length) return Uint8List.fromList(bytes);
+    if (bytes.length > length) {
+      // Remove leading zeros if present
+      int start = 0;
+      while (start < bytes.length - length && bytes[start] == 0) {
+        start++;
+      }
+      final result = bytes.sublist(start);
+      if (result.length > length) {
+        // Still too long? Take the last 'length' bytes
+        return Uint8List.fromList(result.sublist(result.length - length));
+      }
+      // If shorter, it will be handled by padding below
+      bytes = result;
+    }
+    
+    // Pad with leading zeros
+    final padded = Uint8List(length);
+    padded.setRange(length - bytes.length, length, bytes);
+    return padded;
+  }
+
+  /// Ensures a byte array is interpreted as positive by prepending a 0x00 byte
+  /// if the most significant bit is set. This fixes the COORDINATES_OUT_OF_RANGE
+  /// bug in the native Android bridge.
+  static List<int> _ensurePositive(List<int> bytes) {
+    if (bytes.isEmpty) return bytes;
+    if (bytes[0] >= 128) {
+      return [0, ...bytes];
+    }
+    return bytes;
   }
 
   static String _padBase64(String input) {
@@ -58,54 +150,104 @@ class EncryptionHelper {
   }
 
   // Derive shared secret
-  static Future<SecretKey> deriveSharedSecret(EcKeyPair myKeyPair, EcPublicKey partnerPublicKey) async {
-    return await _ecdh.sharedSecretKey(
-      keyPair: myKeyPair,
-      remotePublicKey: partnerPublicKey,
-    );
+  static Future<SecretKey> deriveSharedSecret(KeyPair myKeyPair, PublicKey partnerPublicKey) async {
+    try {
+      final myPublicKey = await myKeyPair.extractPublicKey();
+      final keyPairData = await myKeyPair.extract();
+
+      debugPrint('EncryptionHelper: myKeyPair type = ${myPublicKey.type.name}, remotePublicKey type = ${partnerPublicKey.type.name}');
+
+      if (myPublicKey.type != KeyPairType.p256 || partnerPublicKey.type != KeyPairType.p256) {
+        throw ArgumentError(
+          'Key type mismatch or unsupported: Only P-256 is supported. '
+          'Mine: ${myPublicKey.type.name}, Partner: ${partnerPublicKey.type.name}'
+        );
+      }
+
+      if (keyPairData is! EcKeyPairData || partnerPublicKey is! EcPublicKey) {
+         throw ArgumentError('Expected EcKeyPairData and EcPublicKey for P-256 derivation');
+      }
+
+      debugPrint('EncryptionHelper: Deriving P-256 secret (with Unsigned workaround)...');
+      
+      // Fix for Android COORDINATES_OUT_OF_RANGE:
+      // The native bridge incorrectly treats coordinates as signed. 
+      // Prepending 0x00 ensures they are always treated as positive BigIntegers in Java.
+      final tweakedPartnerKey = EcPublicKey(
+        x: _ensurePositive(partnerPublicKey.x),
+        y: _ensurePositive(partnerPublicKey.y),
+        type: KeyPairType.p256,
+      );
+
+      final tweakedMyKey = EcKeyPairData(
+        d: _ensurePositive(keyPairData.d),
+        x: _ensurePositive(keyPairData.x),
+        y: _ensurePositive(keyPairData.y),
+        type: KeyPairType.p256,
+      );
+
+      return await _p256.sharedSecretKey(
+        keyPair: tweakedMyKey,
+        remotePublicKey: tweakedPartnerKey,
+      );
+    } catch (e) {
+      debugPrint('EncryptionHelper: Shared secret derivation failed: $e');
+      rethrow;
+    }
   }
 
   // Encrypt message
-  static Future<String> encrypt(String text, SecretKey sharedSecret) async {
+  static Future<Map<String, String>> encrypt(String text, SecretKey sharedSecret) async {
     try {
       final secretBox = await _aesGcm.encrypt(
         utf8.encode(text),
         secretKey: sharedSecret,
       );
-      // Combine nonce + cipherText + mac
-      final combined = Uint8List.fromList([
-        ...secretBox.nonce,
-        ...secretBox.cipherText,
-        ...secretBox.mac.bytes,
-      ]);
-      return base64.encode(combined);
+      
+      return {
+        'text': base64.encode(secretBox.cipherText + secretBox.mac.bytes),
+        'iv': base64.encode(secretBox.nonce),
+      };
     } catch (e, stack) {
       debugPrint('EncryptionHelper: Encryption failed: $e');
       debugPrint('Stacktrace: $stack');
-      return text;
+      return {'text': text, 'iv': ''};
     }
   }
 
   // Decrypt message
-  static Future<String> decrypt(String encryptedBase64, SecretKey sharedSecret) async {
+  static Future<String> decrypt(String encryptedBase64, SecretKey sharedSecret, {String? iv}) async {
     if (!_isBase64(encryptedBase64)) return encryptedBase64;
     
     try {
       final data = base64.decode(encryptedBase64);
-
       
-      // Nonce is 12 bytes for AES-GCM, MAC is 16 bytes
-      if (data.length < 12 + 16) return encryptedBase64; // Not encrypted or malformed
+      SecretBox secretBox;
+      if (iv != null && iv.isNotEmpty && _isBase64(iv)) {
+        final nonce = base64.decode(iv);
+        if (data.length < 16) return encryptedBase64;
+        
+        final mac = data.sublist(data.length - 16);
+        final cipherText = data.sublist(0, data.length - 16);
+        
+        secretBox = SecretBox(
+          cipherText,
+          nonce: nonce,
+          mac: Mac(mac),
+        );
+      } else {
+        if (data.length < 12 + 16) return encryptedBase64;
 
-      final nonce = data.sublist(0, 12);
-      final mac = data.sublist(data.length - 16);
-      final cipherText = data.sublist(12, data.length - 16);
-      
-      final secretBox = SecretBox(
-        cipherText,
-        nonce: nonce,
-        mac: Mac(mac),
-      );
+        final nonce = data.sublist(0, 12);
+        final mac = data.sublist(data.length - 16);
+        final cipherText = data.sublist(12, data.length - 16);
+        
+        secretBox = SecretBox(
+          cipherText,
+          nonce: nonce,
+          mac: Mac(mac),
+        );
+      }
       
       final decrypted = await _aesGcm.decrypt(
         secretBox,
@@ -113,19 +255,32 @@ class EncryptionHelper {
       );
       return utf8.decode(decrypted);
     } catch (e) {
-      // If decryption fails, it might not be encrypted or we have wrong key
+      debugPrint('EncryptionHelper: Decryption failed: $e');
       return encryptedBase64; 
     }
   }
 
   // Load KeyPair from saved private key bytes and public key JWK
-  static Future<EcKeyPair> loadKeyPair(List<int> privateKeyBytes, String publicKeyJwk) async {
-    final publicKey = importPublicKey(publicKeyJwk);
-    return EcKeyPairData(
-      d: privateKeyBytes,
-      x: publicKey.x,
-      y: publicKey.y,
-      type: KeyPairType.p256,
+  static Future<KeyPair> loadKeyPair(List<int> privateKeyBytes, String publicKeyJwk) async {
+    final publicKey = await importPublicKey(publicKeyJwk);
+    
+    if (publicKey is EcPublicKey) {
+      return EcKeyPairData(
+        d: privateKeyBytes,
+        x: publicKey.x,
+        y: publicKey.y,
+        type: publicKey.type,
+      );
+    }
+
+    if (publicKey is! SimplePublicKey) {
+      throw StateError('Expected SimplePublicKey or EcPublicKey');
+    }
+
+    return SimpleKeyPairData(
+      privateKeyBytes,
+      publicKey: publicKey,
+      type: publicKey.type,
     );
   }
 
@@ -138,4 +293,3 @@ class EncryptionHelper {
     }
   }
 }
-

@@ -1,7 +1,7 @@
 class AppUrl {
-  // static const String serverUrl = 'http://192.168.1.16:5000';
+  static const String serverUrl = 'http://192.168.1.28:5000';
   // static const String serverUrl = 'https://api.catchandwatch.com';
-  static const String serverUrl = 'https://catch-watch.vercel.app';
+  // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
 
   // Auth Endpoints
