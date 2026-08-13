@@ -96,6 +96,7 @@ class EncryptionHelper {
         final yBytes = _normalizeBytes(base64Url.decode(_padBase64(y)), 32);
         
         debugPrint('EncryptionHelper: P-256 coordinates normalized (32 bytes each)');
+        debugPrint('EncryptionHelper: Partner X-prefix: ${xBytes.sublist(0, 4)}');
         
         // Use EcPublicKey for P-256 compatibility with sharedSecretKey
         return EcPublicKey(x: xBytes, y: yBytes, type: KeyPairType.p256);
@@ -131,22 +132,21 @@ class EncryptionHelper {
     return padded;
   }
 
+  static String _padBase64(String input) {
+    int length = input.length;
+    int mod = length % 4;
+    if (mod == 0) return input;
+    return input.padRight(length + (4 - mod), '=');
+  }
+
   /// Ensures a byte array is interpreted as positive by prepending a 0x00 byte
-  /// if the most significant bit is set. This fixes the COORDINATES_OUT_OF_RANGE
-  /// bug in the native Android bridge.
+  /// if the most significant bit is set. (Legacy fallback for older app versions)
   static List<int> _ensurePositive(List<int> bytes) {
     if (bytes.isEmpty) return bytes;
     if (bytes[0] >= 128) {
       return [0, ...bytes];
     }
     return bytes;
-  }
-
-  static String _padBase64(String input) {
-    int length = input.length;
-    int mod = length % 4;
-    if (mod == 0) return input;
-    return input.padRight(length + (4 - mod), '=');
   }
 
   // Derive shared secret
@@ -168,11 +168,38 @@ class EncryptionHelper {
          throw ArgumentError('Expected EcKeyPairData and EcPublicKey for P-256 derivation');
       }
 
-      debugPrint('EncryptionHelper: Deriving P-256 secret (with Unsigned workaround)...');
+      debugPrint('EncryptionHelper: Deriving P-256 secret...');
+      debugPrint('EncryptionHelper: My X (len ${keyPairData.x.length}): ${base64.encode(keyPairData.x.sublist(0, 4))}...');
+      debugPrint('EncryptionHelper: Partner X (len ${partnerPublicKey.x.length}): ${base64.encode(partnerPublicKey.x.sublist(0, 4))}...');
       
-      // Fix for Android COORDINATES_OUT_OF_RANGE:
-      // The native bridge incorrectly treats coordinates as signed. 
-      // Prepending 0x00 ensures they are always treated as positive BigIntegers in Java.
+      final secretKey = await _p256.sharedSecretKey(
+        keyPair: keyPairData,
+        remotePublicKey: partnerPublicKey,
+      );
+
+      // CRITICAL: Normalize the shared secret to exactly 32 bytes.
+      // Some ECDH implementations strip leading zeros, but AES-256 requires 256 bits.
+      final secretData = await secretKey.extractBytes();
+      final normalizedSecret = _normalizeBytes(secretData, 32);
+      
+      final fingerprint = base64.encode(normalizedSecret.sublist(0, 8));
+      debugPrint('EncryptionHelper: Secret derived. Length: ${normalizedSecret.length}, Fingerprint: $fingerprint');
+
+      return SecretKey(normalizedSecret);
+    } catch (e) {
+      debugPrint('EncryptionHelper: Shared secret derivation failed: $e');
+      rethrow;
+    }
+  }
+
+  /// Derive shared secret using the LEGACY tweak (for backwards compatibility)
+  static Future<SecretKey> deriveSharedSecretLegacy(KeyPair myKeyPair, PublicKey partnerPublicKey) async {
+    try {
+      final keyPairData = await myKeyPair.extract();
+      if (keyPairData is! EcKeyPairData || partnerPublicKey is! EcPublicKey) {
+         throw ArgumentError('Expected EcKeyPairData and EcPublicKey for legacy derivation');
+      }
+
       final tweakedPartnerKey = EcPublicKey(
         x: _ensurePositive(partnerPublicKey.x),
         y: _ensurePositive(partnerPublicKey.y),
@@ -186,12 +213,28 @@ class EncryptionHelper {
         type: KeyPairType.p256,
       );
 
-      return await _p256.sharedSecretKey(
+      final secretKey = await _p256.sharedSecretKey(
         keyPair: tweakedMyKey,
         remotePublicKey: tweakedPartnerKey,
       );
+      
+      final secretData = await secretKey.extractBytes();
+      return SecretKey(_normalizeBytes(secretData, 32));
     } catch (e) {
-      debugPrint('EncryptionHelper: Shared secret derivation failed: $e');
+      debugPrint('EncryptionHelper: Legacy shared secret derivation failed: $e');
+      rethrow;
+    }
+  }
+
+  /// Derive shared secret using SHA-256 hashing (common in some E2EE implementations)
+  static Future<SecretKey> deriveSharedSecretHashed(KeyPair myKeyPair, PublicKey partnerPublicKey) async {
+    try {
+      final rawSecret = await deriveSharedSecret(myKeyPair, partnerPublicKey);
+      final secretBytes = await rawSecret.extractBytes();
+      final hash = await Sha256().hash(secretBytes);
+      return SecretKey(hash.bytes);
+    } catch (e) {
+      debugPrint('EncryptionHelper: Hashed shared secret derivation failed: $e');
       rethrow;
     }
   }
@@ -217,26 +260,52 @@ class EncryptionHelper {
 
   // Decrypt message
   static Future<String> decrypt(String encryptedBase64, SecretKey sharedSecret, {String? iv}) async {
-    if (!_isBase64(encryptedBase64)) return encryptedBase64;
+    if (encryptedBase64.isEmpty) return encryptedBase64;
     
     try {
-      final data = base64.decode(encryptedBase64);
+      // Clean up base64 string (sometimes received with spaces or wrong padding from different sources)
+      final cleanBase64 = encryptedBase64.trim().replaceAll(RegExp(r'\s+'), '');
+      
+      if (!_isBase64(cleanBase64)) {
+        debugPrint('EncryptionHelper: Not a valid Base64 string, returning as-is');
+        return cleanBase64;
+      }
+      
+      final data = base64.decode(_padBase64(cleanBase64));
+      debugPrint('EncryptionHelper: Decrypting ${data.length} bytes total');
       
       SecretBox secretBox;
-      if (iv != null && iv.isNotEmpty && _isBase64(iv)) {
-        final nonce = base64.decode(iv);
-        if (data.length < 16) return encryptedBase64;
+      if (iv != null && iv.isNotEmpty) {
+        final cleanIv = iv.trim().replaceAll(RegExp(r'\s+'), '');
+        if (!_isBase64(cleanIv)) {
+          debugPrint('EncryptionHelper: Provided IV is not valid Base64');
+          return cleanBase64;
+        }
+        
+        final nonce = base64.decode(_padBase64(cleanIv));
+        if (data.length < 16) {
+           debugPrint('EncryptionHelper: Encrypted data too short (needs at least 16 bytes for MAC)');
+           return cleanBase64;
+        }
         
         final mac = data.sublist(data.length - 16);
         final cipherText = data.sublist(0, data.length - 16);
         
+        debugPrint('EncryptionHelper: IV (len ${nonce.length}): ${base64.encode(nonce)}');
+        debugPrint('EncryptionHelper: MAC (len ${mac.length}): ${base64.encode(mac)}');
+        debugPrint('EncryptionHelper: CipherText len: ${cipherText.length}');
+
         secretBox = SecretBox(
           cipherText,
           nonce: nonce,
           mac: Mac(mac),
         );
       } else {
-        if (data.length < 12 + 16) return encryptedBase64;
+        // Fallback: Check if IV is prepended (standard for some libraries)
+        if (data.length < 12 + 16) {
+          debugPrint('EncryptionHelper: Encrypted data too short for prepended IV format');
+          return cleanBase64;
+        }
 
         final nonce = data.sublist(0, 12);
         final mac = data.sublist(data.length - 16);
@@ -254,6 +323,9 @@ class EncryptionHelper {
         secretKey: sharedSecret,
       );
       return utf8.decode(decrypted);
+    } on SecretBoxAuthenticationError {
+      // Rethrow MAC errors so the Provider can handle cache recovery
+      rethrow;
     } catch (e) {
       debugPrint('EncryptionHelper: Decryption failed: $e');
       return encryptedBase64; 
@@ -264,9 +336,12 @@ class EncryptionHelper {
   static Future<KeyPair> loadKeyPair(List<int> privateKeyBytes, String publicKeyJwk) async {
     final publicKey = await importPublicKey(publicKeyJwk);
     
+    // Normalize private key to 32 bytes
+    final normalizedD = _normalizeBytes(privateKeyBytes, 32);
+
     if (publicKey is EcPublicKey) {
       return EcKeyPairData(
-        d: privateKeyBytes,
+        d: normalizedD,
         x: publicKey.x,
         y: publicKey.y,
         type: publicKey.type,

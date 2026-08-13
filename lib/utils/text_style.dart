@@ -109,11 +109,25 @@ TextStyle text26({
   return appTextStyle(fontSize: 26, fontWeight: fontWeight, color: color);
 }
 
+TextStyle text28({
+  FontWeight fontWeight = FontWeight.bold,
+  Color color = AppColors.textPrimary,
+}) {
+  return appTextStyle(fontSize: 28, fontWeight: fontWeight, color: color);
+}
+
 TextStyle text30({
   FontWeight fontWeight = FontWeight.bold,
   Color color = AppColors.textPrimary,
 }) {
   return appTextStyle(fontSize: 30, fontWeight: fontWeight, color: color);
+}
+
+TextStyle text32({
+  FontWeight fontWeight = FontWeight.bold,
+  Color color = AppColors.textPrimary,
+}) {
+  return appTextStyle(fontSize: 32, fontWeight: fontWeight, color: color);
 }
 
 /// -------------------------------

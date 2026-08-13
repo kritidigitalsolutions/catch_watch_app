@@ -1,4 +1,5 @@
 import 'package:catch_watch/res/app_colors.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/utils/text_style.dart';
 import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
 import 'package:catch_watch/views/after_login_pages/message/active_call_screen.dart';
@@ -63,12 +64,25 @@ class CallOverlay extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(
-                                provider.status == CallStatus.ringing ? "Incoming Call" : "Active Call",
-                                style: text12(color: Colors.white70),
+                              Row(
+                                children: [
+                                  Text(
+                                    provider.status == CallStatus.ringing ? "Incoming Call" : "Active Call",
+                                    style: text10(color: Colors.white70),
+                                  ),
+                                  if (provider.status == CallStatus.active) ...[
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      "• ${provider.formattedDuration}",
+                                      style: text10(color: Colors.white70),
+                                    ),
+                                  ],
+                                ],
                               ),
                               Text(
-                                call.receiver?.name ?? call.caller?.name ?? "User",
+                                (call.caller?.sId == HiveService.userId || call.caller?.id == HiveService.userId)
+                                    ? (call.receiver?.name ?? "User")
+                                    : (call.caller?.name ?? "User"),
                                 style: text14(color: Colors.white, fontWeight: FontWeight.bold),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,

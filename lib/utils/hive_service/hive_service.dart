@@ -120,6 +120,18 @@ class HiveService {
     return _keysBox.get('publicKey');
   }
 
+  static Future<void> savePartnerPublicKey(String partnerId, String jwk) async {
+    await _keysBox.put('partner_jwk_$partnerId', jwk);
+  }
+
+  static String? getPartnerPublicKey(String partnerId) {
+    return _keysBox.get('partner_jwk_$partnerId');
+  }
+
+  static Future<void> deletePartnerPublicKey(String partnerId) async {
+    await _keysBox.delete('partner_jwk_$partnerId');
+  }
+
   static bool isLogin() {
 
     final user = getUser();

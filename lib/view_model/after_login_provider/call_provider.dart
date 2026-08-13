@@ -9,13 +9,11 @@ import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/views/after_login_pages/message/active_call_screen.dart';
 import 'package:catch_watch/views/after_login_pages/message/incoming_call_screen.dart';
 import 'package:flutter/material.dart';
-// import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
+import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:permission_handler/permission_handler.dart';
-// import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
-// import 'package:vibration/vibration.dart';
+import 'package:vibration/vibration.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
-// import 'package:vibration/vibration.dart';
 
 enum CallStatus { idle, ringing, active, ended }
 
@@ -37,6 +35,10 @@ class CallProvider extends ChangeNotifier {
   bool _isHistoryLoading = false;
   int _historyPage = 1;
   bool _hasMoreHistory = true;
+
+  // Timer fields
+  Timer? _callTimer;
+  int _durationSeconds = 0;
   
   // Navigation key to show call screens
   final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -50,6 +52,13 @@ class CallProvider extends ChangeNotifier {
   int? get remoteUid => _remoteUid;
   bool get isAccepting => _isAccepting;
   bool get isInCallScreen => _isInCallScreen;
+  int get durationSeconds => _durationSeconds;
+
+  String get formattedDuration {
+    final minutes = (_durationSeconds ~/ 60).toString().padLeft(2, '0');
+    final seconds = (_durationSeconds % 60).toString().padLeft(2, '0');
+    return "$minutes:$seconds";
+  }
 
   List<CallModel> get callHistory => _callHistory;
   bool get isHistoryLoading => _isHistoryLoading;
@@ -58,6 +67,21 @@ class CallProvider extends ChangeNotifier {
     _initSocketListeners();
     _initNotificationListener();
     _initCallKitListener();
+  }
+
+  void _startTimer() {
+    _durationSeconds = 0;
+    _callTimer?.cancel();
+    _callTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _durationSeconds++;
+      notifyListeners();
+    });
+  }
+
+  void _stopTimer() {
+    _callTimer?.cancel();
+    _callTimer = null;
+    // We keep _durationSeconds for a moment so UI can show final time
   }
 
   void setInCallScreen(bool value) {
@@ -81,13 +105,13 @@ class CallProvider extends ChangeNotifier {
   }
 
   void _startRinging() {
-    // FlutterRingtonePlayer().playRingtone();
-    // Vibration.vibrate(pattern: [500, 1000, 500, 1000], repeat: 0);
+    FlutterRingtonePlayer().playRingtone();
+    Vibration.vibrate(pattern: [500, 1000, 500, 1000], repeat: 0);
   }
 
   void _stopRinging() {
-    // FlutterRingtonePlayer().stop();
-    // Vibration.cancel();
+    FlutterRingtonePlayer().stop();
+    Vibration.cancel();
   }
 
   void _initNotificationListener() {
@@ -195,6 +219,7 @@ class CallProvider extends ChangeNotifier {
     if (_currentCall?.sId == acceptedCallId || acceptedCallId != null) {
       _status = CallStatus.active;
       _stopRinging();
+      _startTimer();
       _joinChannel();
       notifyListeners();
     }
@@ -208,6 +233,7 @@ class CallProvider extends ChangeNotifier {
     if (_currentCall?.sId == endedCallId || (_currentCall != null && endedCallId == null)) {
       debugPrint("Ending call locally and popping screens");
       _stopRinging();
+      _stopTimer();
       _endCallLocally();
       // Pop call screens if any are currently pushed
       navigatorKey.currentState?.popUntil((route) => route.settings.name != '/call');
@@ -226,6 +252,7 @@ class CallProvider extends ChangeNotifier {
         _status = CallStatus.idle;
         _currentCall = null;
         _remoteUid = null;
+        _durationSeconds = 0;
         _disposeEngine();
         notifyListeners();
       }
@@ -339,6 +366,7 @@ class CallProvider extends ChangeNotifier {
       
       _status = CallStatus.active;
       _stopRinging();
+      _startTimer();
       
       debugPrint("Initializing Agora engine for receiver...");
       await _initEngine();

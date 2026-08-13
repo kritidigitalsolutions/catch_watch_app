@@ -904,6 +904,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 }
 
                 final messages = chatProvider.messages;
+                debugPrint('ChatScreen: Rendering ${messages.length} messages. First text: ${messages.isNotEmpty ? messages.first.text : "N/A"}');
 
                 // Find indices for status display
                 int? lastMyMessageIndex;
