@@ -144,17 +144,25 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _handleCall(bool isVideo) {
     final callProvider = Provider.of<CallProvider>(context, listen: false);
-    callProvider.startCall(widget.partnerId, isVideo ? 'video' : 'audio');
+    callProvider.startCall(
+      widget.partnerId, 
+      isVideo ? 'video' : 'audio',
+      partnerName: widget.name,
+      partnerImage: widget.image,
+    );
   }
 
   void _scrollToBottom() {
-    if (_itemScrollController.isAttached) {
-      _itemScrollController.scrollTo(
-        index: 0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+      if (_itemScrollController.isAttached && chatProvider.messages.isNotEmpty) {
+        _itemScrollController.scrollTo(
+          index: 0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   void _scrollToOriginalMessage(String replyToId) {
@@ -903,10 +911,16 @@ class _ChatScreenState extends State<ChatScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final messages = chatProvider.messages;
-                debugPrint('ChatScreen: Rendering ${messages.length} messages. First text: ${messages.isNotEmpty ? messages.first.text : "N/A"}');
+                // Create a local copy of the messages list to avoid modification during build
+                final messages = List<MessageModel>.from(chatProvider.messages);
+                
+                if (messages.isEmpty) {
+                  return const Center(child: Text("No messages yet. Say hi!"));
+                }
 
-                // Find indices for status display
+                debugPrint('ChatScreen: Rendering ${messages.length} messages. First text: ${messages.first.text}');
+
+                // Find indices for status display - COMPUTE ONCE per build
                 int? lastMyMessageIndex;
                 int? lastReadMyMessageIndex;
 
@@ -933,6 +947,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   reverse: true, // Show latest messages at the bottom
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
+                    if (index >= messages.length) return const SizedBox.shrink();
                     final message = messages[index];
                     final bool isMe = (currentUserId != null && (message.sender?.sId == currentUserId || message.sender?.id == currentUserId)) ||
                                      (message.sender != null && message.sender?.sId != widget.partnerId && message.sender?.id != widget.partnerId);

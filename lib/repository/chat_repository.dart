@@ -92,11 +92,12 @@ class ChatRepository {
     }
   }
 
-  Future<dynamic> editMessage(String messageId, String text, {bool? isEncrypted, String? iv}) async {
+  Future<dynamic> editMessage(String messageId, String text, {bool? isEncrypted, String? iv, dynamic senderPublicKey}) async {
     try {
       final Map<String, dynamic> data = {'text': text};
       if (isEncrypted != null) data['isEncrypted'] = isEncrypted;
       if (iv != null) data['iv'] = iv;
+      if (senderPublicKey != null) data['senderPublicKey'] = senderPublicKey;
       
       dynamic response = await _apiService.putApi(
         AppUrl.editMessage(messageId),
@@ -254,6 +255,15 @@ class ChatRepository {
   Future<dynamic> getMyProfile() async {
     try {
       dynamic response = await _apiService.getApi(AppUrl.getProfile);
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> getAgoraToken() async {
+    try {
+      dynamic response = await _apiService.getApi(AppUrl.getAgoraToken);
       return response;
     } catch (e) {
       rethrow;

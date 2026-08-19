@@ -120,6 +120,14 @@ class HiveService {
     return _keysBox.get('publicKey');
   }
 
+  static Future<void> saveDeviceId(String deviceId) async {
+    await _keysBox.put('deviceId', deviceId);
+  }
+
+  static String? getDeviceId() {
+    return _keysBox.get('deviceId');
+  }
+
   static Future<void> savePartnerPublicKey(String partnerId, String jwk) async {
     await _keysBox.put('partner_jwk_$partnerId', jwk);
   }

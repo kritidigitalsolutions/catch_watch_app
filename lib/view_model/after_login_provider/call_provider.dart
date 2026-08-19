@@ -30,6 +30,7 @@ class CallProvider extends ChangeNotifier {
   int? _remoteUid;
   bool _isAccepting = false;
   bool _isInCallScreen = false;
+  bool _isCaller = false;
 
   List<CallModel> _callHistory = [];
   bool _isHistoryLoading = false;
@@ -52,6 +53,7 @@ class CallProvider extends ChangeNotifier {
   int? get remoteUid => _remoteUid;
   bool get isAccepting => _isAccepting;
   bool get isInCallScreen => _isInCallScreen;
+  bool get isCaller => _isCaller;
   int get durationSeconds => _durationSeconds;
 
   String get formattedDuration {
@@ -181,6 +183,7 @@ class CallProvider extends ChangeNotifier {
       return;
     }
 
+    _isCaller = false;
     if (data is Map) {
       _currentCall = CallModel.fromJson(Map<String, dynamic>.from(data));
       // Ensure sId is set if it was missing in Map but we extracted it via _extractCallId
@@ -259,14 +262,22 @@ class CallProvider extends ChangeNotifier {
     });
   }
 
-  Future<void> startCall(String receiverId, String type) async {
+  Future<void> startCall(String receiverId, String type, {String? partnerName, String? partnerImage}) async {
     try {
       debugPrint("Starting $type call to $receiverId");
+      _isCaller = true;
       _status = CallStatus.ringing;
       notifyListeners();
 
       final call = await _callRepository.startCall(receiverId, type);
       _currentCall = call;
+      
+      // Enrich receiver data if metadata was provided
+      if (_currentCall?.receiver != null && partnerName != null) {
+        _currentCall!.receiver!.name = partnerName;
+        _currentCall!.receiver!.profileImage = partnerImage;
+      }
+      
       debugPrint("Call started successfully: ${_currentCall?.sId}");
       
       _isInCallScreen = true;

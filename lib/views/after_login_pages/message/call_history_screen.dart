@@ -145,7 +145,12 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
                     ),
                     onPressed: () {
                       if (partner?.sId != null || partner?.id != null) {
-                        provider.startCall(partner?.sId ?? partner?.id ?? "", call.type ?? 'audio');
+                        provider.startCall(
+                          partner?.sId ?? partner?.id ?? "", 
+                          call.type ?? 'audio',
+                          partnerName: partner?.name,
+                          partnerImage: partner?.profileImage,
+                        );
                       }
                     },
                   ),

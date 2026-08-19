@@ -17,7 +17,11 @@ class ActiveCallScreen extends StatelessWidget {
 
     if (call == null) return const SizedBox.shrink();
 
-    final isCaller = call.caller?.sId == HiveService.userId || call.caller?.id == HiveService.userId;
+    final myId = HiveService.userId;
+    final isCaller = callProvider.isCaller || 
+                     (call.caller?.sId != null && call.caller?.sId == myId) || 
+                     (call.caller?.id != null && call.caller?.id == myId);
+                     
     final partner = isCaller ? call.receiver : call.caller;
 
     return Scaffold(

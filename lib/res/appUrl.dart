@@ -1,6 +1,6 @@
 class AppUrl {
-  // static const String serverUrl = 'http://192.168.1.28:5000';
-  static const String serverUrl = 'https://api.catchandwatch.com';
+  static const String serverUrl = 'http://192.168.1.19:5000';
+  // static const String serverUrl = 'https://api.catchandwatch.com';
   // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
 
@@ -104,6 +104,7 @@ class AppUrl {
   static const String getBlockedUsers = '$baseUrl/chat/blocked-users';
   static String getPinnedMessages(String conversationId) => '$baseUrl/chat/conversations/$conversationId/pinned-messages';
   static const String updateChatFcmToken = '$baseUrl/chat/fcm-token';
+  static const String getAgoraToken = '$baseUrl/chat/agora-token';
 
   // E2EE Keys
   static const String savePublicKey = '$baseUrl/chat/keys';

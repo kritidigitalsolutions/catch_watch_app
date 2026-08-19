@@ -158,6 +158,7 @@ class EncryptionHelper {
       debugPrint('EncryptionHelper: myKeyPair type = ${myPublicKey.type.name}, remotePublicKey type = ${partnerPublicKey.type.name}');
 
       if (myPublicKey.type != KeyPairType.p256 || partnerPublicKey.type != KeyPairType.p256) {
+        debugPrint('EncryptionHelper ERROR: Key type mismatch. Mine: ${myPublicKey.type.name}, Partner: ${partnerPublicKey.type.name}');
         throw ArgumentError(
           'Key type mismatch or unsupported: Only P-256 is supported. '
           'Mine: ${myPublicKey.type.name}, Partner: ${partnerPublicKey.type.name}'
@@ -165,16 +166,30 @@ class EncryptionHelper {
       }
 
       if (keyPairData is! EcKeyPairData || partnerPublicKey is! EcPublicKey) {
+         debugPrint('EncryptionHelper ERROR: Expected EcKeyPairData and EcPublicKey. Got: ${keyPairData.runtimeType} and ${partnerPublicKey.runtimeType}');
          throw ArgumentError('Expected EcKeyPairData and EcPublicKey for P-256 derivation');
       }
 
       debugPrint('EncryptionHelper: Deriving P-256 secret...');
-      debugPrint('EncryptionHelper: My X (len ${keyPairData.x.length}): ${base64.encode(keyPairData.x.sublist(0, 4))}...');
-      debugPrint('EncryptionHelper: Partner X (len ${partnerPublicKey.x.length}): ${base64.encode(partnerPublicKey.x.sublist(0, 4))}...');
       
+      // CRITICAL: Apply the "positive byte" tweak to avoid Android's BigInteger negative number crash.
+      // This happens when the MSB of a coordinate is 1 (>= 128).
+      final tweakedPartnerKey = EcPublicKey(
+        x: _ensurePositive(partnerPublicKey.x),
+        y: _ensurePositive(partnerPublicKey.y),
+        type: KeyPairType.p256,
+      );
+
+      final tweakedMyKey = EcKeyPairData(
+        d: _ensurePositive(keyPairData.d),
+        x: _ensurePositive(keyPairData.x),
+        y: _ensurePositive(keyPairData.y),
+        type: KeyPairType.p256,
+      );
+
       final secretKey = await _p256.sharedSecretKey(
-        keyPair: keyPairData,
-        remotePublicKey: partnerPublicKey,
+        keyPair: tweakedMyKey,
+        remotePublicKey: tweakedPartnerKey,
       );
 
       // CRITICAL: Normalize the shared secret to exactly 32 bytes.
@@ -252,7 +267,8 @@ class EncryptionHelper {
         'iv': base64.encode(secretBox.nonce),
       };
     } catch (e, stack) {
-      debugPrint('EncryptionHelper: Encryption failed: $e');
+      debugPrint('EncryptionHelper ERROR: Encryption failed: $e');
+      debugPrint('EncryptionHelper SecretKey state: ${sharedSecret.hashCode}');
       debugPrint('Stacktrace: $stack');
       return {'text': text, 'iv': ''};
     }

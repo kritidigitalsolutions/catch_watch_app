@@ -112,11 +112,11 @@ class ChatDetailsScreen extends StatelessWidget {
               children: [
                 _buildActionButton(Icons.call_outlined, "Audio", () {
                   Provider.of<CallProvider>(context, listen: false)
-                      .startCall(partnerId, 'audio');
+                      .startCall(partnerId, 'audio', partnerName: name, partnerImage: image);
                 }),
                 _buildActionButton(Icons.videocam_outlined, "Video", () {
                   Provider.of<CallProvider>(context, listen: false)
-                      .startCall(partnerId, 'video');
+                      .startCall(partnerId, 'video', partnerName: name, partnerImage: image);
                 }),
                 _buildActionButton(Icons.search, "Search", () {
                   Navigator.pop(context);
