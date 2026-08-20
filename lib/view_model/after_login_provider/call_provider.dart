@@ -327,6 +327,22 @@ class CallProvider extends ChangeNotifier {
           _hasMoreHistory = false;
         } else {
           _callHistory.addAll(newCalls);
+          
+          // Ensure uniqueness and sort by createdAt descending
+          final Map<String, CallModel> callMap = {};
+          for (var call in _callHistory) {
+            if (call.sId != null) {
+              callMap[call.sId!] = call;
+            }
+          }
+          _callHistory = callMap.values.toList();
+          
+          _callHistory.sort((a, b) {
+            final aTime = DateTime.tryParse(a.createdAt ?? '') ?? DateTime(0);
+            final bTime = DateTime.tryParse(b.createdAt ?? '') ?? DateTime(0);
+            return bTime.compareTo(aTime);
+          });
+          
           _historyPage++;
         }
       }

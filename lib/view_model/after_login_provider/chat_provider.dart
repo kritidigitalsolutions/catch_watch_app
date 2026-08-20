@@ -36,6 +36,7 @@ class ChatProvider extends ChangeNotifier {
   String? _activeConversationId;
   String? _activePartnerId;
   MessageModel? _replyingToMessage;
+  String _inboxSearchQuery = '';
 
 
   // E2EE state
@@ -57,6 +58,15 @@ class ChatProvider extends ChangeNotifier {
 
 
   List<ConversationModel> get conversations => _conversations;
+  List<ConversationModel> get filteredConversations {
+    if (_inboxSearchQuery.isEmpty) return _conversations;
+    final query = _inboxSearchQuery.toLowerCase();
+    return _conversations.where((conv) {
+      final name = conv.partner?.name?.toLowerCase() ?? '';
+      final username = conv.partner?.username?.toLowerCase() ?? '';
+      return name.contains(query) || username.contains(query);
+    }).toList();
+  }
   List<MessageModel> get messages => _messages;
   List<MessageModel> get pinnedMessages => _pinnedMessages;
   List<PartnerModel> get searchedUsers => _searchedUsers;
@@ -91,6 +101,11 @@ class ChatProvider extends ChangeNotifier {
 
   void clearReplyingMessage() {
     _replyingToMessage = null;
+    notifyListeners();
+  }
+
+  void setInboxSearchQuery(String query) {
+    _inboxSearchQuery = query;
     notifyListeners();
   }
 
@@ -527,6 +542,10 @@ class ChatProvider extends ChangeNotifier {
       case 'reaction':
         _onMessageReaction(payload);
         break;
+      case 'message_edited':
+      case 'edit_message':
+        _onMessageEdited(payload);
+        break;
       case 'incoming_call':
       case 'call_accepted':
       case 'call_rejected':
@@ -582,78 +601,7 @@ class ChatProvider extends ChangeNotifier {
       if ((newMessage.isEncrypted == true || newMessage.messageType == 'text') && newMessage.text != null && newMessage.text!.isNotEmpty) {
         final senderId = newMessage.sender?.sId ?? newMessage.sender?.id;
         if (senderId != null && senderId != HiveService.userId) {
-          debugPrint('E2EE: Incoming message from $senderId. Attempting decryption...');
-          debugPrint('E2EE: CipherText (len ${newMessage.text!.length}): ${newMessage.text!.substring(0, newMessage.text!.length > 20 ? 20 : newMessage.text!.length)}...');
-          debugPrint('E2EE: IV received: ${newMessage.iv}');
-          
-          // Use public key from payload if available to prevent stale key usage
-          final secret = await _getSharedSecret(senderId, providedPublicKeyJwk: newMessage.sender?.publicKey);
-          
-          if (secret != null) {
-            newMessage.cipherText = newMessage.text;
-            try {
-              final decrypted = await EncryptionHelper.decrypt(newMessage.text!, secret, iv: newMessage.iv);
-              if (decrypted != newMessage.text) {
-                newMessage.text = decrypted;
-                newMessage.isDecrypted = true;
-                debugPrint('E2EE: Decryption successful (Standard)');
-              }
-            } catch (e) {
-              if (e.toString().contains('SecretBoxAuthenticationError')) {
-                debugPrint('E2EE: MAC mismatch (Standard). Trying Legacy fallback...');
-                final legacySecret = await _getLegacySharedSecret(senderId);
-                if (legacySecret != null) {
-                  try {
-                    final decrypted = await EncryptionHelper.decrypt(newMessage.text!, legacySecret, iv: newMessage.iv);
-                    if (decrypted != newMessage.text) {
-                      newMessage.text = decrypted;
-                      newMessage.isDecrypted = true;
-                      debugPrint('E2EE: Decryption successful (Legacy Fallback)');
-                    }
-                  } catch (e2) {
-                    debugPrint('E2EE: Legacy fallback failed. Trying Hashed fallback...');
-                    try {
-                      final partnerKey = _partnerPublicKeys[senderId];
-                      if (partnerKey != null) {
-                        final hashedSecret = await EncryptionHelper.deriveSharedSecretHashed(_myKeyPair!, partnerKey);
-                        final decrypted = await EncryptionHelper.decrypt(newMessage.text!, hashedSecret, iv: newMessage.iv);
-                        if (decrypted != newMessage.text) {
-                          newMessage.text = decrypted;
-                          newMessage.isDecrypted = true;
-                          debugPrint('E2EE: Decryption successful (Hashed Fallback)');
-                        }
-                      }
-                    } catch (e3) {
-                      debugPrint('E2EE: All decryption attempts failed. Invalidating cache and retrying from API...');
-                      _partnerPublicKeys.remove(senderId);
-                      _sharedSecrets.remove(senderId);
-                      _legacySharedSecrets.remove(senderId);
-                      await HiveService.deletePartnerPublicKey(senderId);
-                      
-                      final freshSecret = await _getSharedSecret(senderId, forceFetch: true);
-                      if (freshSecret != null) {
-                        try {
-                           final decrypted = await EncryptionHelper.decrypt(newMessage.text!, freshSecret, iv: newMessage.iv);
-                           if (decrypted != newMessage.text) {
-                             newMessage.text = decrypted;
-                             newMessage.isDecrypted = true;
-                             debugPrint('E2EE: Decryption successful after cache recovery');
-                           }
-                        } catch (e4) {
-                           debugPrint('E2EE: Decryption still failed after API re-fetch: $e4');
-                        }
-                      }
-                    }
-                  }
-                }
-              } else {
-                debugPrint('E2EE Decryption Error: $e');
-              }
-            }
-          }
-else {
-            debugPrint('E2EE: Could not obtain shared secret for $senderId');
-          }
+          await _decryptMessagesList([newMessage], senderId);
         }
       }
 
@@ -816,6 +764,81 @@ else {
     }
   }
 
+  void _onMessageEdited(dynamic payload) async {
+    try {
+      final messageId = payload['messageId'] ?? payload['_id'];
+      final conversationId = payload['conversationId'];
+      final newText = payload['text'];
+      final isEncrypted = payload['isEncrypted'] == true;
+      final iv = payload['iv'];
+      final senderId = payload['senderId'] ?? payload['sender']?['_id'] ?? payload['sender']?['id'];
+
+      if (messageId == null) return;
+
+      // Find the message in local history first
+      final index = _messages.indexWhere((m) => m.sId == messageId);
+      final existingMsg = index != -1 ? _messages[index] : null;
+
+      // IGNORE MY OWN EDITS: Server broadcasts it, but I already have plain text
+      // Check both the payload sender and the local message's sender
+      final bool isMe = (senderId != null && senderId == HiveService.userId) || 
+                       (existingMsg != null && (existingMsg.sender?.sId == HiveService.userId || existingMsg.sender?.id == HiveService.userId));
+
+      if (isMe) {
+        debugPrint('E2EE: Ignoring broadcast of my own edit to avoid overwriting plain text');
+        // Still update encrypted metadata if provided, but KEEP current decrypted text
+        if (existingMsg != null) {
+          existingMsg.isEncrypted = isEncrypted;
+          existingMsg.iv = iv;
+          // DON'T change existingMsg.text as it's already plain text from editMessage()
+          notifyListeners();
+        }
+        return;
+      }
+
+      // Find partnerId from conversation
+      final conv = _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel());
+      final partnerId = senderId ?? conv.partner?.sId ?? conv.partner?.id ?? _activePartnerId;
+
+      if (existingMsg != null) {
+        existingMsg.text = newText;
+        existingMsg.isEncrypted = isEncrypted;
+        existingMsg.iv = iv;
+        existingMsg.isEdited = true;
+        existingMsg.isDecrypted = false; // Reset to allow decryption
+
+        if (isEncrypted && newText != null && partnerId != null) {
+          await _decryptMessagesList([existingMsg], partnerId);
+        } else {
+          existingMsg.isDecrypted = true;
+        }
+
+        notifyListeners();
+      }
+
+      // Update in conversation list
+      final convIndex = _conversations.indexWhere((c) => c.sId == conversationId);
+      if (convIndex != -1) {
+        final lastMsg = _conversations[convIndex].lastMessage;
+        if (lastMsg?.sId == messageId) {
+          lastMsg!.text = newText;
+          lastMsg.isEncrypted = isEncrypted;
+          lastMsg.iv = iv;
+          lastMsg.isDecrypted = false;
+          
+          if (isEncrypted && newText != null && partnerId != null) {
+            await _decryptMessagesList([lastMsg], partnerId);
+          } else {
+            lastMsg.isDecrypted = true;
+          }
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error handling message edited socket event: $e');
+    }
+  }
+
   void _onUserBlocked(dynamic payload) {
     final blockedId = payload['blockedId'] ?? payload['blockedUserId'];
     final blockerId = payload['blockerId'];
@@ -905,6 +928,11 @@ else {
             _blockedByPartnerIds.add(partnerId);
           } else {
             _blockedByPartnerIds.remove(partnerId);
+          }
+
+          // Decrypt last message preview
+          if (conv.lastMessage != null) {
+            await _decryptMessagesList([conv.lastMessage!], partnerId);
           }
         }
       }
@@ -1008,85 +1036,10 @@ else {
       // Decrypt messages
       final partnerId = _activePartnerId ?? _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel()).partner?.sId;
       if (partnerId != null) {
-        debugPrint('E2EE: Fetching messages for partner $partnerId. Deriving secret...');
-        SecretKey? secret = await _getSharedSecret(partnerId);
-        
-        bool hasMacFailure = false;
-        
-        if (secret != null) {
-          SecretKey? legacySecret = await _getLegacySharedSecret(partnerId);
-          bool recovered = false;
-          
-          for (var msg in newMessages) {
-            if (msg.messageType == 'text' && msg.text != null && msg.text!.isNotEmpty) {
-              msg.cipherText = msg.text;
-              
-              Future<void> attemptDecryption() async {
-                // 1. Try Standard
-                try {
-                  final decrypted = await EncryptionHelper.decrypt(msg.text!, secret!, iv: msg.iv);
-                  if (decrypted != msg.text) {
-                    msg.text = decrypted;
-                    msg.isDecrypted = true;
-                    return;
-                  }
-                } catch (_) {}
-                
-                // 2. Try Legacy
-                if (legacySecret != null) {
-                  try {
-                    final decrypted = await EncryptionHelper.decrypt(msg.text!, legacySecret!, iv: msg.iv);
-                    if (decrypted != msg.text) {
-                      msg.text = decrypted;
-                      msg.isDecrypted = true;
-                      return;
-                    }
-                  } catch (_) {}
-                }
-
-                // 3. Try Hashed
-                try {
-                  final partnerKey = _partnerPublicKeys[partnerId];
-                  if (partnerKey != null) {
-                    final hashedSecret = await EncryptionHelper.deriveSharedSecretHashed(_myKeyPair!, partnerKey);
-                    final decrypted = await EncryptionHelper.decrypt(msg.text!, hashedSecret, iv: msg.iv);
-                    if (decrypted != msg.text) {
-                      msg.text = decrypted;
-                      msg.isDecrypted = true;
-                      return;
-                    }
-                  }
-                } catch (_) {}
-              }
-
-              await attemptDecryption();
-
-              // If still failed and we haven't tried recovery for this batch
-              if (!msg.isDecrypted && !recovered) {
-                debugPrint('E2EE: Decryption failed for message in list. Attempting cache recovery...');
-                recovered = true;
-                _partnerPublicKeys.remove(partnerId);
-                _sharedSecrets.remove(partnerId);
-                _legacySharedSecrets.remove(partnerId);
-                await HiveService.deletePartnerPublicKey(partnerId);
-
-                secret = await _getSharedSecret(partnerId, forceFetch: true);
-                legacySecret = await _getLegacySharedSecret(partnerId);
-                
-                if (secret != null) {
-                  await attemptDecryption(); // Try one more time with fresh secret
-                }
-              }
-            }
-          }
-          
-          debugPrint('E2EE: Decrypted ${newMessages.where((m) => m.isDecrypted).length} messages (with recovery: $recovered)');
-        }
+        await _decryptMessagesList(newMessages, partnerId);
       }
 
-
       if (page == 1) {
-
         _messages = newMessages;
       } else {
         _messages.addAll(newMessages);
@@ -1098,6 +1051,86 @@ else {
       _isMessagesLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> _decryptMessagesList(List<MessageModel> messages, String partnerId) async {
+    debugPrint('E2EE: Decrypting ${messages.length} messages for partner $partnerId. Deriving secret...');
+    SecretKey? secret = await _getSharedSecret(partnerId);
+    
+    if (secret == null) {
+      debugPrint('E2EE: Could not obtain shared secret for $partnerId');
+      return;
+    }
+
+    SecretKey? legacySecret = await _getLegacySharedSecret(partnerId);
+    bool recovered = false;
+    
+    for (var msg in messages) {
+      if (msg.messageType == 'text' && msg.text != null && msg.text!.isNotEmpty) {
+        // If it's already decrypted, skip
+        if (msg.isDecrypted) continue;
+        
+        msg.cipherText = msg.text;
+        
+        Future<void> attemptDecryption() async {
+          // 1. Try Standard
+          try {
+            final decrypted = await EncryptionHelper.decrypt(msg.text!, secret!, iv: msg.iv);
+            if (decrypted != msg.text) {
+              msg.text = decrypted;
+              msg.isDecrypted = true;
+              return;
+            }
+          } catch (_) {}
+          
+          // 2. Try Legacy
+          if (legacySecret != null) {
+            try {
+              final decrypted = await EncryptionHelper.decrypt(msg.text!, legacySecret!, iv: msg.iv);
+              if (decrypted != msg.text) {
+                msg.text = decrypted;
+                msg.isDecrypted = true;
+                return;
+              }
+            } catch (_) {}
+          }
+
+          // 3. Try Hashed
+          try {
+            final partnerKey = _partnerPublicKeys[partnerId];
+            if (partnerKey != null) {
+              final hashedSecret = await EncryptionHelper.deriveSharedSecretHashed(_myKeyPair!, partnerKey);
+              final decrypted = await EncryptionHelper.decrypt(msg.text!, hashedSecret, iv: msg.iv);
+              if (decrypted != msg.text) {
+                msg.text = decrypted;
+                msg.isDecrypted = true;
+                return;
+              }
+            }
+          } catch (_) {}
+        }
+
+        await attemptDecryption();
+
+        // If still failed and we haven't tried recovery for this batch
+        if (!msg.isDecrypted && !recovered) {
+          debugPrint('E2EE: Decryption failed for message. Attempting cache recovery...');
+          recovered = true;
+          _partnerPublicKeys.remove(partnerId);
+          _sharedSecrets.remove(partnerId);
+          _legacySharedSecrets.remove(partnerId);
+          await HiveService.deletePartnerPublicKey(partnerId);
+
+          secret = await _getSharedSecret(partnerId, forceFetch: true);
+          legacySecret = await _getLegacySharedSecret(partnerId);
+          
+          if (secret != null) {
+            await attemptDecryption(); // Try one more time with fresh secret
+          }
+        }
+      }
+    }
+    debugPrint('E2EE: Decryption complete. Decrypted: ${messages.where((m) => m.isDecrypted).length}');
   }
 
   Future<bool> sendMessage({
@@ -1275,10 +1308,13 @@ else {
     required MessageModel originalMessage,
   }) async {
     try {
+      debugPrint('E2EE: Forwarding message to $recipientId');
+      
       String? textToForward = originalMessage.text;
       String? iv;
       bool isEncrypted = false;
       
+      // Ensure we have plain text to encrypt
       if (originalMessage.messageType == 'text' && textToForward != null) {
         final secret = await _getSharedSecret(recipientId);
         if (secret != null) {
@@ -1287,6 +1323,7 @@ else {
           iv = encryptionResult['iv'];
           if (textToForward != originalMessage.text) {
             isEncrypted = true;
+            debugPrint('E2EE: Message encrypted for forwarding');
           }
         }
       }
@@ -1295,8 +1332,14 @@ else {
       final myDeviceId = HiveService.getDeviceId() ?? 'unknown_device';
       final myUserId = HiveService.userId ?? 'unknown_user';
 
+      // Find if we already have a conversation with the recipient
+      final existingConv = _conversations.firstWhere(
+        (c) => c.partner?.sId == recipientId || c.partner?.id == recipientId,
+        orElse: () => ConversationModel(),
+      );
+
       final Map<String, dynamic> data = {
-        'conversationId': originalMessage.conversationId,
+        'conversationId': existingConv.sId, // Use existing conversation if available
         'recipientId': recipientId,
         'isEncrypted': isEncrypted,
         'iv': iv ?? '',
@@ -1351,6 +1394,22 @@ else {
       final conv = _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel());
       final partnerId = conv.partner?.sId ?? conv.partner?.id;
       
+      // OPTIMISTIC UPDATE: Update UI instantly
+      final index = _messages.indexWhere((m) => m.sId == messageId);
+      if (index != -1) {
+        _messages[index].text = newText;
+        _messages[index].isEdited = true;
+        _messages[index].isDecrypted = true;
+        notifyListeners();
+      }
+
+      final convIndex = _conversations.indexWhere((c) => c.sId == conversationId);
+      if (convIndex != -1 && _conversations[convIndex].lastMessage?.sId == messageId) {
+        _conversations[convIndex].lastMessage!.text = newText;
+        _conversations[convIndex].lastMessage!.isDecrypted = true;
+        notifyListeners();
+      }
+
       String encryptedText = newText;
       String? iv;
       bool isEncrypted = false;
@@ -1373,10 +1432,9 @@ else {
         iv: iv,
         senderPublicKey: myPublicKeyJwk,
       );
-      final index = _messages.indexWhere((m) => m.sId == messageId);
+
+      // Final sync with metadata if needed, but text is already set
       if (index != -1) {
-        _messages[index].text = newText;
-        _messages[index].isEdited = true;
         _messages[index].isEncrypted = isEncrypted;
         _messages[index].iv = iv;
         notifyListeners();
@@ -1520,6 +1578,13 @@ else {
     try {
       final response = await _chatRepository.fetchPinnedMessages(conversationId);
       _pinnedMessages = response;
+
+      // Decrypt pinned messages
+      final partnerId = _activePartnerId ?? _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel()).partner?.sId;
+      if (partnerId != null && _pinnedMessages.isNotEmpty) {
+        await _decryptMessagesList(_pinnedMessages, partnerId);
+      }
+      
       notifyListeners();
     } catch (e) {
       debugPrint('Error fetching pinned messages: $e');
@@ -1546,8 +1611,51 @@ else {
 
   Future<List<MessageModel>> searchInMessages(String query, {String? conversationId}) async {
     try {
+      final List<MessageModel> combinedResults = [];
+      final queryLower = query.toLowerCase();
+
+      // 1. Local Search (Highest Accuracy for E2EE)
+      if (conversationId == null || conversationId == _activeConversationId) {
+        final localMatches = _messages.where((m) {
+          if (m.messageType != 'text' || m.text == null) return false;
+          return m.text!.toLowerCase().contains(queryLower);
+        }).toList();
+        combinedResults.addAll(localMatches);
+      }
+
+      // 2. Server Search
       final response = await _chatRepository.searchInMessages(query, conversationId: conversationId);
-      return response;
+      final List<MessageModel> serverResults = response;
+      
+      // Resolve partnerId for decryption
+      String? partnerId;
+      if (conversationId != null) {
+        final conv = _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel());
+        partnerId = conv.partner?.sId ?? conv.partner?.id;
+      }
+      partnerId ??= _activePartnerId;
+      
+      if (partnerId != null && serverResults.isNotEmpty) {
+        await _decryptMessagesList(serverResults, partnerId);
+      }
+
+      // Merge and filter by DECRYPTED text
+      for (var sMsg in serverResults) {
+        if (sMsg.text != null && sMsg.text!.toLowerCase().contains(queryLower)) {
+          if (!combinedResults.any((m) => m.sId == sMsg.sId)) {
+            combinedResults.add(sMsg);
+          }
+        }
+      }
+      
+      // Sort by date descending
+      combinedResults.sort((a, b) {
+        final aTime = DateTime.tryParse(a.createdAt ?? '') ?? DateTime(0);
+        final bTime = DateTime.tryParse(b.createdAt ?? '') ?? DateTime(0);
+        return bTime.compareTo(aTime);
+      });
+
+      return combinedResults;
     } catch (e) {
       debugPrint('Error searching in messages: $e');
       return [];

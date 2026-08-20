@@ -18,6 +18,8 @@ class MessageListScreen extends StatefulWidget {
 }
 
 class _MessageListScreenState extends State<MessageListScreen> {
+  final TextEditingController _inboxSearchController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -240,22 +242,17 @@ class _MessageListScreenState extends State<MessageListScreen> {
             );
           }
 
-          final conversations = chatProvider.conversations;
-
-          if (conversations.isEmpty) {
-            return Center(
-              child: Text(
-                "No conversations yet",
-                style: text16(color: Colors.grey),
-              ),
-            );
-          }
+          final conversations = chatProvider.filteredConversations;
 
           return RefreshIndicator(
-            onRefresh: () => chatProvider.fetchConversations(),
+            onRefresh: () async {
+              _inboxSearchController.clear();
+              chatProvider.setInboxSearchQuery('');
+              await chatProvider.fetchConversations();
+            },
             child: Column(
               children: [
-                // Search Bar
+                // Search Bar - ALWAYS VISIBLE
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                   child: Container(
@@ -264,165 +261,199 @@ class _MessageListScreenState extends State<MessageListScreen> {
                       color: Colors.grey[200],
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const TextField(
+                    child: TextField(
+                      controller: _inboxSearchController,
+                      onChanged: (value) {
+                        chatProvider.setInboxSearchQuery(value);
+                        setState(() {}); // Force local rebuild for suffix icon
+                      },
                       decoration: InputDecoration(
                         hintText: 'Search',
-                        prefixIcon: Icon(Icons.search, color: Colors.grey, size: 20),
+                        prefixIcon: const Icon(Icons.search, color: Colors.grey, size: 20),
+                        suffixIcon: _inboxSearchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, color: Colors.grey, size: 20),
+                                onPressed: () {
+                                  _inboxSearchController.clear();
+                                  chatProvider.setInboxSearchQuery('');
+                                  setState(() {});
+                                },
+                              )
+                            : null,
                         border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(vertical: 10),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 10),
                       ),
                     ),
                   ),
                 ),
                 
-                // Active Now (Optional Instagram feature)
-                SizedBox(
-                  height: 100,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    itemCount: conversations.length,
-                    itemBuilder: (context, index) {
-                      final chat = conversations[index];
-                      if (chat.partner?.isOnline != true) return const SizedBox.shrink();
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                        child: Column(
-                          children: [
-                            Stack(
-                              children: [
-                                CircleAvatar(
-                                  radius: 30,
-                                  backgroundImage: chat.partner?.profileImage != null && chat.partner!.profileImage!.isNotEmpty
-                                      ? NetworkImage(chat.partner!.profileImage!)
-                                      : null,
-                                  child: chat.partner?.profileImage == null || chat.partner!.profileImage!.isEmpty
-                                      ? const Icon(Icons.person, size: 30)
-                                      : null,
+                if (conversations.isEmpty)
+                  Expanded(
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: [
+                        SizedBox(height: MediaQuery.of(context).size.height * 0.3),
+                        Center(
+                          child: Text(
+                            chatProvider.conversations.isEmpty 
+                              ? "No conversations yet" 
+                              : "No matching conversations found",
+                            style: text16(color: Colors.grey),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else ...[
+                  // Active Now (Optional Instagram feature)
+                  SizedBox(
+                    height: 100,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      itemCount: conversations.length,
+                      itemBuilder: (context, index) {
+                        final chat = conversations[index];
+                        if (chat.partner?.isOnline != true) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                          child: Column(
+                            children: [
+                              Stack(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 30,
+                                    backgroundImage: chat.partner?.profileImage != null && chat.partner!.profileImage!.isNotEmpty
+                                        ? NetworkImage(chat.partner!.profileImage!)
+                                        : null,
+                                    child: chat.partner?.profileImage == null || chat.partner!.profileImage!.isEmpty
+                                        ? const Icon(Icons.person, size: 30)
+                                        : null,
+                                  ),
+                                  Positioned(
+                                    bottom: 0,
+                                    right: 0,
+                                    child: Container(
+                                      width: 15,
+                                      height: 15,
+                                      decoration: BoxDecoration(
+                                        color: Colors.green,
+                                        border: Border.all(color: Colors.white, width: 2),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                (chat.partner?.name ?? '').split(' ')[0],
+                                style: text12(),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+
+                  const Divider(height: 1),
+
+                  // Chat List
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: conversations.length,
+                      itemBuilder: (context, index) {
+                        final chat = conversations[index];
+                        final unreadCount = chat.unreadCount ?? 0;
+                        return ListTile(
+                          onTap: () {
+                            if (unreadCount > 0) {
+                              chatProvider.markAsRead(chat.sId!);
+                            }
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ChatScreen(
+                                  conversationId: chat.sId!,
+                                  partnerId: chat.partner?.sId ?? chat.partner?.id ?? '',
+                                  name: chat.partner?.name ?? '',
+                                  username: chat.partner?.username ?? '',
+                                  image: chat.partner?.profileImage ?? '',
                                 ),
+                              ),
+                            );
+                          },
+                          onLongPress: () {
+                            _showConversationOptions(context, chat, chatProvider);
+                          },
+                          leading: Stack(
+                            children: [
+                              CircleAvatar(
+                                radius: 25,
+                                backgroundImage: chat.partner?.profileImage != null && chat.partner!.profileImage!.isNotEmpty
+                                    ? NetworkImage(chat.partner!.profileImage!)
+                                    : null,
+                                child: chat.partner?.profileImage == null || chat.partner!.profileImage!.isEmpty
+                                    ? const Icon(Icons.person, size: 25)
+                                    : null,
+                              ),
+                              if (chat.isPinned == true)
                                 Positioned(
                                   bottom: 0,
                                   right: 0,
                                   child: Container(
-                                    width: 15,
-                                    height: 15,
-                                    decoration: BoxDecoration(
-                                      color: Colors.green,
-                                      border: Border.all(color: Colors.white, width: 2),
+                                    padding: const EdgeInsets.all(2),
+                                    decoration: const BoxDecoration(
+                                      color: AppColors.primary,
                                       shape: BoxShape.circle,
                                     ),
+                                    child: const Icon(Icons.push_pin, color: Colors.white, size: 10),
                                   ),
                                 ),
-                              ],
+                            ],
+                          ),
+                          title: Text(
+                            chat.partner?.name ?? 'Unknown',
+                            style: text16(fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.w500),
+                          ),
+                          subtitle: Text(
+                            chat.lastMessage?.text ?? 'No messages',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: text14(
+                              color: unreadCount > 0 ? Colors.black : Colors.grey,
+                              fontWeight: unreadCount > 0 ? FontWeight.w600 : FontWeight.normal,
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              (chat.partner?.name ?? '').split(' ')[0],
-                              style: text12(),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-                const Divider(height: 1),
-
-                // Chat List
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: conversations.length,
-                    itemBuilder: (context, index) {
-                      final chat = conversations[index];
-                      final unreadCount = chat.unreadCount ?? 0;
-                      return ListTile(
-                        onTap: () {
-                          if (unreadCount > 0) {
-                            chatProvider.markAsRead(chat.sId!);
-                          }
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => ChatScreen(
-                                conversationId: chat.sId!,
-                                partnerId: chat.partner?.sId ?? chat.partner?.id ?? '',
-                                name: chat.partner?.name ?? '',
-                                username: chat.partner?.username ?? '',
-                                image: chat.partner?.profileImage ?? '',
+                          ),
+                          trailing: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                _formatTime(chat.lastMessageAt),
+                                style: text12(color: Colors.grey),
                               ),
-                            ),
-                          );
-                        },
-                        onLongPress: () {
-                          _showConversationOptions(context, chat, chatProvider);
-                        },
-                        leading: Stack(
-                          children: [
-                            CircleAvatar(
-                              radius: 25,
-                              backgroundImage: chat.partner?.profileImage != null && chat.partner!.profileImage!.isNotEmpty
-                                  ? NetworkImage(chat.partner!.profileImage!)
-                                  : null,
-                              child: chat.partner?.profileImage == null || chat.partner!.profileImage!.isEmpty
-                                  ? const Icon(Icons.person, size: 25)
-                                  : null,
-                            ),
-                            if (chat.isPinned == true)
-                              Positioned(
-                                bottom: 0,
-                                right: 0,
-                                child: Container(
-                                  padding: const EdgeInsets.all(2),
+                              if (unreadCount > 0)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 4),
+                                  padding: const EdgeInsets.all(6),
                                   decoration: const BoxDecoration(
                                     color: AppColors.primary,
                                     shape: BoxShape.circle,
                                   ),
-                                  child: const Icon(Icons.push_pin, color: Colors.white, size: 10),
+                                  child: Text(
+                                    unreadCount.toString(),
+                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                  ),
                                 ),
-                              ),
-                          ],
-                        ),
-                        title: Text(
-                          chat.partner?.name ?? 'Unknown',
-                          style: text16(fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.w500),
-                        ),
-                        subtitle: Text(
-                          chat.lastMessage?.text ?? 'No messages',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: text14(
-                            color: unreadCount > 0 ? Colors.black : Colors.grey,
-                            fontWeight: unreadCount > 0 ? FontWeight.w600 : FontWeight.normal,
+                            ],
                           ),
-                        ),
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              _formatTime(chat.lastMessageAt),
-                              style: text12(color: Colors.grey),
-                            ),
-                            if (unreadCount > 0)
-                              Container(
-                                margin: const EdgeInsets.only(top: 4),
-                                padding: const EdgeInsets.all(6),
-                                decoration: const BoxDecoration(
-                                  color: AppColors.primary,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Text(
-                                  unreadCount.toString(),
-                                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                          ],
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           );
@@ -434,26 +465,28 @@ class _MessageListScreenState extends State<MessageListScreen> {
   void _showConversationOptions(BuildContext context, ConversationModel chat, ChatProvider provider) {
     showModalBottomSheet(
       context: context,
-      builder: (context) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: Icon(chat.isPinned == true ? Icons.push_pin : Icons.push_pin_outlined),
-            title: Text(chat.isPinned == true ? "Unpin Chat" : "Pin Chat"),
-            onTap: () {
-              provider.togglePin(chat.sId!);
-              Navigator.pop(context);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.delete_outline, color: Colors.red),
-            title: const Text("Delete Chat", style: TextStyle(color: Colors.red)),
-            onTap: () {
-              Navigator.pop(context);
-              _showDeleteChatConfirm(context, chat, provider);
-            },
-          ),
-        ],
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(chat.isPinned == true ? Icons.push_pin : Icons.push_pin_outlined),
+              title: Text(chat.isPinned == true ? "Unpin Chat" : "Pin Chat"),
+              onTap: () {
+                provider.togglePin(chat.sId!);
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text("Delete Chat", style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.pop(context);
+                _showDeleteChatConfirm(context, chat, provider);
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

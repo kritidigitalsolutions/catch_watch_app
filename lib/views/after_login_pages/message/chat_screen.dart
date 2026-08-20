@@ -117,26 +117,28 @@ class _ChatScreenState extends State<ChatScreen> {
     showModalBottomSheet(
       context: context,
       builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt),
-              title: const Text('Take Photo'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickAndSendImage(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Choose from Gallery'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickAndSendImage(ImageSource.gallery);
-              },
-            ),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt),
+                title: const Text('Take Photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickAndSendImage(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library),
+                title: const Text('Choose from Gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickAndSendImage(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -267,58 +269,62 @@ class _ChatScreenState extends State<ChatScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        return Container(
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _actionTile(Icons.reply_rounded, "Reply", () {
-                Navigator.pop(context);
-                chatProvider.setReplyingMessage(message);
-              }),
-              _actionTile(Icons.forward_rounded, "Forward", () {
-                Navigator.pop(context);
-                _showForwardSelectionDialog(message);
-              }),
-              _actionTile(Icons.add_reaction_outlined, "React", () {
-                Navigator.pop(context);
-                _showReactionPicker(message);
-              }),
-              _actionTile(
-                message.isPinned == true ? Icons.push_pin : Icons.push_pin_outlined, 
-                message.isPinned == true ? "Unpin" : "Pin", 
-                () {
-                  Navigator.pop(context);
-                  chatProvider.pinMessage(widget.conversationId, message.sId!);
-                }
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _actionTile(Icons.reply_rounded, "Reply", () {
+                    Navigator.pop(context);
+                    chatProvider.setReplyingMessage(message);
+                  }),
+                  _actionTile(Icons.forward_rounded, "Forward", () {
+                    Navigator.pop(context);
+                    _showForwardSelectionDialog(message);
+                  }),
+                  _actionTile(Icons.add_reaction_outlined, "React", () {
+                    Navigator.pop(context);
+                    _showReactionPicker(message);
+                  }),
+                  _actionTile(
+                    message.isPinned == true ? Icons.push_pin : Icons.push_pin_outlined, 
+                    message.isPinned == true ? "Unpin" : "Pin", 
+                    () {
+                      Navigator.pop(context);
+                      chatProvider.pinMessage(widget.conversationId, message.sId!);
+                    }
+                  ),
+                  // if (message.cipherText != null)
+                  //   _actionTile(Icons.enhanced_encryption_outlined, "Show Encrypted", () {
+                  //     Navigator.pop(context);
+                  //     _showEncryptedDialog(message);
+                  //   }),
+                  // _actionTile(Icons.copy, "Copy", () {
+                  //
+                  //   Navigator.pop(context);
+                  //   // Implement copy logic
+                  // }),
+                  if (message.messageType == 'text' && isMe && 
+                      message.createdAt != null && 
+                      DateTime.now().difference(DateTime.parse(message.createdAt!)).inMinutes <= 5)
+                    _actionTile(Icons.edit_outlined, "Edit", () {
+                      Navigator.pop(context);
+                      _showEditDialog(message);
+                    }),
+                  _actionTile(Icons.delete_outline, "Delete for me", () {
+                    chatProvider.deleteMessage(widget.conversationId, message.sId!);
+                    Navigator.pop(context);
+                  }, color: Colors.red),
+                  if (isMe)
+                    _actionTile(Icons.remove_circle_outline, "Unsend for everyone", () {
+                      chatProvider.unsendMessage(widget.conversationId, message.sId!);
+                      Navigator.pop(context);
+                    }, color: Colors.red),
+                ],
               ),
-              if (message.cipherText != null)
-                _actionTile(Icons.enhanced_encryption_outlined, "Show Encrypted", () {
-                  Navigator.pop(context);
-                  _showEncryptedDialog(message);
-                }),
-              _actionTile(Icons.copy, "Copy", () {
-
-                Navigator.pop(context);
-                // Implement copy logic
-              }),
-              if (message.messageType == 'text' && isMe && 
-                  message.createdAt != null && 
-                  DateTime.now().difference(DateTime.parse(message.createdAt!)).inMinutes <= 5)
-                _actionTile(Icons.edit_outlined, "Edit", () {
-                  Navigator.pop(context);
-                  _showEditDialog(message);
-                }),
-              _actionTile(Icons.delete_outline, "Delete for me", () {
-                chatProvider.deleteMessage(widget.conversationId, message.sId!);
-                Navigator.pop(context);
-              }, color: Colors.red),
-              if (isMe)
-                _actionTile(Icons.remove_circle_outline, "Unsend for everyone", () {
-                  chatProvider.unsendMessage(widget.conversationId, message.sId!);
-                  Navigator.pop(context);
-                }, color: Colors.red),
-            ],
+            ),
           ),
         );
       },
@@ -345,30 +351,32 @@ class _ChatScreenState extends State<ChatScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        margin: const EdgeInsets.all(20),
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(30),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, spreadRadius: 2),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: emojis.map((emoji) {
-            return GestureDetector(
-              onTap: () {
-                chatProvider.reactToMessage(message.sId!, emoji);
-                Navigator.pop(context);
-              },
-              child: Text(
-                emoji,
-                style: const TextStyle(fontSize: 28),
-              ),
-            );
-          }).toList(),
+      builder: (context) => SafeArea(
+        child: Container(
+          margin: const EdgeInsets.all(20),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(30),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, spreadRadius: 2),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: emojis.map((emoji) {
+              return GestureDetector(
+                onTap: () {
+                  chatProvider.reactToMessage(message.sId!, emoji);
+                  Navigator.pop(context);
+                },
+                child: Text(
+                  emoji,
+                  style: const TextStyle(fontSize: 28),
+                ),
+              );
+            }).toList(),
+          ),
         ),
       ),
     );
@@ -589,66 +597,70 @@ class _ChatScreenState extends State<ChatScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(20),
-            topRight: Radius.circular(20),
+      builder: (context) => SafeArea(
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(20),
+              topRight: Radius.circular(20),
+            ),
           ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 10),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 20),
-            _actionTile(Icons.search, "Search Chat", () {
-              Navigator.pop(context);
-              _showSearchUI();
-            }),
-            _actionTile(
-              isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-              isPinned ? "Unpin Chat" : "Pin Chat",
-              () {
-                chatProvider.togglePin(widget.conversationId);
-                Navigator.pop(context);
-              },
-            ),
-            _actionTile(Icons.delete_outline, "Delete Chat", () {
-              Navigator.pop(context);
-              _showDeleteChatConfirm();
-            }, color: Colors.red),
-            
-            if (blockedByMe)
-              _actionTile(
-                Icons.lock_open,
-                "Unblock User",
-                () {
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 10),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _actionTile(Icons.search, "Search Chat", () {
                   Navigator.pop(context);
-                  _showUnblockConfirmation(context, chatProvider);
-                },
-                color: Colors.red,
-              )
-            else
-              _actionTile(
-                Icons.block,
-                "Block User",
-                () {
+                  _showSearchUI();
+                }),
+                _actionTile(
+                  isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                  isPinned ? "Unpin Chat" : "Pin Chat",
+                  () {
+                    chatProvider.togglePin(widget.conversationId);
+                    Navigator.pop(context);
+                  },
+                ),
+                _actionTile(Icons.delete_outline, "Delete Chat", () {
                   Navigator.pop(context);
-                  _showBlockDialog(context);
-                },
-                color: Colors.red,
-              ),
-            const SizedBox(height: 20),
-          ],
+                  _showDeleteChatConfirm();
+                }, color: Colors.red),
+                
+                if (blockedByMe)
+                  _actionTile(
+                    Icons.lock_open,
+                    "Unblock User",
+                    () {
+                      Navigator.pop(context);
+                      _showUnblockConfirmation(context, chatProvider);
+                    },
+                    color: Colors.red,
+                  )
+                else
+                  _actionTile(
+                    Icons.block,
+                    "Block User",
+                    () {
+                      Navigator.pop(context);
+                      _showBlockDialog(context);
+                    },
+                    color: Colors.red,
+                  ),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
         ),
       ),
     );

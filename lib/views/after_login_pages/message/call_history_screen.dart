@@ -53,6 +53,26 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final currentUserId = HiveService.userId;
+    final currentUserName = HiveService.getUser()?.name;
+
+    bool isMe(dynamic person) {
+      if (person == null) return false;
+      String? pid;
+      String? pName;
+      
+      // In CallModel, caller/receiver are Sender objects
+      if (person is String) {
+        pid = person;
+      } else {
+        pid = person.sId ?? person.id;
+        pName = person.name;
+      }
+
+      if (pid != null && currentUserId != null && pid == currentUserId) return true;
+      if (pName != null && currentUserName != null && 
+          pName.toLowerCase().trim() == currentUserName.toLowerCase().trim()) return true;
+      return false;
+    }
 
     return Scaffold(
       backgroundColor: AppColors.white,
@@ -92,25 +112,65 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
                 }
 
                 final call = provider.callHistory[index];
-                final bool isOutgoing = call.caller?.id == currentUserId || call.caller?.sId == currentUserId;
-                final partner = isOutgoing ? call.receiver : call.caller;
+
+                // Robust check if current user is caller or receiver
+                final bool isCurrentUserCaller = isMe(call.caller);
+                final bool isCurrentUserReceiver = isMe(call.receiver);
+
+                // The partner is the participant who is NOT me
+                dynamic partner;
+                if (isCurrentUserCaller) {
+                  partner = call.receiver;
+                } else if (isCurrentUserReceiver) {
+                  partner = call.caller;
+                } else {
+                  // Fallback: If caller looks like me, partner is receiver. Otherwise caller.
+                  partner = isMe(call.caller) ? call.receiver : call.caller;
+                }
+
+                // If partner resolved to me (e.g. calling yourself), or is still null, 
+                // try to find the one that is definitely NOT me
+                if (isMe(partner)) {
+                  if (!isMe(call.caller)) {
+                    partner = call.caller;
+                  } else if (!isMe(call.receiver)) {
+                    partner = call.receiver;
+                  }
+                }
 
                 IconData statusIcon;
                 Color statusColor;
+                String statusText = "";
 
-                switch (call.status?.toLowerCase()) {
-                  case 'missed':
+                final status = call.status?.toLowerCase() ?? "";
+                final bool isOutgoing = isCurrentUserCaller;
+
+                if (status == 'missed') {
+                  statusIcon = Icons.call_missed;
+                  statusColor = Colors.red;
+                  statusText = "Missed";
+                } else if (status == 'rejected' || status == 'busy') {
+                  statusIcon = Icons.block;
+                  statusColor = Colors.grey;
+                  statusText = status == 'busy' ? "Busy" : "Rejected";
+                } else if (status == 'cancelled') {
+                  if (isOutgoing) {
+                    statusIcon = Icons.call_made;
+                    statusColor = Colors.grey;
+                    statusText = "Cancelled";
+                  } else {
                     statusIcon = Icons.call_missed;
                     statusColor = Colors.red;
-                    break;
-                  case 'rejected':
-                  case 'busy':
-                    statusIcon = Icons.block;
-                    statusColor = Colors.grey;
-                    break;
-                  default:
-                    statusIcon = isOutgoing ? Icons.call_made : Icons.call_received;
-                    statusColor = call.status == 'ended' ? Colors.green : Colors.grey;
+                    statusText = "Missed";
+                  }
+                } else if (status == 'ended') {
+                  statusIcon = isOutgoing ? Icons.call_made : Icons.call_received;
+                  statusColor = Colors.green;
+                  statusText = isOutgoing ? "Outgoing" : "Incoming";
+                } else {
+                  statusIcon = isOutgoing ? Icons.call_made : Icons.call_received;
+                  statusColor = Colors.grey;
+                  statusText = isOutgoing ? "Outgoing" : "Incoming";
                 }
 
                 return ListTile(
@@ -133,7 +193,7 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
                       Icon(statusIcon, size: 14, color: statusColor),
                       const SizedBox(width: 4),
                       Text(
-                        "${call.type == 'video' ? 'Video' : 'Audio'} • ${_formatDateTime(call.createdAt)}",
+                        "$statusText • ${call.type == 'video' ? 'Video' : 'Audio'} • ${_formatDateTime(call.createdAt)}",
                         style: text12(color: Colors.grey),
                       ),
                     ],

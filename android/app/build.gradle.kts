@@ -58,6 +58,21 @@ android {
             } else {
                 signingConfigs.getByName("release")
             }
+             proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+
+    packaging {
+        jniLibs {
+            pickFirsts.add("**/libaosl.so")
+            pickFirsts.add("**/libc++_shared.so")
+        }
+        resources {
+            pickFirsts.add("**/libaosl.so")
+            pickFirsts.add("**/libc++_shared.so")
         }
     }
 }
