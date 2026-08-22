@@ -37,6 +37,8 @@ class ChatProvider extends ChangeNotifier {
   String? _activePartnerId;
   MessageModel? _replyingToMessage;
   String _inboxSearchQuery = '';
+  final Set<String> _processedMessageIds = {};
+  final Set<String> _processingFingerprints = {};
 
 
   // E2EE state
@@ -597,6 +599,48 @@ class ChatProvider extends ChangeNotifier {
         );
       }
 
+      // CRITICAL: Deduplicate immediately using sId
+      if (newMessage.sId != null) {
+        if (_processedMessageIds.contains(newMessage.sId)) {
+          debugPrint('Duplicate message detected by sId: ${newMessage.sId}');
+          return;
+        }
+        _processedMessageIds.add(newMessage.sId!);
+        
+        // Keep the set size manageable
+        if (_processedMessageIds.length > 500) {
+          _processedMessageIds.remove(_processedMessageIds.first);
+        }
+      }
+
+      // CRITICAL: Content-based deduplication for call events that might have different IDs
+      if (newMessage.messageType == 'call' || newMessage.messageType == 'audio_call' || newMessage.messageType == 'video_call') {
+        final String fingerprint = '${newMessage.conversationId}_${newMessage.messageType}_${newMessage.sender?.sId}';
+        
+        if (_processingFingerprints.contains(fingerprint)) {
+          debugPrint('Duplicate call event detected by simultaneous processing fingerprint');
+          return;
+        }
+
+        final bool alreadyExists = _messages.take(10).any((m) {
+          return m.messageType == newMessage.messageType && 
+                 m.conversationId == newMessage.conversationId &&
+                 m.sender?.sId == newMessage.sender?.sId &&
+                 DateTime.now().difference(DateTime.tryParse(m.createdAt ?? '') ?? DateTime.now()).inSeconds.abs() < 5;
+        });
+        
+        if (alreadyExists) {
+          debugPrint('Duplicate call event detected by existing message content');
+          return;
+        }
+
+        _processingFingerprints.add(fingerprint);
+        // Remove from processing set after a short delay (enough for the message to be inserted into _messages)
+        Future.delayed(const Duration(seconds: 5), () {
+          _processingFingerprints.remove(fingerprint);
+        });
+      }
+
       // Decrypt message if it's text
       if ((newMessage.isEncrypted == true || newMessage.messageType == 'text') && newMessage.text != null && newMessage.text!.isNotEmpty) {
         final senderId = newMessage.sender?.sId ?? newMessage.sender?.id;
@@ -615,24 +659,14 @@ class ChatProvider extends ChangeNotifier {
         return;
       }
 
-      // Update conversations list
-      final convIndex = _conversations.indexWhere((c) => c.sId == conversationId);
-      if (convIndex != -1) {
-        _conversations[convIndex].lastMessage = newMessage;
-        _conversations[convIndex].lastMessageAt = newMessage.createdAt;
-        if (conversationId != _activeConversationId) {
-          _conversations[convIndex].unreadCount = (_conversations[convIndex].unreadCount ?? 0) + 1;
-        }
-        _sortConversations();
-      } else {
-        fetchConversations(); // Fetch if new conversation started
-      }
-
       // Update current message list if it's the active conversation
       if (conversationId == _activeConversationId) {
         debugPrint('Updating active conversation messages list');
-        // Avoid duplicates if HTTP send also added it
-        if (!_messages.any((m) => m.sId == newMessage.sId)) {
+        
+        // Final deduplication before inserting into active list
+        bool alreadyExists = _messages.any((m) => m.sId == newMessage.sId);
+        
+        if (!alreadyExists) {
           _messages.insert(0, newMessage);
           debugPrint('Message inserted into list');
           
@@ -766,74 +800,90 @@ class ChatProvider extends ChangeNotifier {
 
   void _onMessageEdited(dynamic payload) async {
     try {
+      debugPrint('E2EE: Handling message_edited socket event: $payload');
       final messageId = payload['messageId'] ?? payload['_id'];
       final conversationId = payload['conversationId'];
-      final newText = payload['text'];
-      final isEncrypted = payload['isEncrypted'] == true;
+      final newText = payload['text'] ?? payload['message'] ?? payload['body'];
+      final isEncrypted = payload['isEncrypted'] == true || payload['isEncrypted'] == 'true';
       final iv = payload['iv'];
-      final senderId = payload['senderId'] ?? payload['sender']?['_id'] ?? payload['sender']?['id'];
+      
+      // Robust senderId detection
+      var senderId = payload['senderId'];
+      if (senderId == null && payload['sender'] != null) {
+        if (payload['sender'] is Map) {
+          senderId = payload['sender']['_id'] ?? payload['sender']['id'];
+        } else {
+          senderId = payload['sender'].toString();
+        }
+      }
 
       if (messageId == null) return;
 
-      // Find the message in local history first
+      // Find the message in local history
       final index = _messages.indexWhere((m) => m.sId == messageId);
       final existingMsg = index != -1 ? _messages[index] : null;
 
-      // IGNORE MY OWN EDITS: Server broadcasts it, but I already have plain text
-      // Check both the payload sender and the local message's sender
+      // IGNORE MY OWN EDITS for text overwrite, but update metadata
       final bool isMe = (senderId != null && senderId == HiveService.userId) || 
                        (existingMsg != null && (existingMsg.sender?.sId == HiveService.userId || existingMsg.sender?.id == HiveService.userId));
 
       if (isMe) {
-        debugPrint('E2EE: Ignoring broadcast of my own edit to avoid overwriting plain text');
-        // Still update encrypted metadata if provided, but KEEP current decrypted text
+        debugPrint('E2EE: Ignoring broadcast of my own edit text to preserve plain text');
         if (existingMsg != null) {
           existingMsg.isEncrypted = isEncrypted;
           existingMsg.iv = iv;
-          // DON'T change existingMsg.text as it's already plain text from editMessage()
-          notifyListeners();
+          existingMsg.isEdited = true;
         }
-        return;
+      } else {
+        if (existingMsg != null) {
+          existingMsg.text = newText;
+          existingMsg.isEncrypted = isEncrypted;
+          existingMsg.iv = iv;
+          existingMsg.isEdited = true;
+          existingMsg.isDecrypted = false;
+
+          // Find partnerId for decryption
+          final conv = _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel());
+          final partnerId = senderId ?? conv.partner?.sId ?? conv.partner?.id ?? _activePartnerId;
+
+          if (isEncrypted && newText != null && partnerId != null) {
+            await _decryptMessagesList([existingMsg], partnerId);
+          } else {
+            existingMsg.isDecrypted = true;
+          }
+        }
       }
 
-      // Find partnerId from conversation
-      final conv = _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel());
-      final partnerId = senderId ?? conv.partner?.sId ?? conv.partner?.id ?? _activePartnerId;
-
-      if (existingMsg != null) {
-        existingMsg.text = newText;
-        existingMsg.isEncrypted = isEncrypted;
-        existingMsg.iv = iv;
-        existingMsg.isEdited = true;
-        existingMsg.isDecrypted = false; // Reset to allow decryption
-
-        if (isEncrypted && newText != null && partnerId != null) {
-          await _decryptMessagesList([existingMsg], partnerId);
-        } else {
-          existingMsg.isDecrypted = true;
-        }
-
-        notifyListeners();
-      }
-
-      // Update in conversation list
+      // Update in conversation list preview (Inbox) - ALWAYS do this even if isMe
       final convIndex = _conversations.indexWhere((c) => c.sId == conversationId);
       if (convIndex != -1) {
         final lastMsg = _conversations[convIndex].lastMessage;
         if (lastMsg?.sId == messageId) {
-          lastMsg!.text = newText;
-          lastMsg.isEncrypted = isEncrypted;
-          lastMsg.iv = iv;
-          lastMsg.isDecrypted = false;
-          
-          if (isEncrypted && newText != null && partnerId != null) {
-            await _decryptMessagesList([lastMsg], partnerId);
+          if (!isMe) {
+            lastMsg!.text = newText;
+            lastMsg.isEncrypted = isEncrypted;
+            lastMsg.iv = iv;
+            lastMsg.isDecrypted = false;
+            
+            final partnerId = senderId ?? _conversations[convIndex].partner?.sId ?? _conversations[convIndex].partner?.id;
+            if (isEncrypted && newText != null && partnerId != null) {
+              await _decryptMessagesList([lastMsg], partnerId);
+            } else {
+              lastMsg.isDecrypted = true;
+            }
           } else {
-            lastMsg.isDecrypted = true;
+            // If it's me, ensure the last message in inbox matches the edited text
+            // existingMsg might have the plain text updated from editMessage()
+            if (existingMsg != null) {
+              lastMsg!.text = existingMsg.text;
+              lastMsg.isDecrypted = true;
+            }
           }
-          notifyListeners();
         }
+        _conversations[convIndex].lastMessageAt = DateTime.now().toIso8601String(); // Ensure it stays at top
       }
+      
+      notifyListeners();
     } catch (e) {
       debugPrint('Error handling message edited socket event: $e');
     }
@@ -1413,6 +1463,8 @@ class ChatProvider extends ChangeNotifier {
       String encryptedText = newText;
       String? iv;
       bool isEncrypted = false;
+      Map<String, dynamic>? encryptionMetadata;
+
       if (partnerId != null) {
         final secret = await _getSharedSecret(partnerId);
         if (secret != null) {
@@ -1420,18 +1472,50 @@ class ChatProvider extends ChangeNotifier {
           encryptedText = encryptionResult['text'] ?? newText;
           iv = encryptionResult['iv'];
           isEncrypted = encryptedText != newText;
+
+          if (isEncrypted && iv != null) {
+            final myPublicKeyJwk = HiveService.getPublicKey();
+            final myDeviceId = HiveService.getDeviceId() ?? 'unknown_device';
+            final myUserId = HiveService.userId ?? 'unknown_user';
+
+            encryptionMetadata = {
+              'version': 2,
+              'senderDeviceId': myDeviceId,
+              'senderKeyId': 'key_$myUserId',
+              'senderPublicKey': myPublicKeyJwk,
+              'recipientDeviceId': 'dev_${partnerId}_01',
+              'recipientKeyId': 'key_$partnerId',
+              'envelopes': [
+                {
+                  'userId': partnerId,
+                  'deviceId': 'dev_${partnerId}_01',
+                  'keyId': 'key_$partnerId',
+                  'senderDeviceId': myDeviceId,
+                  'senderKeyId': 'key_$myUserId',
+                  'senderPublicKey': myPublicKeyJwk,
+                  'ciphertext': encryptedText,
+                  'iv': iv,
+                }
+              ]
+            };
+          }
         }
       }
 
-      final myPublicKeyJwk = HiveService.getPublicKey();
-
-      await _chatRepository.editMessage(
+      final response = await _chatRepository.editMessage(
         messageId, 
         encryptedText, 
         isEncrypted: isEncrypted, 
         iv: iv,
-        senderPublicKey: myPublicKeyJwk,
+        encryption: encryptionMetadata,
       );
+
+      if (response['success'] == true) {
+        debugPrint('✅ Message edit API successful');
+      } else {
+        debugPrint('❌ Message edit API failed: ${response['message']}');
+        // Optional: Revert optimistic update here if needed
+      }
 
       // Final sync with metadata if needed, but text is already set
       if (index != -1) {

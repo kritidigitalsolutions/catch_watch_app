@@ -19,8 +19,7 @@ class CallOverlay extends StatelessWidget {
         Consumer<CallProvider>(
           builder: (context, provider, _) {
             final call = provider.currentCall;
-            final isVisible = (provider.status == CallStatus.active || 
-                               provider.status == CallStatus.ringing) && 
+            final isVisible = provider.status == CallStatus.active && 
                               !provider.isInCallScreen;
 
             if (!isVisible || call == null) return const SizedBox.shrink();

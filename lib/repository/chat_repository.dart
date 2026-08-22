@@ -92,12 +92,17 @@ class ChatRepository {
     }
   }
 
-  Future<dynamic> editMessage(String messageId, String text, {bool? isEncrypted, String? iv, dynamic senderPublicKey}) async {
+  Future<dynamic> editMessage(String messageId, String text, {bool? isEncrypted, String? iv, Map<String, dynamic>? encryption}) async {
     try {
-      final Map<String, dynamic> data = {'text': text};
-      if (isEncrypted != null) data['isEncrypted'] = isEncrypted;
-      if (iv != null) data['iv'] = iv;
-      if (senderPublicKey != null) data['senderPublicKey'] = senderPublicKey;
+      final Map<String, dynamic> data = {
+        'text': text,
+        'isEncrypted': isEncrypted ?? false,
+        'iv': iv ?? '',
+      };
+      if (isEncrypted == true) {
+        data['ciphertext'] = text;
+      }
+      if (encryption != null) data['encryption'] = encryption;
       
       dynamic response = await _apiService.putApi(
         AppUrl.editMessage(messageId),

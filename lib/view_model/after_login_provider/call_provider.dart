@@ -1,69 +1,144 @@
 import 'dart:async';
+
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
-import 'package:catch_watch/data/network/socket_service.dart';
 import 'package:catch_watch/data/network/notification_service.dart';
+import 'package:catch_watch/data/network/socket_service.dart';
 import 'package:catch_watch/models/call_model.dart';
 import 'package:catch_watch/repository/call_repository.dart';
 import 'package:catch_watch/utils/agora_config.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/views/after_login_pages/message/active_call_screen.dart';
-import 'package:catch_watch/views/after_login_pages/message/incoming_call_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:vibration/vibration.dart';
-import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
+import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
+import 'package:flutter_callkit_incoming/entities/ios_params.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:uuid/uuid.dart';
+import 'package:vibration/vibration.dart';
 
-enum CallStatus { idle, ringing, active, ended }
+enum CallStatus {
+  idle,
+  ringing,
+  active,
+  ended,
+}
 
 class CallProvider extends ChangeNotifier {
-  final CallRepository _callRepository = CallRepository();
-  final SocketService _socketService = SocketService();
+  final CallRepository _callRepository =
+  CallRepository();
+
+  final SocketService _socketService =
+  SocketService();
 
   RtcEngine? _engine;
+
   CallModel? _currentCall;
-  CallStatus _status = CallStatus.idle;
+
+  CallStatus _status =
+      CallStatus.idle;
+
   bool _isMuted = false;
   bool _isVideoOff = false;
   bool _isSpeakerOn = true;
+
   int? _remoteUid;
+
   bool _isAccepting = false;
+  bool _isEnding = false;
+  bool _isRejecting = false;
+
   bool _isInCallScreen = false;
+
   bool _isCaller = false;
 
   List<CallModel> _callHistory = [];
+
   bool _isHistoryLoading = false;
+
   int _historyPage = 1;
+
   bool _hasMoreHistory = true;
 
-  // Timer fields
-  Timer? _callTimer;
-  int _durationSeconds = 0;
-  
-  // Navigation key to show call screens
-  final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  // ============================================================
+  // TIMERS
+  // ============================================================
 
-  RtcEngine? get engine => _engine;
-  CallModel? get currentCall => _currentCall;
-  CallStatus get status => _status;
-  bool get isMuted => _isMuted;
-  bool get isVideoOff => _isVideoOff;
-  bool get isSpeakerOn => _isSpeakerOn;
-  int? get remoteUid => _remoteUid;
-  bool get isAccepting => _isAccepting;
-  bool get isInCallScreen => _isInCallScreen;
-  bool get isCaller => _isCaller;
-  int get durationSeconds => _durationSeconds;
+  static const Duration ringingDuration =
+  Duration(seconds: 30);
+
+  Timer? _callTimer;
+
+  Timer? _ringingTimer;
+
+  int _durationSeconds = 0;
+
+  // ============================================================
+  // NAVIGATOR
+  // ============================================================
+
+  final GlobalKey<NavigatorState>
+  navigatorKey =
+  GlobalKey<NavigatorState>();
+
+  // ============================================================
+  // GETTERS
+  // ============================================================
+
+  RtcEngine? get engine =>
+      _engine;
+
+  CallModel? get currentCall =>
+      _currentCall;
+
+  CallStatus get status =>
+      _status;
+
+  bool get isMuted =>
+      _isMuted;
+
+  bool get isVideoOff =>
+      _isVideoOff;
+
+  bool get isSpeakerOn =>
+      _isSpeakerOn;
+
+  int? get remoteUid =>
+      _remoteUid;
+
+  bool get isAccepting =>
+      _isAccepting;
+
+  bool get isInCallScreen =>
+      _isInCallScreen;
+
+  bool get isCaller =>
+      _isCaller;
+
+  int get durationSeconds =>
+      _durationSeconds;
+
+  List<CallModel> get callHistory =>
+      _callHistory;
+
+  bool get isHistoryLoading =>
+      _isHistoryLoading;
 
   String get formattedDuration {
-    final minutes = (_durationSeconds ~/ 60).toString().padLeft(2, '0');
-    final seconds = (_durationSeconds % 60).toString().padLeft(2, '0');
-    return "$minutes:$seconds";
+    final int minutes =
+    (_durationSeconds ~/ 60);
+
+    final int seconds =
+    (_durationSeconds % 60);
+
+    return '${minutes.toString().padLeft(2, '0')}:'
+        '${seconds.toString().padLeft(2, '0')}';
   }
 
-  List<CallModel> get callHistory => _callHistory;
-  bool get isHistoryLoading => _isHistoryLoading;
+  // ============================================================
+  // CONSTRUCTOR
+  // ============================================================
 
   CallProvider() {
     _initSocketListeners();
@@ -71,486 +146,1588 @@ class CallProvider extends ChangeNotifier {
     _initCallKitListener();
   }
 
+  // ============================================================
+  // CALL TIMER
+  // ============================================================
+
   void _startTimer() {
     _durationSeconds = 0;
+
     _callTimer?.cancel();
-    _callTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      _durationSeconds++;
-      notifyListeners();
-    });
+
+    _callTimer =
+        Timer.periodic(
+          const Duration(seconds: 1),
+              (timer) {
+            _durationSeconds++;
+
+            notifyListeners();
+          },
+        );
   }
 
   void _stopTimer() {
     _callTimer?.cancel();
+
     _callTimer = null;
-    // We keep _durationSeconds for a moment so UI can show final time
   }
 
-  void setInCallScreen(bool value) {
+  // ============================================================
+  // RINGING TIMER
+  // ============================================================
+
+  void _startRingingTimer() {
+    _ringingTimer?.cancel();
+
+    _ringingTimer =
+        Timer(
+          ringingDuration,
+              () async {
+            debugPrint(
+              '⏳ Incoming call timeout',
+            );
+
+            if (_status ==
+                CallStatus.ringing) {
+              if (_isCaller) {
+                await endCall();
+              } else {
+                await rejectCall();
+              }
+            }
+          },
+        );
+  }
+
+  void _stopRingingTimer() {
+    _ringingTimer?.cancel();
+
+    _ringingTimer = null;
+  }
+
+  // ============================================================
+  // CALL SCREEN STATE
+  // ============================================================
+
+  void setInCallScreen(
+      bool value,
+      ) {
     _isInCallScreen = value;
+
     notifyListeners();
   }
 
+  // ============================================================
+  // UUID
+  // ============================================================
+
+  String _getUuidFromCallId(
+      String callId,
+      ) {
+    return const Uuid().v5(
+      Uuid.NAMESPACE_URL,
+      callId,
+    );
+  }
+
+  // ============================================================
+  // CALLKIT EVENTS
+  // ============================================================
+
   void _initCallKitListener() {
-    FlutterCallkitIncoming.onEvent.listen((event) {
-      if (event == null) return;
-      debugPrint("CallKit Event: ${event.eventName}");
-      
-      if (event is CallEventActionCallAccept) {
-        acceptCall();
-      } else if (event is CallEventActionCallDecline) {
-        rejectCall();
-      } else if (event is CallEventActionCallEnded) {
-        endCall();
+    FlutterCallkitIncoming
+        .onEvent
+        .listen(
+          (event) async {
+        if (event == null) {
+          return;
+        }
+
+        debugPrint(
+          '📞 CallKit Event: '
+              '${event.eventName}',
+        );
+
+        // debugPrint(
+        //   'CallKit body: ${event.body}',
+        // );
+
+        // ------------------------------------------------------
+        // ACCEPT
+        // ------------------------------------------------------
+
+        if (event
+        is CallEventActionCallAccept) {
+          await _handleCallKitAccept(
+            event,
+          );
+
+          return;
+        }
+
+        // ------------------------------------------------------
+        // DECLINE
+        // ------------------------------------------------------
+
+        if (event
+        is CallEventActionCallDecline) {
+          await _handleCallKitDecline(
+            event,
+          );
+
+          return;
+        }
+
+        // ------------------------------------------------------
+        // END
+        // ------------------------------------------------------
+
+        if (event
+        is CallEventActionCallEnded) {
+          debugPrint(
+            '📞 CallKit ended call',
+          );
+
+          if (_status !=
+              CallStatus.idle) {
+            await endCall();
+          }
+
+          return;
+        }
+
+        // ------------------------------------------------------
+        // TIMEOUT
+        // ------------------------------------------------------
+
+        if (event
+        is CallEventActionCallTimeout) {
+          debugPrint(
+            '⏰ CallKit timeout',
+          );
+
+          if (_status ==
+              CallStatus.ringing) {
+            await rejectCall();
+          }
+
+          return;
+        }
+      },
+    );
+  }
+
+  // ============================================================
+  // CALLKIT ACCEPT
+  // ============================================================
+
+  Future<void> _handleCallKitAccept(
+      CallEventActionCallAccept event,
+      ) async {
+    try {
+      final String? callId =
+      _extractCallIdFromCallKitEvent(
+        event,
+      );
+
+      debugPrint(
+        '📞 CallKit ACCEPT',
+      );
+
+      debugPrint(
+        'Call ID: $callId',
+      );
+
+      // --------------------------------------------------------
+      // If current call is already loaded, use it.
+      // --------------------------------------------------------
+
+      if (_currentCall != null &&
+          _currentCall!.sId != null) {
+        await acceptCall();
+
+        return;
       }
-    });
+
+      // --------------------------------------------------------
+      // Otherwise fetch call details.
+      // This is important when the app was terminated.
+      // --------------------------------------------------------
+
+      if (callId == null) {
+        debugPrint(
+          '❌ CallKit accept: no call ID',
+        );
+
+        return;
+      }
+
+      debugPrint(
+        '📥 Fetching call details for '
+            '$callId',
+      );
+
+      final CallModel call =
+      await _callRepository
+          .getCallDetails(
+        callId,
+      );
+
+      call.sId ??= callId;
+
+      _currentCall = call;
+
+      _isCaller = false;
+
+      _status =
+          CallStatus.ringing;
+
+      notifyListeners();
+
+      await acceptCall();
+    } catch (e, stackTrace) {
+      debugPrint(
+        '❌ CallKit accept error: $e',
+      );
+
+      debugPrint(
+        '$stackTrace',
+      );
+    }
   }
 
-  void _startRinging() {
-    FlutterRingtonePlayer().playRingtone();
-    Vibration.vibrate(pattern: [500, 1000, 500, 1000], repeat: 0);
+  // ============================================================
+  // CALLKIT DECLINE
+  // ============================================================
+
+  Future<void> _handleCallKitDecline(
+      CallEventActionCallDecline event,
+      ) async {
+    try {
+      debugPrint(
+        '📞 CallKit DECLINE',
+      );
+
+      final String? callId =
+      _extractCallIdFromCallKitEvent(
+        event,
+      );
+
+      if (_currentCall == null &&
+          callId != null) {
+        try {
+          final CallModel call =
+          await _callRepository
+              .getCallDetails(
+            callId,
+          );
+
+          call.sId ??= callId;
+
+          _currentCall = call;
+        } catch (e) {
+          debugPrint(
+            'Could not fetch call details '
+                'for decline: $e',
+          );
+        }
+      }
+
+      await rejectCall();
+    } catch (e, stackTrace) {
+      debugPrint(
+        '❌ CallKit decline error: $e',
+      );
+
+      debugPrint(
+        '$stackTrace',
+      );
+    }
   }
 
-  void _stopRinging() {
-    FlutterRingtonePlayer().stop();
-    Vibration.cancel();
+  // ============================================================
+  // EXTRACT CALL ID FROM CALLKIT EVENT
+  // ============================================================
+
+  String? _extractCallIdFromCallKitEvent(
+      dynamic event,
+      ) {
+    try {
+      final dynamic body =
+          event.body;
+
+      if (body is Map) {
+        final dynamic extra =
+        body['extra'];
+
+        if (extra is Map) {
+          final dynamic callId =
+          extra['callId'];
+
+          if (callId != null) {
+            return callId.toString();
+          }
+        }
+
+        final dynamic callId =
+            body['callId'] ??
+                body['id'];
+
+        if (callId != null) {
+          return callId.toString();
+        }
+      }
+
+      // Some versions expose UUID as body['id'].
+      //
+      // We intentionally do NOT convert the UUID back to
+      // callId because UUID -> callId is not reversible.
+      //
+      // Therefore, your CallKit extra.callId is important.
+
+      return null;
+    } catch (e) {
+      debugPrint(
+        '❌ Error extracting CallKit call ID: $e',
+      );
+
+      return null;
+    }
   }
+
+  // ============================================================
+  // FOREGROUND FCM LISTENER
+  // ============================================================
 
   void _initNotificationListener() {
-    NotificationService.foregroundMessageStream.listen((message) {
-      debugPrint("CallProvider: FCM message received: ${message.data}");
-      final type = message.data['type'];
-      if (type == 'CALL' || type == 'INCOMING_CALL' || message.data['callId'] != null) {
-        _handleIncomingCall(message.data);
-      }
-    });
+    NotificationService
+        .foregroundMessageStream
+        .listen(
+          (message) {
+        debugPrint(
+          'CallProvider FCM: '
+              '${message.data}',
+        );
+
+        final String type =
+            message.data['type']
+                ?.toString()
+                .toUpperCase() ??
+                '';
+
+        // ------------------------------------------------------
+        // IMPORTANT:
+        //
+        // Incoming calls are already displayed by CallKit.
+        //
+        // Do NOT call _handleIncomingCall() here.
+        // ------------------------------------------------------
+
+        if (type == 'CALL' ||
+            type == 'INCOMING_CALL') {
+          debugPrint(
+            '📞 Incoming call already handled '
+                'by CallKit',
+          );
+
+          return;
+        }
+
+        // ------------------------------------------------------
+        // CALL TERMINATION FROM FCM
+        // ------------------------------------------------------
+
+        if (type == 'CALL_CANCELLED' ||
+            type == 'CALL_ENDED' ||
+            type == 'CALL_REJECTED' ||
+            type == 'CALL_BUSY' ||
+            type == 'CANCEL' ||
+            type == 'REJECTED' ||
+            type == 'ENDED' ||
+            type == 'BUSY') {
+          debugPrint(
+            '📴 Call termination received via FCM: $type',
+          );
+
+          _handleCallEnd(
+            message.data,
+          );
+
+          return;
+        }
+
+        // Other FCM messages can continue here.
+      },
+    );
   }
+
+  // ============================================================
+  // SOCKET LISTENERS
+  // ============================================================
 
   void _initSocketListeners() {
-    _socketService.messageStream.listen((eventData) {
-      final event = eventData['event'];
-      final data = eventData['data'];
+    _socketService.messageStream.listen(
+          (eventData) {
+        final dynamic event =
+        eventData['event'];
 
-      debugPrint("Call Socket Event: $event");
-      debugPrint("Call Socket Data: $data");
+        final dynamic data =
+        eventData['data'];
 
-      switch (event) {
-        case 'incoming_call':
-          _handleIncomingCall(data);
-          break;
-        case 'call_accepted':
-          _handleCallAccepted(data);
-          break;
-        case 'call_rejected':
-        case 'call_ended':
-        case 'call_cancelled':
-        case 'call_busy':
-        case 'call_missed':
-          _handleCallEnd(data);
-          break;
-      }
-    });
+        debugPrint(
+          'Call Socket Event: $event',
+        );
+
+        debugPrint(
+          'Call Socket Data: $data',
+        );
+
+        switch (event) {
+          case 'incoming_call':
+            _handleIncomingCall(
+              data,
+            );
+            break;
+
+          case 'call_accepted':
+            _handleCallAccepted(
+              data,
+            );
+            break;
+
+          case 'call_rejected':
+          case 'call_ended':
+          case 'call_cancelled':
+          case 'call_busy':
+          case 'call_missed':
+            _handleCallEnd(
+              data,
+            );
+            break;
+        }
+      },
+    );
   }
 
-  String? _extractCallId(dynamic data) {
-    if (data == null) return null;
-    if (data is String) return data;
-    if (data is Map) {
-      return (data['_id'] ?? data['id'] ?? data['callId'])?.toString();
+  // ============================================================
+  // EXTRACT CALL ID
+  // ============================================================
+
+  String? _extractCallId(
+      dynamic data,
+      ) {
+    if (data == null) {
+      return null;
     }
+
+    if (data is String) {
+      return data;
+    }
+
+    if (data is Map) {
+      return (
+          data['_id'] ??
+              data['id'] ??
+              data['callId']
+      )?.toString();
+    }
+
     return null;
   }
 
-  Future<void> _handleIncomingCall(dynamic data) async {
-    debugPrint("Handling incoming call payload: $data");
-    
-    final incomingCallId = _extractCallId(data);
+  // ============================================================
+  // SOCKET INCOMING CALL
+  // ============================================================
+
+  Future<void> _handleIncomingCall(
+      dynamic data,
+      ) async {
+    debugPrint(
+      '📞 SOCKET incoming call: $data',
+    );
+
+    final String? incomingCallId =
+    _extractCallId(data);
+
     if (incomingCallId == null) {
-      debugPrint("Error: Could not extract call ID from incoming call data");
+      debugPrint(
+        '❌ Could not extract call ID',
+      );
+
       return;
     }
 
-    // AVOID DUPLICATE EVENTS: If we already have this call active/ringing, ignore the duplicate event
-    debugPrint("Duplicate Check: Current ID: ${_currentCall?.sId}, Incoming ID: $incomingCallId");
-    if (_currentCall?.sId == incomingCallId) {
-      debugPrint("Ignoring duplicate incoming call event for $incomingCallId");
+    // ----------------------------------------------------------
+    // DUPLICATE
+    // ----------------------------------------------------------
+
+    if (_currentCall?.sId ==
+        incomingCallId) {
+      debugPrint(
+        '⚠️ Duplicate incoming call ignored',
+      );
+
       return;
     }
 
-    if (_status != CallStatus.idle) {
-      debugPrint("User is already in another call (Status: $_status), marking incoming call $incomingCallId as busy");
-      await _callRepository.busyCall(incomingCallId);
+    // ----------------------------------------------------------
+    // BUSY
+    // ----------------------------------------------------------
+
+    if (_status !=
+        CallStatus.idle) {
+      debugPrint(
+        '📵 Already in another call',
+      );
+
+      await _callRepository
+          .busyCall(
+        incomingCallId,
+      );
+
       return;
     }
 
     _isCaller = false;
+
+    // ----------------------------------------------------------
+    // CREATE CURRENT CALL
+    // ----------------------------------------------------------
+
     if (data is Map) {
-      _currentCall = CallModel.fromJson(Map<String, dynamic>.from(data));
-      // Ensure sId is set if it was missing in Map but we extracted it via _extractCallId
-      _currentCall!.sId ??= incomingCallId;
+      _currentCall =
+          CallModel.fromJson(
+            Map<String, dynamic>.from(
+              data,
+            ),
+          );
+
+      _currentCall!.sId ??=
+          incomingCallId;
     } else {
-      debugPrint("Incoming call data is not a Map, attempting to fetch details for $incomingCallId");
       try {
-        _currentCall = await _callRepository.getCallDetails(incomingCallId);
-        _currentCall!.sId ??= incomingCallId;
+        _currentCall =
+        await _callRepository
+            .getCallDetails(
+          incomingCallId,
+        );
+
+        _currentCall!.sId ??=
+            incomingCallId;
       } catch (e) {
-        debugPrint("Error fetching incoming call details: $e");
+        debugPrint(
+          '❌ Error getting call details: $e',
+        );
+
         return;
       }
     }
 
-    debugPrint("Current call set with ID: ${_currentCall?.sId}");
-    _status = CallStatus.ringing;
-    _startRinging();
+    _status =
+        CallStatus.ringing;
+
+    _startRingingTimer();
+
     notifyListeners();
-    
-    debugPrint("Showing IncomingCallScreen");
-    _isInCallScreen = true;
-    // Show IncomingCallScreen
-    navigatorKey.currentState?.push(
-      MaterialPageRoute(
-        settings: const RouteSettings(name: '/call'),
-        builder: (context) => const IncomingCallScreen(),
-      ),
+
+    // Trigger Incoming UI in foreground
+    _showActiveCallScreen();
+
+    debugPrint(
+      '✅ Socket incoming call prepared',
     );
   }
 
-  void _handleCallAccepted(dynamic data) {
-    final acceptedCallId = _extractCallId(data);
-    debugPrint("Call accepted event received for ID: $acceptedCallId");
-    
-    if (_currentCall?.sId == acceptedCallId || acceptedCallId != null) {
-      _status = CallStatus.active;
+  // ============================================================
+  // CALL ACCEPTED FROM SOCKET
+  // ============================================================
+
+  void _handleCallAccepted(
+      dynamic data,
+      ) {
+    final String? acceptedCallId =
+    _extractCallId(data);
+
+    debugPrint(
+      '📞 Call accepted: '
+          '$acceptedCallId',
+    );
+
+    if (_currentCall?.sId ==
+        acceptedCallId ||
+        acceptedCallId != null) {
+      _status =
+          CallStatus.active;
+
+      if (acceptedCallId != null) {
+        FlutterCallkitIncoming
+            .setCallConnected(
+          _getUuidFromCallId(
+            acceptedCallId,
+          ),
+        );
+      }
+
       _stopRinging();
+      _stopRingingTimer();
+
       _startTimer();
+
       _joinChannel();
+
       notifyListeners();
     }
   }
 
-  void _handleCallEnd(dynamic data) {
-    final endedCallId = _extractCallId(data);
-    debugPrint("Call ended/rejected event received for ID: $endedCallId. Current call ID: ${_currentCall?.sId}");
+  // ============================================================
+  // CALL END SOCKET
+  // ============================================================
 
-    // If ID matches, or if we are in a call and receive an end event without specific ID (broadcast)
-    if (_currentCall?.sId == endedCallId || (_currentCall != null && endedCallId == null)) {
-      debugPrint("Ending call locally and popping screens");
+  void _handleCallEnd(
+      dynamic data,
+      ) {
+    final String? endedCallId =
+    _extractCallId(data);
+
+    debugPrint(
+      '📴 Call ended/rejected: '
+          '$endedCallId',
+    );
+
+    // If we have an active call and receive a termination signal, 
+    // end it even if the ID is missing in the payload (safety fallback)
+    if (_currentCall?.sId == endedCallId || 
+        (_currentCall != null && (endedCallId == null || endedCallId.isEmpty))) {
+      debugPrint(
+        '📴 Ending call locally: '
+            '${_currentCall?.sId}',
+      );
+
+      if (endedCallId != null) {
+        FlutterCallkitIncoming
+            .endCall(
+          _getUuidFromCallId(
+            endedCallId,
+          ),
+        );
+      } else if (_currentCall?.sId !=
+          null) {
+        FlutterCallkitIncoming
+            .endCall(
+          _getUuidFromCallId(
+            _currentCall!.sId!,
+          ),
+        );
+      }
+
+      FlutterCallkitIncoming
+          .endAllCalls();
+
       _stopRinging();
+
+      _stopRingingTimer();
+
       _stopTimer();
+
       _endCallLocally();
-      // Pop call screens if any are currently pushed
-      navigatorKey.currentState?.popUntil((route) => route.settings.name != '/call');
-      _isInCallScreen = false;
+
+      if (_isInCallScreen) {
+        navigatorKey.currentState
+            ?.popUntil(
+              (route) =>
+          route.settings.name !=
+              '/call',
+        );
+
+        _isInCallScreen = false;
+      }
+
       notifyListeners();
     }
   }
+
+  // ============================================================
+  // END LOCALLY
+  // ============================================================
 
   void _endCallLocally() {
-    _status = CallStatus.ended;
-    notifyListeners();
-    
-    Future.delayed(const Duration(seconds: 2), () {
-      // Only clear if the status is still 'ended' (meaning no new call started)
-      if (_status == CallStatus.ended) {
-        _status = CallStatus.idle;
-        _currentCall = null;
-        _remoteUid = null;
-        _durationSeconds = 0;
-        _disposeEngine();
-        notifyListeners();
-      }
-    });
-  }
+    _status =
+        CallStatus.ended;
 
-  Future<void> startCall(String receiverId, String type, {String? partnerName, String? partnerImage}) async {
-    try {
-      debugPrint("Starting $type call to $receiverId");
-      _isCaller = true;
-      _status = CallStatus.ringing;
-      notifyListeners();
-
-      final call = await _callRepository.startCall(receiverId, type);
-      _currentCall = call;
-      
-      // Enrich receiver data if metadata was provided
-      if (_currentCall?.receiver != null && partnerName != null) {
-        _currentCall!.receiver!.name = partnerName;
-        _currentCall!.receiver!.profileImage = partnerImage;
-      }
-      
-      debugPrint("Call started successfully: ${_currentCall?.sId}");
-      
-      _isInCallScreen = true;
-      // Show ActiveCallScreen (as "Calling...") immediately
-      navigatorKey.currentState?.push(
-        MaterialPageRoute(
-          settings: const RouteSettings(name: '/call'),
-          builder: (context) => const ActiveCallScreen(),
-        ),
-      );
-
-      // Initialize engine in background
-      _initEngine().then((_) {
-        debugPrint("Agora engine initialized for caller");
-      }).catchError((e) {
-        debugPrint("Error initializing Agora engine: $e");
-      });
-      
-      notifyListeners();
-    } catch (e) {
-      _status = CallStatus.idle;
-      notifyListeners();
-      debugPrint("Error starting call: $e");
-      _showError(e.toString());
-    }
-  }
-
-  Future<void> fetchHistory({bool isRefresh = false}) async {
-    if (isRefresh) {
-      _historyPage = 1;
-      _hasMoreHistory = true;
-      _callHistory = [];
-    }
-
-    if (!_hasMoreHistory || _isHistoryLoading) return;
-
-    _isHistoryLoading = true;
     notifyListeners();
 
-    try {
-      final response = await _callRepository.fetchCallHistory(page: _historyPage);
-      if (response['success'] == true) {
-        final List<dynamic> callsData = response['calls'];
-        final newCalls = callsData.map((e) => CallModel.fromJson(e)).toList();
-        
-        if (newCalls.isEmpty) {
-          _hasMoreHistory = false;
-        } else {
-          _callHistory.addAll(newCalls);
-          
-          // Ensure uniqueness and sort by createdAt descending
-          final Map<String, CallModel> callMap = {};
-          for (var call in _callHistory) {
-            if (call.sId != null) {
-              callMap[call.sId!] = call;
-            }
-          }
-          _callHistory = callMap.values.toList();
-          
-          _callHistory.sort((a, b) {
-            final aTime = DateTime.tryParse(a.createdAt ?? '') ?? DateTime(0);
-            final bTime = DateTime.tryParse(b.createdAt ?? '') ?? DateTime(0);
-            return bTime.compareTo(aTime);
-          });
-          
-          _historyPage++;
+    Future.delayed(
+      const Duration(seconds: 2),
+          () {
+        if (_status ==
+            CallStatus.ended) {
+          _status =
+              CallStatus.idle;
+
+          _currentCall = null;
+
+          _remoteUid = null;
+
+          _durationSeconds = 0;
+
+          _disposeEngine();
+
+          notifyListeners();
         }
-      }
-    } catch (e) {
-      debugPrint("Error fetching call history: $e");
-    } finally {
-      _isHistoryLoading = false;
-      notifyListeners();
-    }
+      },
+    );
   }
 
-  void _showError(String message) {
-    final context = navigatorKey.currentContext;
-    if (context != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
+  // ============================================================
+  // START CALL
+  // ============================================================
+
+  Future<void> startCall(
+      String receiverId,
+      String type, {
+        String? partnerName,
+        String? partnerImage,
+      }) async {
+    try {
+      debugPrint(
+        '📞 Starting $type call '
+            'to $receiverId',
+      );
+
+      _isCaller = true;
+
+      _status =
+          CallStatus.ringing;
+
+      notifyListeners();
+
+      final CallModel call =
+      await _callRepository.startCall(
+        receiverId,
+        type,
+      );
+
+      _currentCall = call;
+
+      if (_currentCall?.receiver !=
+          null &&
+          partnerName != null) {
+        _currentCall!.receiver!.name =
+            partnerName;
+
+        _currentCall!.receiver!
+            .profileImage =
+            partnerImage;
+      }
+
+      debugPrint(
+        '📞 Call started: '
+            '${_currentCall?.sId}',
+      );
+
+      // --------------------------------------------------------
+      // OUTGOING CALLKIT
+      // --------------------------------------------------------
+
+      if (_currentCall?.sId != null) {
+        final CallKitParams params =
+        CallKitParams(
+          id: _getUuidFromCallId(
+            _currentCall!.sId!,
+          ),
+          nameCaller:
+          partnerName ??
+              'Calling...',
+          handle: 'Outgoing call',
+          type: type == 'video'
+              ? 1
+              : 0,
+
+          extra: <String, dynamic>{
+            'callId':
+            _currentCall!.sId,
+          },
+
+          duration:
+          ringingDuration
+              .inMilliseconds,
+
+          android:
+          const AndroidParams(
+            isCustomNotification:
+            false,
+            isImportant: true,
+            isFullScreen: false,
+          ),
+
+          ios: const IOSParams(
+            handleType: 'generic',
+            supportsVideo: true,
+          ),
+        );
+
+        await FlutterCallkitIncoming
+            .startCall(
+          params,
+        );
+      }
+
+      _isInCallScreen = true;
+
+      _startRingingTimer();
+
+      // --------------------------------------------------------
+      // OUTGOING SCREEN
+      // --------------------------------------------------------
+
+      navigatorKey.currentState
+          ?.push(
+        MaterialPageRoute(
+          settings:
+          const RouteSettings(
+            name: '/call',
+          ),
+          builder: (context) =>
+          const ActiveCallScreen(),
         ),
+      );
+
+      // --------------------------------------------------------
+      // AGORA
+      // --------------------------------------------------------
+
+      _initEngine()
+          .then(
+            (_) {
+          debugPrint(
+            '✅ Agora initialized',
+          );
+        },
+      )
+          .catchError(
+            (e) {
+          debugPrint(
+            '❌ Agora init error: $e',
+          );
+        },
+      );
+
+      notifyListeners();
+    } catch (e) {
+      _status =
+          CallStatus.idle;
+
+      notifyListeners();
+
+      debugPrint(
+        '❌ Start call error: $e',
+      );
+
+      _showError(
+        e.toString(),
       );
     }
   }
+
+  // ============================================================
+  // ACCEPT CALL
+  // ============================================================
 
   Future<void> acceptCall() async {
-    if (_currentCall == null || _isAccepting) {
-      debugPrint("AcceptCall aborted: _currentCall is ${_currentCall == null ? 'NULL' : 'NOT NULL'}, _isAccepting is $_isAccepting");
+    if (_isAccepting) {
       return;
     }
-    
-    final String? callId = _currentCall!.sId;
-    if (callId == null) {
-      debugPrint("Error: Current call has no ID. Data: ${_currentCall!.toJson()}");
-      _showError("Cannot accept call: Missing ID");
+
+    if (_currentCall == null) {
+      debugPrint(
+        '❌ Accept aborted: current call is null',
+      );
+
+      return;
+    }
+
+    final String? callId =
+        _currentCall!.sId;
+
+    if (callId == null ||
+        callId.isEmpty) {
+      debugPrint(
+        '❌ Accept aborted: missing call ID',
+      );
+
       return;
     }
 
     try {
       _isAccepting = true;
+
       notifyListeners();
 
-      debugPrint("Accepting call via API: $callId");
-      final updatedCall = await _callRepository.acceptCall(callId);
-      
-      // Merge updated call data but preserve sId if missing
-      _currentCall = updatedCall;
-      _currentCall!.sId ??= callId;
-      
-      _status = CallStatus.active;
+      debugPrint(
+        '📞 Accepting call: $callId',
+      );
+
+      // --------------------------------------------------------
+      // ACCEPT API
+      // --------------------------------------------------------
+
+      final CallModel updatedCall =
+      await _callRepository
+          .acceptCall(
+        callId,
+      );
+
+      _currentCall =
+          updatedCall;
+
+      _currentCall!.sId ??=
+          callId;
+
+      _status =
+          CallStatus.active;
+
       _stopRinging();
-      _startTimer();
-      
-      debugPrint("Initializing Agora engine for receiver...");
-      await _initEngine();
-      
-      debugPrint("Joining channel: ${_currentCall!.channelName} with token: ${_currentCall!.agoraToken}");
-      await _joinChannel();
-      
-      _isAccepting = false;
-      notifyListeners();
 
-      // Replace IncomingCallScreen with ActiveCallScreen
-      navigatorKey.currentState?.pushReplacement(
-        MaterialPageRoute(
-          settings: const RouteSettings(name: '/call'),
-          builder: (context) => const ActiveCallScreen(),
+      _stopRingingTimer();
+
+      // --------------------------------------------------------
+      // CALLKIT CONNECTED
+      // --------------------------------------------------------
+
+      await FlutterCallkitIncoming
+          .setCallConnected(
+        _getUuidFromCallId(
+          callId,
         ),
       );
-    } catch (e) {
+
+      // --------------------------------------------------------
+      // AGORA
+      // --------------------------------------------------------
+
+      debugPrint(
+        '🎧 Initializing Agora',
+      );
+
+      await _initEngine();
+
+      debugPrint(
+        '🎧 Joining channel: '
+            '${_currentCall!.channelName}',
+      );
+
+      await _joinChannel();
+
+      _startTimer();
+
       _isAccepting = false;
+
       notifyListeners();
-      debugPrint("Error accepting call: $e");
-      _showError("Failed to accept call: $e");
+
+      // --------------------------------------------------------
+      // SHOW ACTIVE SCREEN
+      // --------------------------------------------------------
+
+      _showActiveCallScreen();
+    } catch (e, stackTrace) {
+      _isAccepting = false;
+
+      notifyListeners();
+
+      debugPrint(
+        '❌ Accept call error: $e',
+      );
+
+      debugPrint(
+        '$stackTrace',
+      );
+
+      _showError(
+        'Failed to accept call: $e',
+      );
+
+      try {
+        await FlutterCallkitIncoming
+            .endCall(
+          _getUuidFromCallId(
+            callId,
+          ),
+        );
+      } catch (_) {}
     }
   }
+
+  // ============================================================
+  // SHOW ACTIVE CALL SCREEN
+  // ============================================================
+
+  void _showActiveCallScreen() {
+    final NavigatorState? navigator =
+        navigatorKey.currentState;
+
+    if (navigator == null) {
+      debugPrint(
+        '⚠️ Navigator not available',
+      );
+
+      return;
+    }
+
+    _isInCallScreen = true;
+
+    // Avoid pushing duplicate call screens.
+    bool alreadyOnCallScreen =
+    false;
+
+    navigator.popUntil(
+          (route) {
+        if (route.settings.name ==
+            '/call') {
+          alreadyOnCallScreen = true;
+        }
+
+        return true;
+      },
+    );
+
+    if (alreadyOnCallScreen) {
+      return;
+    }
+
+    navigator.push(
+      MaterialPageRoute(
+        settings:
+        const RouteSettings(
+          name: '/call',
+        ),
+        builder: (context) =>
+        const ActiveCallScreen(),
+      ),
+    );
+  }
+
+  // ============================================================
+  // REJECT CALL
+  // ============================================================
 
   Future<void> rejectCall() async {
-    final callId = _currentCall?.sId;
-    debugPrint("Rejecting call: $callId");
+    if (_isRejecting) return;
     
-    _stopRinging();
-    if (callId == null) {
-      debugPrint("Error: No active call to reject");
-      _endCallLocally();
-      navigatorKey.currentState?.popUntil((route) => route.settings.name != '/call');
-      return;
-    }
+    final String? callId =
+        _currentCall?.sId;
+
+    debugPrint(
+      '📵 Rejecting call: $callId',
+    );
 
     try {
+      _isRejecting = true;
+      notifyListeners();
+
+      _stopRinging();
+      _stopRingingTimer();
+
+      if (callId == null || callId.isEmpty) {
+        debugPrint('⚠️ No call ID while rejecting');
+        FlutterCallkitIncoming.endAllCalls();
+        _endCallLocally();
+        _removeCallScreen();
+        return;
+      }
+
+      // --------------------------------------------------------
+      // STOP CALLKIT
+      // --------------------------------------------------------
+      await FlutterCallkitIncoming.endCall(
+        _getUuidFromCallId(callId),
+      );
+
+      // --------------------------------------------------------
+      // REJECT API
+      // --------------------------------------------------------
       await _callRepository.rejectCall(callId);
+
       _endCallLocally();
-      navigatorKey.currentState?.popUntil((route) => route.settings.name != '/call');
+      _removeCallScreen();
     } catch (e) {
-      debugPrint("Error rejecting call: $e");
+      debugPrint('❌ Reject call error: $e');
       _endCallLocally();
-      navigatorKey.currentState?.popUntil((route) => route.settings.name != '/call');
+      _removeCallScreen();
+    } finally {
+      _isRejecting = false;
+      notifyListeners();
     }
   }
+
+  // ============================================================
+  // END CALL
+  // ============================================================
 
   Future<void> endCall() async {
-    final callId = _currentCall?.sId;
-    debugPrint("Ending call: $callId");
+    if (_isEnding) return;
 
-    _stopRinging();
-    if (callId == null) {
-      debugPrint("Error: No active call to end");
-      _endCallLocally();
-      navigatorKey.currentState?.popUntil((route) => route.settings.name != '/call');
-      return;
-    }
+    final String? callId =
+        _currentCall?.sId;
+
+    debugPrint(
+      '📴 Ending call: $callId',
+    );
 
     try {
+      _isEnding = true;
+      notifyListeners();
+      
+      _stopRinging();
+      _stopRingingTimer();
+
+      if (callId == null || callId.isEmpty) {
+        FlutterCallkitIncoming.endAllCalls();
+        _endCallLocally();
+        _removeCallScreen();
+        return;
+      }
+
+      await FlutterCallkitIncoming.endCall(
+        _getUuidFromCallId(callId),
+      );
+
       await _callRepository.endCall(callId);
+
       _endCallLocally();
-      navigatorKey.currentState?.popUntil((route) => route.settings.name != '/call');
+      _removeCallScreen();
     } catch (e) {
-      debugPrint("Error ending call: $e");
-      _endCallLocally(); // Force end locally if API fails
-      navigatorKey.currentState?.popUntil((route) => route.settings.name != '/call');
+      debugPrint('❌ End call error: $e');
+      _endCallLocally();
+      _removeCallScreen();
+    } finally {
+      _isEnding = false;
+      notifyListeners();
     }
   }
 
-  Future<void> _initEngine() async {
-    await [Permission.microphone, Permission.camera].request();
+  // ============================================================
+  // REMOVE CALL SCREEN
+  // ============================================================
 
-    _engine = createAgoraRtcEngine();
-    await _engine!.initialize(const RtcEngineContext(
-      appId: AgoraConfig.appId,
-      channelProfile: ChannelProfileType.channelProfileCommunication,
-    ));
+  void _removeCallScreen() {
+    final NavigatorState? navigator =
+        navigatorKey.currentState;
+
+    if (navigator == null) {
+      return;
+    }
+
+    if (!_isInCallScreen) {
+      return;
+    }
+
+    navigator.popUntil(
+          (route) =>
+      route.settings.name !=
+          '/call',
+    );
+
+    _isInCallScreen = false;
+  }
+
+  // ============================================================
+  // RINGING
+  // ============================================================
+
+  void _startRinging() {
+    // DO NOT start FlutterRingtonePlayer here.
+    //
+    // flutter_callkit_incoming is responsible for:
+    //
+    // - ringtone
+    // - vibration
+    // - lock screen
+    // - full screen
+    //
+    // Keeping another ringtone here can cause double ringtone
+    // or fail when the Flutter process is terminated.
+    debugPrint(
+      '🔔 Ringtone handled by CallKit',
+    );
+  }
+
+  void _stopRinging() {
+    // CallKit handles the ringtone.
+    //
+    // Keep vibration cancellation as a safety cleanup.
+    try {
+      Vibration.cancel();
+    } catch (_) {}
+
+    debugPrint(
+      '🔕 Ringing stopped',
+    );
+  }
+
+  // ============================================================
+  // ERROR
+  // ============================================================
+
+  void _showError(
+      String message,
+      ) {
+    final BuildContext? context =
+        navigatorKey.currentContext;
+
+    if (context == null) {
+      return;
+    }
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        behavior:
+        SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // ============================================================
+  // CALL HISTORY
+  // ============================================================
+
+  Future<void> fetchHistory({
+    bool isRefresh = false,
+  }) async {
+    if (isRefresh) {
+      _historyPage = 1;
+
+      _hasMoreHistory = true;
+
+      _callHistory = [];
+    }
+
+    if (!_hasMoreHistory ||
+        _isHistoryLoading) {
+      return;
+    }
+
+    _isHistoryLoading = true;
+
+    notifyListeners();
+
+    try {
+      final response =
+      await _callRepository
+          .fetchCallHistory(
+        page: _historyPage,
+      );
+
+      if (response['success'] ==
+          true) {
+        final List<dynamic>
+        callsData =
+        response['calls'];
+
+        final List<CallModel>
+        newCalls =
+        callsData
+            .map(
+              (e) =>
+              CallModel.fromJson(e),
+        )
+            .toList();
+
+        if (newCalls.isEmpty) {
+          _hasMoreHistory = false;
+        } else {
+          _callHistory.addAll(
+            newCalls,
+          );
+
+          final Map<String, CallModel>
+          callMap =
+          {};
+
+          for (final CallModel call
+          in _callHistory) {
+            if (call.sId != null) {
+              callMap[call.sId!] =
+                  call;
+            }
+          }
+
+          _callHistory =
+              callMap.values.toList();
+
+          _callHistory.sort(
+                (a, b) {
+              final DateTime aTime =
+                  DateTime.tryParse(
+                    a.createdAt ?? '',
+                  ) ??
+                      DateTime(0);
+
+              final DateTime bTime =
+                  DateTime.tryParse(
+                    b.createdAt ?? '',
+                  ) ??
+                      DateTime(0);
+
+              return bTime.compareTo(
+                aTime,
+              );
+            },
+          );
+
+          _historyPage++;
+        }
+      }
+    } catch (e) {
+      debugPrint(
+        '❌ Error fetching call history: $e',
+      );
+    } finally {
+      _isHistoryLoading = false;
+
+      notifyListeners();
+    }
+  }
+
+  // ============================================================
+  // AGORA INITIALIZATION
+  // ============================================================
+
+  Future<void> _initEngine() async {
+    if (_engine != null) {
+      return;
+    }
+
+    await [
+      Permission.microphone,
+      Permission.camera,
+    ].request();
+
+    _engine =
+        createAgoraRtcEngine();
+
+    await _engine!.initialize(
+      const RtcEngineContext(
+        appId: AgoraConfig.appId,
+        channelProfile:
+        ChannelProfileType
+            .channelProfileCommunication,
+      ),
+    );
 
     _engine!.registerEventHandler(
       RtcEngineEventHandler(
-        onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
-          debugPrint("Local user ${connection.localUid} joined");
-          _engine!.setEnableSpeakerphone(_isSpeakerOn).catchError((e) {
-            debugPrint("Error setting speakerphone in handler: $e");
-          });
+        onJoinChannelSuccess:
+            (
+            RtcConnection connection,
+            int elapsed,
+            ) {
+          debugPrint(
+            '✅ Local user '
+                '${connection.localUid} joined',
+          );
+
+          _engine!
+              .setEnableSpeakerphone(
+            _isSpeakerOn,
+          )
+              .catchError(
+                (e) {
+              debugPrint(
+                '❌ Speaker error: $e',
+              );
+            },
+          );
         },
-        onUserJoined: (RtcConnection connection, int remoteUid, int elapsed) {
-          debugPrint("Remote user $remoteUid joined");
-          _remoteUid = remoteUid;
+        onUserJoined:
+            (
+            RtcConnection connection,
+            int remoteUid,
+            int elapsed,
+            ) {
+          debugPrint(
+            '👤 Remote user joined: '
+                '$remoteUid',
+          );
+
+          _remoteUid =
+              remoteUid;
+
           notifyListeners();
         },
-        onUserOffline: (RtcConnection connection, int remoteUid, UserOfflineReasonType reason) {
-          debugPrint("Remote user $remoteUid left");
+        onUserOffline:
+            (
+            RtcConnection connection,
+            int remoteUid,
+            UserOfflineReasonType reason,
+            ) {
+          debugPrint(
+            '👤 Remote user left: '
+                '$remoteUid',
+          );
+
           _remoteUid = null;
+
           notifyListeners();
-          if (_status == CallStatus.active) {
+
+          if (_status ==
+              CallStatus.active) {
             endCall();
           }
         },
-        onLeaveChannel: (RtcConnection connection, RtcStats stats) {
-          debugPrint("Local user left channel");
+        onLeaveChannel:
+            (
+            RtcConnection connection,
+            RtcStats stats,
+            ) {
+          debugPrint(
+            '📴 Local user left channel',
+          );
         },
       ),
     );
 
-    if (_currentCall?.type == 'video') {
+    // ----------------------------------------------------------
+    // VIDEO
+    // ----------------------------------------------------------
+
+    if (_currentCall?.type ==
+        'video') {
       await _engine!.enableVideo();
-      await _engine!.startPreview();
+
+      await _engine!
+          .startPreview();
     } else {
-      await _engine!.disableVideo();
+      await _engine!
+          .disableVideo();
     }
   }
 
+  // ============================================================
+  // JOIN AGORA CHANNEL
+  // ============================================================
+
   Future<void> _joinChannel() async {
-    if (_engine == null || _currentCall == null) return;
+    if (_engine == null ||
+        _currentCall == null) {
+      return;
+    }
+
+    final String? channelName =
+        _currentCall!.channelName;
+
+    if (channelName == null ||
+        channelName.isEmpty) {
+      throw Exception(
+        'Agora channel name is missing',
+      );
+    }
 
     await _engine!.joinChannel(
-      token: _currentCall!.agoraToken ?? "",
-      channelId: _currentCall!.channelName!,
-      uid: _currentCall!.agoraUid ?? (int.tryParse(HiveService.userId ?? "0") ?? 0),
-      options: const ChannelMediaOptions(),
+      token:
+      _currentCall!.agoraToken ??
+          '',
+      channelId:
+      channelName,
+      uid:
+      _currentCall!.agoraUid ??
+          (int.tryParse(
+            HiveService.userId ??
+                '0',
+          ) ??
+              0),
+      options:
+      const ChannelMediaOptions(),
     );
   }
 
+  // ============================================================
+  // MUTE
+  // ============================================================
+
   void toggleMute() {
-    _isMuted = !_isMuted;
-    _engine?.muteLocalAudioStream(_isMuted);
+    _isMuted =
+    !_isMuted;
+
+    _engine
+        ?.muteLocalAudioStream(
+      _isMuted,
+    );
+
     notifyListeners();
   }
+
+  // ============================================================
+  // VIDEO
+  // ============================================================
 
   void toggleVideo() {
-    _isVideoOff = !_isVideoOff;
-    _engine?.muteLocalVideoStream(_isVideoOff);
+    _isVideoOff =
+    !_isVideoOff;
+
+    _engine
+        ?.muteLocalVideoStream(
+      _isVideoOff,
+    );
+
     notifyListeners();
   }
 
+  // ============================================================
+  // SPEAKER
+  // ============================================================
+
   void toggleSpeaker() {
-    _isSpeakerOn = !_isSpeakerOn;
-    _engine?.setEnableSpeakerphone(_isSpeakerOn);
+    _isSpeakerOn =
+    !_isSpeakerOn;
+
+    _engine
+        ?.setEnableSpeakerphone(
+      _isSpeakerOn,
+    );
+
     notifyListeners();
   }
+
+  // ============================================================
+  // CAMERA
+  // ============================================================
 
   void switchCamera() {
     _engine?.switchCamera();
   }
 
+  // ============================================================
+  // DISPOSE AGORA
+  // ============================================================
+
   void _disposeEngine() {
-    _engine?.leaveChannel();
-    _engine?.release();
+    try {
+      _engine?.leaveChannel();
+    } catch (_) {}
+
+    try {
+      _engine?.release();
+    } catch (_) {}
+
     _engine = null;
   }
 
+  // ============================================================
+  // DISPOSE
+  // ============================================================
+
   @override
   void dispose() {
+    _callTimer?.cancel();
+
+    _ringingTimer?.cancel();
+
     _disposeEngine();
+
     super.dispose();
   }
 }

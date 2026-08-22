@@ -76,8 +76,16 @@
     <key>NSPhotoLibraryUsageDescription</key>
     <string>This app needs gallery access to select photos.</string>
 
-	<key>NSPhotoLibraryUsageDescription</key>
-<string>We need access to your photo library to upload videos.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>We need access to your photo library to upload videos.</string>
+
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>voip</string>
+        <string>audio</string>
+        <string>fetch</string>
+        <string>remote-notification</string>
+    </array>
 
 
 </dict>
