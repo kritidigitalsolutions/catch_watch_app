@@ -62,16 +62,16 @@ class NotificationService {
   static const String endedType = 'ENDED';
 
   static const String notificationChannelId =
-      'high_importance_channel';
+      'high_importance_channel_catch_watch';
 
   static const String notificationChannelName =
-      'High Importance Notifications';
+      'Catch Watch Notifications';
 
   static const String incomingCallChannelName =
-      'High Importance Notifications';
+      'Incoming Calls';
 
   static const String missedCallChannelName =
-      'Missed Call';
+      'Missed Calls';
 
   static const Duration incomingCallDuration =
   Duration(seconds: 30);
@@ -97,6 +97,7 @@ class NotificationService {
       ) async {
     try {
       await Firebase.initializeApp();
+      await HiveService.init();
 
       debugPrint(
         '📩 BACKGROUND FCM RECEIVED',
@@ -391,8 +392,9 @@ class NotificationService {
         },
 
         android: AndroidParams(
-          isCustomNotification: false,
+          isCustomNotification: true,
           isShowLogo: false,
+          isCustomSmallExNotification: true,
 
           ringtonePath:
           'system_ringtone_default',
@@ -406,8 +408,8 @@ class NotificationService {
           textAccept: 'Accept',
           textDecline: 'Decline',
 
-          // Disable full-screen in foreground to avoid flickering/jumping UI
-          isFullScreen: !isForeground,
+          // Always use full-screen intent for incoming calls to ensure UI shows up
+          isFullScreen: true, 
 
           isImportant: true,
 

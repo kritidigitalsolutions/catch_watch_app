@@ -16,6 +16,7 @@ import '../../utils/hive_service/hive_service.dart';
 import '../../res/appUrl.dart' show AppUrl;
 import '../../utils/text_style.dart';
 import '../../view_model/after_login_provider/profile_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
 
 class ShortVideoPlayerScreen extends StatefulWidget {
   final bool isVisible;
@@ -408,7 +409,7 @@ class _ShortVideoPage extends StatefulWidget {
   State<_ShortVideoPage> createState() => _ShortVideoPageState();
 }
 
-class _ShortVideoPageState extends State<_ShortVideoPage> {
+class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
   VideoPlayerController? _controller;
   YoutubePlayerController? _ytController;
   bool _hasStarted = false;
@@ -428,6 +429,34 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
     super.initState();
     _watchStopwatch = Stopwatch();
     _initializeVideo();
+    
+    // Listen for call status changes
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<CallProvider>().addListener(_callListener);
+    });
+  }
+
+  void _callListener() {
+    if (mounted) {
+      final callStatus = context.read<CallProvider>().status;
+      if (callStatus != CallStatus.idle) {
+        _pauseVideo();
+      } else if (widget.isActive) {
+        _syncPlayback();
+      }
+    }
+  }
+
+  void _pauseVideo() {
+    if (_isYoutube) {
+      _ytController?.pause();
+    } else {
+      _controller?.pause();
+    }
+    if (_watchStopwatch.isRunning) {
+      _watchStopwatch.stop();
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _initializeVideo() async {
@@ -491,6 +520,12 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncPlayback();
+  }
+
+  @override
   void didUpdateWidget(covariant _ShortVideoPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.isActive != widget.isActive) {
@@ -499,6 +534,15 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
   }
 
   void _syncPlayback() {
+    final bool isRouteActive = ModalRoute.of(context)?.isCurrent ?? true;
+    final callProvider = context.read<CallProvider>();
+    final bool isCallActive = callProvider.status != CallStatus.idle;
+
+    if (!isRouteActive || isCallActive) {
+      _pauseVideo();
+      return;
+    }
+
     if (_isYoutube) {
       if (_ytController == null) return;
       if (mounted) {
@@ -653,6 +697,7 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
 
   @override
   void dispose() {
+    context.read<CallProvider>().removeListener(_callListener);
     _controller?.removeListener(_videoListener);
     _controller?.dispose();
     _ytController?.dispose();
@@ -764,12 +809,14 @@ class _ShortVideoPageState extends State<_ShortVideoPage> {
 
   void _handleAdClick() async {
     final reel = widget.reel;
+    final provider = context.read<ReelsProvider>();
+    
     if (reel.destinationUrl != null) {
       final url = Uri.parse(reel.destinationUrl!);
       if (await canLaunchUrl(url)) {
         // Record CLICK event
         if (reel.adId != null) {
-          context.read<ReelsProvider>().recordAdEvent(
+          provider.recordAdEvent(
             adId: reel.adId!,
             campaignId: reel.campaignId ?? '',
             eventType: 'CLICK',

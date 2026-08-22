@@ -8,6 +8,7 @@ import 'package:catch_watch/repository/call_repository.dart';
 import 'package:catch_watch/utils/agora_config.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/views/after_login_pages/message/active_call_screen.dart';
+import 'package:catch_watch/views/after_login_pages/message/incoming_call_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
@@ -42,6 +43,7 @@ class CallProvider extends ChangeNotifier {
   bool _isMuted = false;
   bool _isVideoOff = false;
   bool _isSpeakerOn = true;
+  bool _remoteVideoMuted = false;
 
   int? _remoteUid;
 
@@ -103,6 +105,9 @@ class CallProvider extends ChangeNotifier {
 
   bool get isSpeakerOn =>
       _isSpeakerOn;
+
+  bool get remoteVideoMuted =>
+      _remoteVideoMuted;
 
   int? get remoteUid =>
       _remoteUid;
@@ -731,7 +736,7 @@ class CallProvider extends ChangeNotifier {
     notifyListeners();
 
     // Trigger Incoming UI in foreground
-    _showActiveCallScreen();
+    _showIncomingCallScreen();
 
     debugPrint(
       '✅ Socket incoming call prepared',
@@ -776,6 +781,29 @@ class CallProvider extends ChangeNotifier {
       _joinChannel();
 
       notifyListeners();
+
+      // If we are the receiver and were on incoming screen, transition to active screen
+      if (!_isCaller && _status == CallStatus.active && _isInCallScreen) {
+        final NavigatorState? navigator = navigatorKey.currentState;
+        if (navigator != null) {
+          bool onIncoming = false;
+          navigator.popUntil((route) {
+            if (route.settings.name == '/incoming-call') {
+              onIncoming = true;
+            }
+            return true;
+          });
+
+          if (onIncoming) {
+            navigator.pushReplacement(
+              MaterialPageRoute(
+                settings: const RouteSettings(name: '/call'),
+                builder: (context) => const ActiveCallScreen(),
+              ),
+            );
+          }
+        }
+      }
     }
   }
 
@@ -1127,8 +1155,17 @@ class CallProvider extends ChangeNotifier {
       // --------------------------------------------------------
       // SHOW ACTIVE SCREEN
       // --------------------------------------------------------
-
-      _showActiveCallScreen();
+      
+      final NavigatorState? navigator = navigatorKey.currentState;
+      if (navigator != null) {
+        _isInCallScreen = true;
+        navigator.pushReplacement(
+          MaterialPageRoute(
+            settings: const RouteSettings(name: '/call'),
+            builder: (context) => const ActiveCallScreen(),
+          ),
+        );
+      }
     } catch (e, stackTrace) {
       _isAccepting = false;
 
@@ -1155,6 +1192,39 @@ class CallProvider extends ChangeNotifier {
         );
       } catch (_) {}
     }
+  }
+
+  // ============================================================
+  // SHOW INCOMING CALL SCREEN
+  // ============================================================
+
+  void _showIncomingCallScreen() {
+    final NavigatorState? navigator = navigatorKey.currentState;
+
+    if (navigator == null) {
+      debugPrint('⚠️ Navigator not available');
+      return;
+    }
+
+    _isInCallScreen = true;
+
+    // Avoid pushing duplicate screens
+    bool alreadyOnScreen = false;
+    navigator.popUntil((route) {
+      if (route.settings.name == '/incoming-call' || route.settings.name == '/call') {
+        alreadyOnScreen = true;
+      }
+      return true;
+    });
+
+    if (alreadyOnScreen) return;
+
+    navigator.push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: '/incoming-call'),
+        builder: (context) => const IncomingCallScreen(),
+      ),
+    );
   }
 
   // ============================================================
@@ -1323,8 +1393,7 @@ class CallProvider extends ChangeNotifier {
 
     navigator.popUntil(
           (route) =>
-      route.settings.name !=
-          '/call',
+      route.settings.name != '/call' && route.settings.name != '/incoming-call',
     );
 
     _isInCallScreen = false;
@@ -1570,12 +1639,20 @@ class CallProvider extends ChangeNotifier {
           );
 
           _remoteUid = null;
+          _remoteVideoMuted = false;
 
           notifyListeners();
 
           if (_status ==
               CallStatus.active) {
             endCall();
+          }
+        },
+        onUserMuteVideo: (connection, remoteUid, muted) {
+          debugPrint('👤 Remote user video mute: $muted');
+          if (_remoteUid == remoteUid) {
+            _remoteVideoMuted = muted;
+            notifyListeners();
           }
         },
         onLeaveChannel:
@@ -1664,14 +1741,20 @@ class CallProvider extends ChangeNotifier {
   // VIDEO
   // ============================================================
 
-  void toggleVideo() {
-    _isVideoOff =
-    !_isVideoOff;
+  Future<void> toggleVideo() async {
+    if (_engine == null) return;
+    
+    _isVideoOff = !_isVideoOff;
 
-    _engine
-        ?.muteLocalVideoStream(
-      _isVideoOff,
-    );
+    if (_isVideoOff) {
+      await _engine?.stopPreview();
+      await _engine?.enableLocalVideo(false);
+    } else {
+      await _engine?.enableLocalVideo(true);
+      await _engine?.startPreview();
+    }
+
+    await _engine?.muteLocalVideoStream(_isVideoOff);
 
     notifyListeners();
   }
@@ -1684,10 +1767,18 @@ class CallProvider extends ChangeNotifier {
     _isSpeakerOn =
     !_isSpeakerOn;
 
+    debugPrint('🔊 Toggling speaker: $_isSpeakerOn');
+
     _engine
         ?.setEnableSpeakerphone(
       _isSpeakerOn,
-    );
+    )
+        .then((_) {
+      debugPrint('🔊 Speakerphone set to $_isSpeakerOn');
+    })
+        .catchError((e) {
+      debugPrint('❌ Speaker toggle error: $e');
+    });
 
     notifyListeners();
   }

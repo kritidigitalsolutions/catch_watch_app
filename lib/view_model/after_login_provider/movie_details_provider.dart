@@ -7,6 +7,7 @@ import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:http/http.dart' as http;
@@ -109,6 +110,20 @@ class MovieDetailProvider extends ChangeNotifier {
     _initPlayer();
     if (content.type == 'tvshow') {
       _fetchEpisodes();
+    }
+    
+    // Listen for calls
+    if (context != null) {
+      context!.read<CallProvider>().addListener(_callStatusListener);
+    }
+  }
+
+  void _callStatusListener() {
+    if (context != null) {
+      final callStatus = context!.read<CallProvider>().status;
+      if (callStatus != CallStatus.idle && isPlaying) {
+        togglePlay(); // This handles pausing and wakelock
+      }
     }
   }
 
@@ -707,6 +722,11 @@ class MovieDetailProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (context != null) {
+      try {
+        context!.read<CallProvider>().removeListener(_callStatusListener);
+      } catch (_) {}
+    }
     _hideControlsTimer?.cancel();
     _videoController?.removeListener(_onVideoUpdate);
     _videoController?.dispose();

@@ -16,6 +16,9 @@ class ActiveCallScreen extends StatefulWidget {
 
 class _ActiveCallScreenState extends State<ActiveCallScreen> with TickerProviderStateMixin {
   late AnimationController _pulseController;
+  VideoViewController? _localController;
+  VideoViewController? _remoteController;
+  int? _lastRemoteUid;
 
   @override
   void initState() {
@@ -29,7 +32,29 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with TickerProvider
   @override
   void dispose() {
     _pulseController.dispose();
+    _localController?.dispose();
+    _remoteController?.dispose();
     super.dispose();
+  }
+
+  void _initLocalController(RtcEngine engine) {
+    if (_localController != null) return;
+    _localController = VideoViewController(
+      rtcEngine: engine,
+      canvas: const VideoCanvas(uid: 0),
+    );
+  }
+
+  void _initRemoteController(RtcEngine engine, int remoteUid, String channelName) {
+    if (_remoteController != null && _lastRemoteUid == remoteUid) return;
+    
+    _remoteController?.dispose();
+    _remoteController = VideoViewController.remote(
+      rtcEngine: engine,
+      canvas: VideoCanvas(uid: remoteUid),
+      connection: RtcConnection(channelId: channelName),
+    );
+    _lastRemoteUid = remoteUid;
   }
 
   @override
@@ -46,11 +71,18 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with TickerProvider
                      
     final partner = isCaller ? call.receiver : call.caller;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          // Background Gradient
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        callProvider.setInCallScreen(false);
+        Navigator.pop(context);
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            // Background Gradient
           Positioned.fill(
             child: Container(
               decoration: const BoxDecoration(
@@ -81,6 +113,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with TickerProvider
             _buildVideoUI(context, callProvider, call, partner)
           else
             _buildAudioOrRingingUI(context, callProvider, call, partner),
+
+          // Local Preview (for video calls)
+          if (callProvider.status == CallStatus.active && call.type == 'video')
+            _buildLocalPreview(callProvider),
 
           // Top Info bar
           Positioned(
@@ -145,20 +181,81 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with TickerProvider
             _buildActiveControls(context, callProvider, call),
         ],
       ),
+    ),
+  );
+}
+
+  Widget _buildVideoUI(BuildContext context, CallProvider provider, dynamic call, dynamic partner) {
+    bool isRemoteVideoOff = provider.remoteVideoMuted || provider.remoteUid == null;
+
+    if (!isRemoteVideoOff && provider.remoteUid != null && provider.engine != null) {
+      _initRemoteController(provider.engine!, provider.remoteUid!, call.channelName!);
+    }
+
+    return Positioned.fill(
+      child: (isRemoteVideoOff || _remoteController == null)
+          ? Container(
+              color: Colors.black,
+              child: _buildAudioOrRingingContent(partner, provider),
+            )
+          : AgoraVideoView(
+              key: ValueKey('remote_${provider.remoteUid}_${provider.remoteVideoMuted}'),
+              controller: _remoteController!,
+            ),
     );
   }
 
-  Widget _buildVideoUI(BuildContext context, CallProvider provider, dynamic call, dynamic partner) {
-    return Positioned.fill(
-      child: (provider.remoteUid != null && provider.engine != null)
-          ? AgoraVideoView(
-              controller: VideoViewController.remote(
-                rtcEngine: provider.engine!,
-                canvas: VideoCanvas(uid: provider.remoteUid),
-                connection: RtcConnection(channelId: call.channelName),
-              ),
+  Widget _buildLocalPreview(CallProvider provider) {
+    if (provider.engine == null) return const SizedBox.shrink();
+
+    if (!provider.isVideoOff) {
+      _initLocalController(provider.engine!);
+    }
+
+    return Positioned(
+      top: 120,
+      right: 16,
+      child: Container(
+        width: 110,
+        height: 160,
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white24, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.4),
+              blurRadius: 10,
             )
-          : _buildConnectingUI(partner),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: provider.isVideoOff
+              ? Container(
+                  color: Colors.black87,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.videocam_off, color: Colors.white54, size: 30),
+                        const SizedBox(height: 8),
+                        Text(
+                          "Camera Off",
+                          style: text10(color: Colors.white54),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : _localController != null
+                  ? AgoraVideoView(
+                      key: const ValueKey('local_preview'),
+                      controller: _localController!,
+                    )
+                  : Container(color: Colors.black54),
+        ),
+      ),
     );
   }
 
@@ -183,24 +280,45 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with TickerProvider
 
   Widget _buildAudioOrRingingUI(BuildContext context, CallProvider provider, dynamic call, dynamic partner) {
     return Positioned.fill(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _buildPulsingAvatar(partner),
-          const SizedBox(height: 24),
-          Text(
-            partner?.name ?? "Unknown",
-            style: text28(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            provider.status == CallStatus.active 
-              ? provider.formattedDuration 
-              : (provider.status == CallStatus.ringing ? "Ringing..." : "Connecting..."),
-            style: text18(color: Colors.white70),
-          ),
-        ],
-      ),
+      child: _buildAudioOrRingingContent(partner, provider),
+    );
+  }
+
+  Widget _buildAudioOrRingingContent(dynamic partner, CallProvider provider) {
+    String statusText = "";
+    if (provider.status == CallStatus.active) {
+      if (provider.currentCall?.type == 'video' && (provider.remoteVideoMuted || provider.remoteUid == null)) {
+        statusText = "Video Paused";
+      } else {
+        statusText = provider.formattedDuration;
+      }
+    } else {
+      statusText = provider.status == CallStatus.ringing ? "Ringing..." : "Connecting...";
+    }
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _buildPulsingAvatar(partner),
+        const SizedBox(height: 24),
+        Text(
+          partner?.name ?? "Unknown",
+          style: text28(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          statusText,
+          style: text18(color: Colors.white70),
+        ),
+        if (provider.status == CallStatus.active && provider.currentCall?.type == 'video' && (provider.remoteVideoMuted || provider.remoteUid == null))
+           Padding(
+             padding: const EdgeInsets.only(top: 8.0),
+             child: Text(
+               provider.formattedDuration,
+               style: text14(color: Colors.white54),
+             ),
+           ),
+      ],
     );
   }
 
