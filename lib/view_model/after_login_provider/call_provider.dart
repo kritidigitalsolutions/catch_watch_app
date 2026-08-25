@@ -18,6 +18,8 @@ import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
 import 'package:vibration/vibration.dart';
+import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 enum CallStatus {
   idle,
@@ -149,6 +151,20 @@ class CallProvider extends ChangeNotifier {
     _initSocketListeners();
     _initNotificationListener();
     _initCallKitListener();
+    _checkActiveCalls();
+  }
+
+  Future<void> _checkActiveCalls() async {
+    try {
+      final calls = await FlutterCallkitIncoming.activeCalls();
+      if (calls is List && calls.isNotEmpty) {
+        debugPrint('📞 Found active CallKit calls on init: ${calls.length}');
+        // We might want to check if any are accepted but not handled locally yet.
+        // However, standard flow is that CallKit triggers events.
+      }
+    } catch (e) {
+      debugPrint('❌ Error checking active calls: $e');
+    }
   }
 
   // ============================================================
@@ -336,21 +352,23 @@ class CallProvider extends ChangeNotifier {
       );
 
       debugPrint(
-        '📞 CallKit ACCEPT',
+        '📞 CallKit ACCEPT Event Received',
       );
 
-      debugPrint(
-        'Call ID: $callId',
-      );
+      // Wait a moment for the app to initialize if it was terminated
+      int retry = 0;
+      while (navigatorKey.currentState == null && retry < 5) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        retry++;
+      }
 
       // --------------------------------------------------------
       // If current call is already loaded, use it.
       // --------------------------------------------------------
 
       if (_currentCall != null &&
-          _currentCall!.sId != null) {
+          (_currentCall!.sId == callId || callId == null)) {
         await acceptCall();
-
         return;
       }
 
@@ -732,6 +750,7 @@ class CallProvider extends ChangeNotifier {
         CallStatus.ringing;
 
     _startRingingTimer();
+    _startRinging();
 
     notifyListeners();
 
@@ -763,6 +782,8 @@ class CallProvider extends ChangeNotifier {
         acceptedCallId != null) {
       _status =
           CallStatus.active;
+      
+      WakelockPlus.enable();
 
       if (acceptedCallId != null) {
         FlutterCallkitIncoming
@@ -786,22 +807,18 @@ class CallProvider extends ChangeNotifier {
       if (!_isCaller && _status == CallStatus.active && _isInCallScreen) {
         final NavigatorState? navigator = navigatorKey.currentState;
         if (navigator != null) {
-          bool onIncoming = false;
-          navigator.popUntil((route) {
-            if (route.settings.name == '/incoming-call') {
-              onIncoming = true;
-            }
-            return true;
-          });
+         // Clean up any call screens before pushing active screen
+          navigator.popUntil((route) => 
+            route.settings.name != '/call' && 
+            route.settings.name != '/incoming-call'
+          );
 
-          if (onIncoming) {
-            navigator.pushReplacement(
-              MaterialPageRoute(
-                settings: const RouteSettings(name: '/call'),
-                builder: (context) => const ActiveCallScreen(),
-              ),
-            );
-          }
+          navigator.push(
+            MaterialPageRoute(
+              settings: const RouteSettings(name: '/call'),
+              builder: (context) => const ActiveCallScreen(),
+            ),
+          );
         }
       }
     }
@@ -859,16 +876,7 @@ class CallProvider extends ChangeNotifier {
 
       _endCallLocally();
 
-      if (_isInCallScreen) {
-        navigatorKey.currentState
-            ?.popUntil(
-              (route) =>
-          route.settings.name !=
-              '/call',
-        );
-
-        _isInCallScreen = false;
-      }
+      _removeCallScreen();
 
       notifyListeners();
     }
@@ -881,6 +889,8 @@ class CallProvider extends ChangeNotifier {
   void _endCallLocally() {
     _status =
         CallStatus.ended;
+    
+    WakelockPlus.disable();
 
     notifyListeners();
 
@@ -1117,6 +1127,8 @@ class CallProvider extends ChangeNotifier {
       _stopRinging();
 
       _stopRingingTimer();
+      
+      WakelockPlus.enable();
 
       // --------------------------------------------------------
       // CALLKIT CONNECTED
@@ -1159,7 +1171,15 @@ class CallProvider extends ChangeNotifier {
       final NavigatorState? navigator = navigatorKey.currentState;
       if (navigator != null) {
         _isInCallScreen = true;
-        navigator.pushReplacement(
+        
+        // Remove any existing call screens before pushing the active one
+        // We pop until we hit a non-call route (like home), then push on top.
+        navigator.popUntil((route) => 
+          route.settings.name != '/call' && 
+          route.settings.name != '/incoming-call'
+        );
+
+        navigator.push(
           MaterialPageRoute(
             settings: const RouteSettings(name: '/call'),
             builder: (context) => const ActiveCallScreen(),
@@ -1391,10 +1411,13 @@ class CallProvider extends ChangeNotifier {
       return;
     }
 
-    navigator.popUntil(
-          (route) =>
-      route.settings.name != '/call' && route.settings.name != '/incoming-call',
-    );
+    // Safety: only pop if we are actually on a call screen to avoid black screen
+    navigator.popUntil((route) {
+      final String? name = route.settings.name;
+      // If we hit something that ISN'T a call screen, stop popping.
+      // This ensures we always leave at least one route (Home) in the stack.
+      return name != '/call' && name != '/incoming-call';
+    });
 
     _isInCallScreen = false;
   }
@@ -1404,27 +1427,20 @@ class CallProvider extends ChangeNotifier {
   // ============================================================
 
   void _startRinging() {
-    // DO NOT start FlutterRingtonePlayer here.
-    //
-    // flutter_callkit_incoming is responsible for:
-    //
-    // - ringtone
-    // - vibration
-    // - lock screen
-    // - full screen
-    //
-    // Keeping another ringtone here can cause double ringtone
-    // or fail when the Flutter process is terminated.
-    debugPrint(
-      '🔔 Ringtone handled by CallKit',
-    );
+    try {
+      FlutterRingtonePlayer().playRingtone(
+        looping: true,
+        volume: 1.0,
+      );
+      Vibration.vibrate(pattern: [500, 1000, 500, 1000], repeat: 0);
+    } catch (e) {
+      debugPrint('❌ Error starting ringtone/vibration: $e');
+    }
   }
 
   void _stopRinging() {
-    // CallKit handles the ringtone.
-    //
-    // Keep vibration cancellation as a safety cleanup.
     try {
+      FlutterRingtonePlayer().stop();
       Vibration.cancel();
     } catch (_) {}
 

@@ -293,7 +293,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with TickerProvider
         statusText = provider.formattedDuration;
       }
     } else {
-      statusText = provider.status == CallStatus.ringing ? "Ringing..." : "Connecting...";
+      statusText = provider.status == CallStatus.ringing 
+          ? "Ringing..." 
+          : (provider.status == CallStatus.ended ? "Call Ended" : "Connecting...");
     }
 
     return Column(

@@ -392,9 +392,9 @@ class NotificationService {
         },
 
         android: AndroidParams(
-          isCustomNotification: true,
+          isCustomNotification: false,
           isShowLogo: false,
-          isCustomSmallExNotification: true,
+          isCustomSmallExNotification: false,
 
           ringtonePath:
           'system_ringtone_default',

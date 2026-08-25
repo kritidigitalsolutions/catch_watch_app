@@ -18,15 +18,9 @@ class _SplashScreenState extends State<SplashScreen> {
 
     Future.delayed(const Duration(seconds: 3), () {
       if (HiveService.isLogin()) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const MyHomePage()),
-        );
+        Navigator.pushReplacementNamed(context, '/home');
       } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const OnboardingScreen()),
-        );
+        Navigator.pushReplacementNamed(context, '/onboarding');
       }
     });
   }

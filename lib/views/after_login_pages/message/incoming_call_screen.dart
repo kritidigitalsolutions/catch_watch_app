@@ -71,8 +71,11 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> with TickerProv
               children: [
                 const SizedBox(height: 60),
                 Text(
-                  "INCOMING CALL",
-                  style: text14(color: Colors.white70, fontWeight: FontWeight.bold).copyWith(letterSpacing: 4),
+                  callProvider.status == CallStatus.ended ? "CALL ENDED" : "INCOMING CALL",
+                  style: text14(
+                    color: callProvider.status == CallStatus.ended ? Colors.redAccent : Colors.white70, 
+                    fontWeight: FontWeight.bold
+                  ).copyWith(letterSpacing: 4),
                 ),
                 const Spacer(),
                 
