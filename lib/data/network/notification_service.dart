@@ -392,9 +392,9 @@ class NotificationService {
         },
 
         android: AndroidParams(
-          isCustomNotification: false,
+          isCustomNotification: true,
           isShowLogo: false,
-          isCustomSmallExNotification: false,
+          isCustomSmallExNotification: true,
 
           ringtonePath:
           'system_ringtone_default',
@@ -408,15 +408,15 @@ class NotificationService {
           textAccept: 'Accept',
           textDecline: 'Decline',
 
-          // Always use full-screen intent for incoming calls to ensure UI shows up
-          isFullScreen: true, 
+          // Use high-priority notification for incoming calls to comply with Play Store policy
+          isFullScreen: false, 
 
           isImportant: true,
 
-          isShowFullLockedScreen: true,
+          isShowFullLockedScreen: false,
 
           incomingCallNotificationChannelName:
-          incomingCallChannelName,
+          'high_importance_channel_catch_watch_calls',
 
           missedCallNotificationChannelName:
           missedCallChannelName,
@@ -543,6 +543,32 @@ class NotificationService {
             playSound: true,
           ),
         );
+
+        // CREATE INCOMING CALL CHANNEL
+        await androidImplementation
+            ?.createNotificationChannel(
+          const AndroidNotificationChannel(
+            'high_importance_channel_catch_watch_calls',
+            incomingCallChannelName,
+            description: 'Incoming call notifications',
+            importance: Importance.max,
+            playSound: true,
+            enableVibration: true,
+            showBadge: true,
+          ),
+        );
+
+        // CREATE MISSED CALL CHANNEL
+        await androidImplementation
+            ?.createNotificationChannel(
+          const AndroidNotificationChannel(
+            'missed_call_channel_id',
+            missedCallChannelName,
+            description: 'Missed call notifications',
+            importance: Importance.max,
+            playSound: true,
+          ),
+        );
       }
 
       // --------------------------------------------------------
@@ -628,19 +654,10 @@ class NotificationService {
             // --------------------------------------------------
 
             if (_isIncomingCall(data)) {
-              await _showIncomingCallKit(
-                data,
-                isForeground: true,
-              );
-
-              // VERY IMPORTANT:
-              //
-              // Do not show the same call as a normal
-              // notification.
-              //
-              // Do not send it to the normal foreground
-              // notification stream.
-              return;
+              // We DO NOT call _showIncomingCallKit(data, isForeground: true) here
+              // to avoid redundant native notifications in foreground.
+              // The CallProvider handles the in-app UI via the stream.
+              debugPrint('📲 Foreground incoming call: suppressing native notification');
             }
 
             // --------------------------------------------------
@@ -768,26 +785,6 @@ class NotificationService {
           'postNotificationMessageRequired':
           'Notification permission is required. Please allow notification permission from settings.',
         });
-
-        // Android 14+
-        try {
-          final bool canUseFullIntent =
-          await FlutterCallkitIncoming
-              .canUseFullScreenIntent();
-
-          debugPrint(
-            'Full screen intent allowed: $canUseFullIntent',
-          );
-
-          if (!canUseFullIntent) {
-            await FlutterCallkitIncoming
-                .requestFullIntentPermission();
-          }
-        } catch (e) {
-          debugPrint(
-            '⚠️ Full screen intent permission error: $e',
-          );
-        }
       }
     } catch (e) {
       debugPrint(

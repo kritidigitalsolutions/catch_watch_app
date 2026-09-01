@@ -38,7 +38,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
   final _linkedinController = TextEditingController();
   final _reasonController = TextEditingController();
 
-  String _selectedIdType = 'Aadhar';
+  String _selectedIdType = 'Aadhaar';
   File? _idFront;
   File? _idBack;
   File? _selfie;
@@ -65,7 +65,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
       _twitterController.text = app.twitter ?? '';
       _linkedinController.text = app.linkedin ?? '';
       _reasonController.text = app.reason ?? '';
-      _selectedIdType = app.governmentIdType ?? 'Aadhar';
+      _selectedIdType = app.governmentIdType ?? 'Aadhaar';
       _confirmed = true;
     } else if (user != null) {
       _fullNameController.text = user.name ?? '';
@@ -452,7 +452,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
               child: DropdownButton<String>(
                 value: _selectedIdType,
                 isExpanded: true,
-                items: ['Aadhar', 'Passport', 'Driving License', 'PAN']
+                items: ['Aadhaar', 'Passport', 'Driving License', 'PAN']
                     .map((e) => DropdownMenuItem(value: e, child: Text(e, style: text14())))
                     .toList(),
                 onChanged: (val) => setState(() => _selectedIdType = val!),

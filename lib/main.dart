@@ -116,19 +116,27 @@ class MyHomePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => HomeScreenProvider(),
-      builder: (context, child) {
-        final ctr = Provider.of<HomeScreenProvider>(context);
+    final ctr = context.watch<HomeScreenProvider>();
+    final uploadProvider = context.watch<VideoUploadProvider>();
 
-        // Set initial index if provided
-        if (initialIndex != null) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            ctr.changePage(initialIndex!);
-          });
+    // Set initial index if provided
+    if (initialIndex != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ctr.changePage(initialIndex!);
+      });
+    }
+
+    // Auto-navigate to upload tab if data was recovered after a restart
+    if (uploadProvider.wasDataRecovered) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (ctr.pageIndex != 2) {
+          ctr.changePage(2);
+          uploadProvider.consumeRecoveredData();
         }
+      });
+    }
 
-        return AnnotatedRegion<SystemUiOverlayStyle>(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
           value: const SystemUiOverlayStyle(
             statusBarColor: Colors.transparent,
             statusBarIconBrightness: Brightness.dark,
@@ -180,8 +188,6 @@ class MyHomePage extends StatelessWidget {
             ),
           ),
         );
-      },
-    );
   }
 
   Future<bool?> _showExitDialog(BuildContext context) {

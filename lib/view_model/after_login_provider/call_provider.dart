@@ -21,6 +21,8 @@ import 'package:vibration/vibration.dart';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../../models/chat_model.dart';
+
 enum CallStatus {
   idle,
   ringing,
@@ -28,7 +30,7 @@ enum CallStatus {
   ended,
 }
 
-class CallProvider extends ChangeNotifier {
+class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   final CallRepository _callRepository =
   CallRepository();
 
@@ -148,23 +150,90 @@ class CallProvider extends ChangeNotifier {
   // ============================================================
 
   CallProvider() {
+    WidgetsBinding.instance.addObserver(this);
     _initSocketListeners();
     _initNotificationListener();
     _initCallKitListener();
     _checkActiveCalls();
   }
 
-  Future<void> _checkActiveCalls() async {
-    try {
-      final calls = await FlutterCallkitIncoming.activeCalls();
-      if (calls is List && calls.isNotEmpty) {
-        debugPrint('📞 Found active CallKit calls on init: ${calls.length}');
-        // We might want to check if any are accepted but not handled locally yet.
-        // However, standard flow is that CallKit triggers events.
-      }
-    } catch (e) {
-      debugPrint('❌ Error checking active calls: $e');
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('📱 App resumed, checking for active calls...');
+      _checkActiveCalls();
     }
+  }
+
+  Future<void> _checkActiveCalls() async {
+    // Retry a few times because at cold start, 
+    // the plugin might not report calls immediately.
+    int retryCount = 0;
+    while (retryCount < 5) {
+      try {
+        final calls = await FlutterCallkitIncoming.activeCalls();
+        if (calls is List && calls.isNotEmpty) {
+          debugPrint('📞 Found active CallKit calls: ${calls.length}');
+          
+          if (_status == CallStatus.idle) {
+            final callData = calls.first;
+            final String? callId = _extractCallIdFromCallKitData(callData);
+            
+            if (callId != null) {
+              debugPrint('📥 Cold start: Transitioning to call screen for $callId');
+              
+              _isCaller = false;
+              
+              try {
+                final CallModel call = await _callRepository.getCallDetails(callId);
+                call.sId = callId;
+                _currentCall = call;
+                _status = CallStatus.ringing;
+                
+                // Patch name/image from CallKit data if missing
+                if (_currentCall!.caller == null) {
+                  _currentCall!.caller = Sender();
+                }
+                if (_currentCall!.caller!.name == null || _currentCall!.caller!.name!.isEmpty) {
+                  _currentCall!.caller!.name = callData.nameCaller ?? 
+                                               (callData.extra?['callerName']?.toString());
+                }
+                if (_currentCall!.caller!.profileImage == null || _currentCall!.caller!.profileImage!.isEmpty) {
+                  _currentCall!.caller!.profileImage = callData.avatar ?? 
+                                                       (callData.extra?['callerImage']?.toString());
+                }
+                
+                notifyListeners();
+                _showIncomingCallScreen();
+                return; // Success
+              } catch (e) {
+                debugPrint('❌ Error fetching call details: $e');
+              }
+            }
+          } else {
+            return; // Already in a call state
+          }
+        }
+      } catch (e) {
+        debugPrint('❌ Error checking active calls: $e');
+      }
+      
+      retryCount++;
+      await Future.delayed(const Duration(milliseconds: 1000));
+    }
+  }
+
+  String? _extractCallIdFromCallKitData(dynamic data) {
+    if (data is Map) {
+      final extra = data['extra'];
+      if (extra is Map) {
+        return extra['callId']?.toString();
+      }
+      return data['callId']?.toString() ?? data['id']?.toString();
+    } else if (data is CallKitParams) {
+      return data.extra?['callId']?.toString() ?? data.id;
+    }
+    return null;
   }
 
   // ============================================================
@@ -300,6 +369,16 @@ class CallProvider extends ChangeNotifier {
         }
 
         // ------------------------------------------------------
+        // CALLBACK (TAP ON NOTIFICATION BODY)
+        // ------------------------------------------------------
+
+        if (event is CallEventActionCallCallback) {
+          debugPrint('📞 CallKit Callback (Notification Tapped)');
+          _showIncomingCallScreen();
+          return;
+        }
+
+        // ------------------------------------------------------
         // END
         // ------------------------------------------------------
 
@@ -400,6 +479,20 @@ class CallProvider extends ChangeNotifier {
 
       _currentCall = call;
 
+      // Patch name/image from CallKit data if missing
+      final params = event.callKitParams;
+      if (_currentCall!.caller == null) {
+        _currentCall!.caller = Sender();
+      }
+      if (_currentCall!.caller!.name == null || _currentCall!.caller!.name!.isEmpty) {
+        _currentCall!.caller!.name = params.nameCaller ?? 
+                                     (params.extra?['callerName']?.toString());
+      }
+      if (_currentCall!.caller!.profileImage == null || _currentCall!.caller!.profileImage!.isEmpty) {
+        _currentCall!.caller!.profileImage = params.avatar ?? 
+                                             (params.extra?['callerImage']?.toString());
+      }
+
       _isCaller = false;
 
       _status =
@@ -476,8 +569,15 @@ class CallProvider extends ChangeNotifier {
       dynamic event,
       ) {
     try {
-      final dynamic body =
-          event.body;
+      if (event is CallEventActionCallIncoming) return event.callKitParams.extra?['callId']?.toString() ?? event.callKitParams.id;
+      if (event is CallEventActionCallStart) return event.callKitParams.extra?['callId']?.toString() ?? event.callKitParams.id;
+      if (event is CallEventActionCallAccept) return event.callKitParams.extra?['callId']?.toString() ?? event.callKitParams.id;
+      if (event is CallEventActionCallDecline) return event.callKitParams.extra?['callId']?.toString() ?? event.callKitParams.id;
+      if (event is CallEventActionCallEnded) return event.callKitParams.extra?['callId']?.toString() ?? event.callKitParams.id;
+      if (event is CallEventActionCallTimeout) return event.id;
+      if (event is CallEventActionCallCallback) return event.id;
+
+      final dynamic body = (event as dynamic).body;
 
       if (body is Map) {
         final dynamic extra =
@@ -549,8 +649,11 @@ class CallProvider extends ChangeNotifier {
         if (type == 'CALL' ||
             type == 'INCOMING_CALL') {
           debugPrint(
-            '📞 Incoming call already handled '
-                'by CallKit',
+            '📞 Foreground Incoming call: showing UI',
+          );
+
+          _handleIncomingCall(
+            message.data,
           );
 
           return;
@@ -727,6 +830,22 @@ class CallProvider extends ChangeNotifier {
 
       _currentCall!.sId ??=
           incomingCallId;
+          
+      // Ensure caller name and image are populated from top-level data if missing in caller object
+      if (_currentCall!.caller == null) {
+        _currentCall!.caller = Sender(
+          sId: (data['callerId'] ?? data['senderId'])?.toString(),
+          id: (data['callerId'] ?? data['senderId'])?.toString(),
+        );
+      }
+      
+      if (_currentCall!.caller!.name == null || _currentCall!.caller!.name!.isEmpty) {
+        _currentCall!.caller!.name = (data['callerName'] ?? data['senderName'])?.toString();
+      }
+      
+      if (_currentCall!.caller!.profileImage == null || _currentCall!.caller!.profileImage!.isEmpty) {
+        _currentCall!.caller!.profileImage = (data['callerImage'] ?? data['senderImage'])?.toString();
+      }
     } else {
       try {
         _currentCall =
@@ -1218,11 +1337,18 @@ class CallProvider extends ChangeNotifier {
   // SHOW INCOMING CALL SCREEN
   // ============================================================
 
-  void _showIncomingCallScreen() {
+  Future<void> _showIncomingCallScreen() async {
+    // Wait for navigator to be ready if app is just launching
+    int retry = 0;
+    while (navigatorKey.currentState == null && retry < 20) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      retry++;
+    }
+
     final NavigatorState? navigator = navigatorKey.currentState;
 
     if (navigator == null) {
-      debugPrint('⚠️ Navigator not available');
+      debugPrint('⚠️ Navigator not available even after retries');
       return;
     }
 
@@ -1234,11 +1360,15 @@ class CallProvider extends ChangeNotifier {
       if (route.settings.name == '/incoming-call' || route.settings.name == '/call') {
         alreadyOnScreen = true;
       }
-      return true;
+      return true; // We don't actually want to pop anything here, just check
     });
 
-    if (alreadyOnScreen) return;
+    if (alreadyOnScreen) {
+      debugPrint('ℹ️ Already on call screen, skipping navigation');
+      return;
+    }
 
+    debugPrint('🚀 Navigating to IncomingCallScreen');
     navigator.push(
       MaterialPageRoute(
         settings: const RouteSettings(name: '/incoming-call'),
@@ -1829,6 +1959,7 @@ class CallProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _callTimer?.cancel();
 
     _ringingTimer?.cancel();

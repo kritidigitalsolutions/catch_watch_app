@@ -239,7 +239,7 @@ class _ThumbnailPicker extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Reel Thumbnail', style: text14(fontWeight: FontWeight.w600)),
+        Text('Reel Thumbnail (Optional)', style: text14(fontWeight: FontWeight.w600)),
         const SizedBox(height: 10),
         GestureDetector(
           onTap: provider.isUploading ? null : () => provider.pickThumbnail(),
@@ -455,9 +455,9 @@ class _PublishButton extends StatelessWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Reel uploaded successfully!')),
                   );
+                  provider.reset();
                   Navigator.of(context).pop();
-                }
- else if (provider.uploadError != null && context.mounted) {
+                } else if (provider.uploadError != null && context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text(provider.uploadError!)),
                   );

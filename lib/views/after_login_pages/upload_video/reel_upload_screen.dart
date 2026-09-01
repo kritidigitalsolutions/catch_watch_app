@@ -13,10 +13,7 @@ class UploadScreenWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => VideoUploadProvider(),
-      child: const UploadScreen(),
-    );
+    return const UploadScreen();
   }
 }
 

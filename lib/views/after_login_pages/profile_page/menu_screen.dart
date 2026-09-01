@@ -102,7 +102,7 @@ class MenuScreen extends StatelessWidget {
                   _divider(),
                   _menuItem(
                     Icons.favorite_outline_rounded,
-                    'Wish List',
+                    'WishList',
                     onTap: () {
                       Navigator.push(
                         context,

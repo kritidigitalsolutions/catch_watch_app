@@ -82,7 +82,7 @@ class _WishListScreenState extends State<WishListScreen> {
           const SizedBox(width: 14),
           Expanded(
             child: Text(
-              'Wish List',
+              'WishList',
               style: text18(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,

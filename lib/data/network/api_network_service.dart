@@ -26,7 +26,15 @@ class NetworkApiService extends BaseApiService {
           }
           debugPrint("➡️ REQUEST [${options.method}] => ${options.uri}");
           debugPrint("Headers: ${options.headers}");
-          debugPrint("Data: ${options.data}");
+          if (options.data is FormData) {
+            final formData = options.data as FormData;
+            debugPrint("Data: FormData with ${formData.fields.length} fields and ${formData.files.length} files");
+            for (var field in formData.fields) {
+              debugPrint("  Field: ${field.key} = ${field.value}");
+            }
+          } else {
+            debugPrint("Data: ${options.data}");
+          }
           return handler.next(options);
         },
         onResponse: (response, handler) {
@@ -185,7 +193,11 @@ class NetworkApiService extends BaseApiService {
 
       case DioExceptionType.unknown:
       default:
-        return FetchDataException("No Internet Connection");
+        final message = error.message ?? "";
+        if (message.contains("SocketException")) {
+           return FetchDataException("No Internet Connection");
+        }
+        return FetchDataException("Something went wrong: ${error.error ?? 'Unknown error'}");
     }
   }
 }
