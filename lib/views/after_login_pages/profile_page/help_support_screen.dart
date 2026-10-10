@@ -122,8 +122,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     final profileProvider = context.watch<ProfileProvider>();
     final verificationProvider = context.watch<VerificationProvider>();
     final isVerified = verificationProvider.currentApplication?.status == 'approved' || 
-                       profileProvider.user?.isVerified == true || 
-                       profileProvider.user?.blueTick == true;
+                       profileProvider.user?.hasVerifiedTick == true;
 
     // Manually add Live Chat as instructed not to change it
     final List<Map<String, dynamic>> staticOptions = [

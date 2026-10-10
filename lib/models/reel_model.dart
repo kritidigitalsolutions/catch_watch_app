@@ -127,8 +127,9 @@ class ReelUser {
   bool? isFollowing;
   bool? isVerified;
   bool? blueTick;
+  bool? orangeTick;
 
-  ReelUser({this.id, this.name, this.profileImage, this.username, this.isFollowing, this.isVerified, this.blueTick});
+  ReelUser({this.id, this.name, this.profileImage, this.username, this.isFollowing, this.isVerified, this.blueTick, this.orangeTick});
 
   ReelUser.fromJson(Map<String, dynamic> json) {
     id = json['_id'] ?? json['id'];
@@ -147,5 +148,9 @@ class ReelUser {
     isFollowing = json['isFollowing'] ?? false;
     isVerified = json['isVerified'] ?? json['verification']?['isVerified'] ?? false;
     blueTick = json['blueTick'] ?? (json['verification']?['badgeType'] == 'BLUE' && json['verification']?['isVerified'] == true) ?? false;
+    orangeTick = json['orangeTick'] ?? (json['verification']?['badgeType'] == 'ORANGE' && json['verification']?['isVerified'] == true) ?? false;
   }
+
+  /// Returns whether the creator has a verified tick (Orange Tick / Blue Tick)
+  bool get hasVerifiedTick => (isVerified == true) || (blueTick == true) || (orangeTick == true);
 }

@@ -7,7 +7,19 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 class SocketService {
   static final SocketService _instance = SocketService._internal();
   factory SocketService() => _instance;
-  SocketService._internal();
+  SocketService._internal() {
+    debugPrint('[SOCKET_DEBUG] Socket CREATED');
+  }
+
+  static String _getSocketCaller() {
+    final frames = StackTrace.current.toString().split('\n');
+    for (final frame in frames) {
+      if (frame.contains('package:catch_watch/') && !frame.contains('socket_service.dart')) {
+        return frame.trim();
+      }
+    }
+    return 'Unknown caller';
+  }
 
   io.Socket? _socket;
   bool _isConnected = false;
@@ -17,6 +29,7 @@ class SocketService {
   bool get isConnected => _isConnected;
 
   void connect() {
+    debugPrint('[SOCKET_DEBUG] Socket CONNECT called from: ${_getSocketCaller()}');
     final token = HiveService.getToken();
     if (token == null) {
       debugPrint('Socket.io Connection deferred: No token found');
@@ -40,12 +53,12 @@ class SocketService {
 
       _socket!.onConnect((_) {
         _isConnected = true;
-        debugPrint('Socket.io Connected');
+        debugPrint('[SOCKET_DEBUG] Socket.io Connected');
       });
 
       _socket!.onDisconnect((_) {
         _isConnected = false;
-        debugPrint('Socket.io Disconnected');
+        debugPrint('[SOCKET_DEBUG] Socket.io Disconnected');
       });
 
       _socket!.onConnectError((data) {
@@ -93,11 +106,13 @@ class SocketService {
   }
 
   void disconnect() {
+    debugPrint('[SOCKET_DEBUG] Socket DISCONNECT called from: ${_getSocketCaller()}');
     _socket?.disconnect();
     _isConnected = false;
   }
 
   void dispose() {
+    debugPrint('[SOCKET_DEBUG] Socket DISPOSE called from: ${_getSocketCaller()}');
     disconnect();
     _messageStreamController.close();
   }

@@ -25,7 +25,7 @@ class WalletRepository {
     try {
       String url = AppUrl.creatorLeaderboard;
       if (range != null) {
-        url += '?timeframe=$range';
+        url += '?timeframe=$range&range=$range';
       }
       dynamic response = await _apiService.getApi(url);
       return LeaderboardResponse.fromJson(response);

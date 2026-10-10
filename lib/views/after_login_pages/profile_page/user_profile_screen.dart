@@ -8,8 +8,9 @@ import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/followers_following_screen.dart';
 import 'package:catch_watch/views/after_login_pages/message/chat_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-
+import '../../../utils/empty_state_widget.dart';
 import '../../../view_model/after_login_provider/profile_provider.dart';
 
 class UserProfileScreen extends StatefulWidget {
@@ -63,10 +64,16 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   Widget build(BuildContext context) {
     final provider = context.watch<UserProfileProvider>();
 
-    return Scaffold(
-      backgroundColor: AppColors.white,
-      body: Stack(
-        children: [
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+      ),
+      child: Scaffold(
+        backgroundColor: AppColors.white,
+        body: Stack(
+          children: [
           if (provider.isLoading)
             const Center(child: CircularProgressIndicator(color: AppColors.primary))
           else if (provider.error != null)
@@ -116,9 +123,36 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               ),
             ),
           ),
+
+          // Fallback back button if loading, error, or user not found
+          if (provider.isLoading || provider.error != null || provider.user == null)
+            Positioned(
+              top: MediaQuery.paddingOf(context).top + 8,
+              left: 16,
+              child: GestureDetector(
+                onTap: () => Navigator.pop(context),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: AppColors.grey100,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.grey300),
+                  ),
+                  child: const Center(
+                    child: Icon(
+                      Icons.arrow_back_ios_new_rounded,
+                      color: AppColors.textPrimary,
+                      size: 18,
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
-    );
+    ));
   }
 
   Widget _buildTabRow() {
@@ -152,6 +186,17 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   Widget _buildGrid(UserProfileProvider provider) {
+    if (provider.userReels.isEmpty) {
+      return const SliverToBoxAdapter(
+        child: EmptyStateWidget(
+          title: 'No Posts Found',
+          message: 'No posts are available yet.',
+          icon: Icons.grid_view_rounded,
+          isScrollable: false,
+        ),
+      );
+    }
+
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
       sliver: SliverGrid(
@@ -272,28 +317,31 @@ class _ExpandedHeader extends StatelessWidget {
             ),
           ),
 
-          // // ── Back button top-left ──
-          // Positioned(
-          //   top: 0,
-          //   left: 16,
-          //   child: Container(
-          //     decoration: BoxDecoration(
-          //       color: Colors.white.withOpacity(0.15),
-          //       borderRadius: BorderRadius.circular(12),
-          //     ),
-          //     child: IconButton(
-          //       icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-          //       onPressed: () => Navigator.pop(context),
-          //     ),
-          //   ),
-          // ),
-
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Center(
+                      child: Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
                 Row(
                   children: [
                     Container(
@@ -327,10 +375,10 @@ class _ExpandedHeader extends StatelessWidget {
                                 user.name ?? '',
                                 style: text20(color: Colors.white, fontWeight: FontWeight.w900),
                               ),
-                              if (user.isVerified == true || user.blueTick == true) ...[
+                              if (user.hasVerifiedTick) ...[
                                 const SizedBox(width: 6),
                                 const Icon(Icons.verified_rounded, 
-                                    color: Colors.blue, size: 20),
+                                    color: AppColors.primary, size: 20),
                               ],
                             ],
                           ),
@@ -514,10 +562,26 @@ class _CollapsedBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // IconButton(
-          //   icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-          //   onPressed: () => Navigator.pop(context),
-          // ),
+          GestureDetector(
+            onTap: () => Navigator.pop(context),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 36,
+              height: 36,
+              margin: const EdgeInsets.only(right: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.18),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Center(
+                child: Icon(
+                  Icons.arrow_back_ios_new_rounded,
+                  color: Colors.white,
+                  size: 16,
+                ),
+              ),
+            ),
+          ),
           Container(
             decoration: BoxDecoration(
               shape: BoxShape.circle,
@@ -540,10 +604,10 @@ class _CollapsedBar extends StatelessWidget {
                 Row(
                   children: [
                     Text(user.name ?? '', style: text14(color: Colors.white, fontWeight: FontWeight.w800)),
-                    if (user.isVerified == true || user.blueTick == true) ...[
+                    if (user.hasVerifiedTick) ...[
                       const SizedBox(width: 4),
                       const Icon(Icons.verified_rounded, 
-                          color: Colors.blue, size: 14),
+                          color: AppColors.primary, size: 14),
                     ],
                   ],
                 ),
@@ -624,6 +688,7 @@ class _GridCard extends StatelessWidget {
               isVisible: true,
               initialReels: allReels,
               initialIndex: index,
+              showBackButton: true,
             ),
           ),
         );

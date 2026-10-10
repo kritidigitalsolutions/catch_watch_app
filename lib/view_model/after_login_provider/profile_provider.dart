@@ -10,11 +10,14 @@ import 'package:catch_watch/repository/interaction_repository.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/utils/hive_service/userdetail.dart';
 import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
+import 'package:catch_watch/data/network/socket_service.dart';
+import 'package:catch_watch/data/exception/app_exception.dart';
 import 'package:dio/dio.dart' as dio;
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:catch_watch/view_model/before_login_provider/auth_providers.dart';
 
 enum ProfileTab { videos, cuts, saved, liked }
 
@@ -29,6 +32,8 @@ class ProfileProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   String? _selectedImagePath;
+  bool _isDeletingAccount = false;
+  String? _deleteAccountError;
 
   List<ReelModel> _myReels = [];
   List<ReelModel> _bookmarkedReels = [];
@@ -42,6 +47,8 @@ class ProfileProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   String? get selectedImagePath => _selectedImagePath;
+  bool get isDeletingAccount => _isDeletingAccount;
+  String? get deleteAccountError => _deleteAccountError;
   List<ReelModel> get myReels => _myReels;
   List<ReelModel> get bookmarkedReels => _bookmarkedReels;
   List<WatchlistItem> get watchlist => _watchlist;
@@ -87,9 +94,22 @@ class ProfileProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> fetchProfile() async {
+  bool _isFetchingProfile = false;
+  bool get isFetchingProfile => _isFetchingProfile;
+  bool _isFetchingMyReels = false;
+  bool _isFetchingBookmarked = false;
+  bool _hasFetchedMyReels = false;
+  bool _hasFetchedBookmarks = false;
+
+  Future<void> fetchProfile({bool forceRefresh = false}) async {
+    if (_isFetchingProfile) {
+      debugPrint('[PROFILE_PROVIDER_TRACE] fetchProfile SKIPPED: already in-flight');
+      return;
+    }
+    _isFetchingProfile = true;
     _isLoading = true;
     _error = null;
+    debugPrint('[PROFILE_PROVIDER_TRACE] fetchProfile START');
     notifyListeners();
 
     try {
@@ -148,23 +168,35 @@ class ProfileProvider extends ChangeNotifier {
     } catch (e) {
       _error = e.toString();
     } finally {
+      _isFetchingProfile = false;
       _isLoading = false;
       notifyListeners();
+      debugPrint('[PROFILE_PROVIDER_TRACE] fetchProfile END');
     }
   }
 
   Future<void> fetchMyReels() async {
+    if (_isFetchingMyReels) {
+      debugPrint('[PROFILE_PROVIDER_TRACE] fetchPosts SKIPPED: already in-flight');
+      return;
+    }
+    _isFetchingMyReels = true;
+    debugPrint('[PROFILE_PROVIDER_TRACE] fetchPosts START');
     try {
       final response = await _reelsRepository.getMyReels();
       if (response['success'] == true) {
         _myReels = (response['reels'] as List)
             .map((e) => ReelModel.fromJson(e))
             .toList();
+        _hasFetchedMyReels = true;
       }
     } catch (e) {
       debugPrint('Error fetching my reels: $e');
+    } finally {
+      _isFetchingMyReels = false;
+      notifyListeners();
+      debugPrint('[PROFILE_PROVIDER_TRACE] fetchPosts END');
     }
-    notifyListeners();
   }
 
   Future<void> fetchWatchlist() async {
@@ -180,6 +212,12 @@ class ProfileProvider extends ChangeNotifier {
   }
 
   Future<void> fetchBookmarkedReels() async {
+    if (_isFetchingBookmarked) {
+      debugPrint('[PROFILE_PROVIDER_TRACE] fetchSaved SKIPPED: already in-flight');
+      return;
+    }
+    _isFetchingBookmarked = true;
+    debugPrint('[PROFILE_PROVIDER_TRACE] fetchSaved START');
     try {
       final response = await InteractionRepository().getBookmarks();
       if (response['success'] == true) {
@@ -187,11 +225,15 @@ class ProfileProvider extends ChangeNotifier {
             .where((e) => e['contentType'] == 'reel' && e['contentDetails'] != null)
             .map((e) => ReelModel.fromJson(e['contentDetails']))
             .toList();
+        _hasFetchedBookmarks = true;
       }
     } catch (e) {
       debugPrint('Error fetching bookmarked reels: $e');
+    } finally {
+      _isFetchingBookmarked = false;
+      notifyListeners();
+      debugPrint('[PROFILE_PROVIDER_TRACE] fetchSaved END');
     }
-    notifyListeners();
   }
 
   Future<void> fetchFollowers({String? userId}) async {
@@ -355,9 +397,128 @@ class ProfileProvider extends ChangeNotifier {
   }
 
   Future<void> logout(BuildContext context) async {
+    // Reset AuthProvider state (clearing phone, OTP, terms)
+    if (context.mounted) {
+      try {
+        Provider.of<AuthProvider>(context, listen: false).resetAuthState(clearPhone: true);
+      } catch (e) {
+        debugPrint('Error resetting AuthProvider during logout: $e');
+      }
+    }
     await HiveService.logout();
-    // Navigate to onboarding
-    Navigator.of(context).pushNamedAndRemoveUntil('/onboarding', (route) => false);
+    _resetUserData();
+    SocketService().disconnect();
+    // Navigate directly to login
+    if (context.mounted) {
+      Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+    }
+  }
+
+  /// Clears local user state in memory after logout or account deletion
+  void _resetUserData() {
+    _user = null;
+    _selectedImagePath = null;
+    _myReels = [];
+    _bookmarkedReels = [];
+    _watchlist = [];
+    _localDrafts = [];
+    _followersList = [];
+    _followingList = [];
+    _followingIds.clear();
+    notifyListeners();
+  }
+
+  /// Deletes the current user's account permanently via `DELETE /api/user/delete-account`.
+  ///
+  /// Prevents concurrent calls with [_isDeletingAccount].
+  /// Clears local session, token, in-memory state, and socket connection ONLY upon confirmed API success.
+  /// Accepts optional [reason], [reasonDetails], and [context] parameters.
+  ///
+  /// Contract Compliance:
+  /// The confirmed backend specification defines:
+  /// - Method: DELETE /api/user/delete-account
+  /// - Headers: Authorization: Bearer <USER_ACCESS_TOKEN>, Content-Type: application/json
+  /// Because no request body is documented in the confirmed backend contract, the request
+  /// is called without a body (data: null). If the backend team confirms request body support,
+  /// the payload can be passed directly to `_authRepository.deleteAccount(data: payload)`.
+  ///
+  /// Returns `true` on success, `false` on failure.
+  Future<bool> deleteAccount({String? reason, String? reasonDetails, BuildContext? context}) async {
+    if (_isDeletingAccount) return false;
+
+    // 1. Session verification: ensure user is authenticated
+    final token = HiveService.getToken();
+    if (token == null || token.isEmpty) {
+      _deleteAccountError = 'You must be logged in to delete your account.';
+      notifyListeners();
+      return false;
+    }
+
+    _isDeletingAccount = true;
+    _deleteAccountError = null;
+    notifyListeners();
+
+    try {
+      // 2. Request body handling strictly based on confirmed backend contract
+      // The confirmed contract does not document or accept a request body on DELETE.
+      // Calling without a body (data: null) to avoid rejection by proxies/gateways.
+      final response = await _authRepository.deleteAccount(data: null);
+
+      // 3. Evaluate response
+      bool isSuccess = true;
+      String? errorMessage;
+
+      if (response is Map) {
+        if (response['success'] == false ||
+            response['status'] == false ||
+            response['status'] == 'error' ||
+            response['status'] == 'fail') {
+          isSuccess = false;
+          errorMessage = response['message']?.toString() ?? response['error']?.toString();
+        } else if (response['success'] == true ||
+            response['status'] == true ||
+            response['status'] == 'success') {
+          isSuccess = true;
+        } else if (response.containsKey('error') && response['error'] != null) {
+          isSuccess = false;
+          errorMessage = response['error'].toString();
+        }
+      }
+
+      if (isSuccess) {
+        // 4. Success handling: Clear auth tokens, session data, user state, and sockets
+        await HiveService.logout();
+        _resetUserData();
+        SocketService().disconnect();
+        if (context != null && context.mounted) {
+          try {
+            Provider.of<AuthProvider>(context, listen: false).resetAuthState(clearPhone: true);
+          } catch (e) {
+            debugPrint('Error resetting AuthProvider during deleteAccount: $e');
+          }
+        }
+        return true;
+      } else {
+        // 5. Failure handling: Retain session, do not navigate, store error
+        _deleteAccountError = errorMessage ?? 'Unable to delete your account right now. Please try again.';
+        return false;
+      }
+    } catch (e) {
+      if (e is AppException) {
+        _deleteAccountError = e.message;
+      } else {
+        _deleteAccountError = e.toString().replaceAll('Exception: ', '').trim();
+      }
+      if (_deleteAccountError == null ||
+          _deleteAccountError!.isEmpty ||
+          _deleteAccountError == 'Unknown error') {
+        _deleteAccountError = 'Unable to delete your account right now. Please try again.';
+      }
+      return false;
+    } finally {
+      _isDeletingAccount = false;
+      notifyListeners();
+    }
   }
 
   Future<void> pickImage(ImageSource source) async {
@@ -455,14 +616,19 @@ class ProfileProvider extends ChangeNotifier {
   }
 
   void setTab(ProfileTab tab) {
+    if (_activeTab == tab) return;
     _activeTab = tab;
     notifyListeners();
     
-    // Auto-refresh data when switching tabs
+    // Auto-fetch data when switching tabs only if not yet fetched
     if (tab == ProfileTab.videos) {
-      fetchMyReels();
+      if (!_hasFetchedMyReels) {
+        fetchMyReels();
+      }
     } else if (tab == ProfileTab.saved) {
-      fetchBookmarkedReels();
+      if (!_hasFetchedBookmarks) {
+        fetchBookmarkedReels();
+      }
     }
   }
 

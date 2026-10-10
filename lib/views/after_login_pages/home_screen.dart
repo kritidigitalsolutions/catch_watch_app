@@ -4,6 +4,7 @@ import 'package:catch_watch/view_model/after_login_provider/subscription_provide
 import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:catch_watch/utils/custom_button.dart';
+import 'package:catch_watch/utils/empty_state_widget.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:catch_watch/views/after_login_pages/content_grid_screen.dart';
 import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
@@ -37,6 +38,7 @@ void _openShortFilm(BuildContext context, Content content) {
       builder: (_) => ShortVideoPlayerScreen(
         isVisible: true,
         initialReels: [ReelModel.fromContent(content)],
+        showBackButton: true,
       ),
     ),
   );
@@ -134,27 +136,78 @@ class _HomeScreenState extends State<HomeScreen> {
       case 4: // TV Shows
         return _buildTvShowsTab(provider);
       default:
-        return _buildAllShowsTab(provider);
+        return _buildDefaultTab(provider);
     }
   }
 
   Widget _buildAllShowsTab(HomeScreenProvider provider) {
+    if (provider.allContent.isEmpty) {
+      return const EmptyStateWidget(
+        title: 'No Shows Found',
+        message: 'No content is available in this category yet.',
+        icon: Icons.movie_filter_outlined,
+      );
+    }
     return _buildTabWithSections(provider, showContinueWatching: true);
   }
 
   Widget _buildMoviesTab(HomeScreenProvider provider) {
+    if (provider.movies.isEmpty) {
+      return const EmptyStateWidget(
+        title: 'No Movies Found',
+        message: 'No content is available in this category yet.',
+        icon: Icons.movie_outlined,
+      );
+    }
     return _buildTabWithSections(provider, showContinueWatching: false);
   }
 
   Widget _buildShortFilmsTab(HomeScreenProvider provider) {
+    if (provider.shortFilms.isEmpty) {
+      return const EmptyStateWidget(
+        title: 'No Short Films Found',
+        message: 'No content is available in this category yet.',
+        icon: Icons.video_collection_outlined,
+      );
+    }
     return _buildTabWithSections(provider, showContinueWatching: false);
   }
 
   Widget _buildSeriesTab(HomeScreenProvider provider) {
+    if (provider.series.isEmpty) {
+      return const EmptyStateWidget(
+        title: 'No Series Found',
+        message: 'No content is available in this category yet.',
+        icon: Icons.auto_awesome_motion_outlined,
+      );
+    }
     return _buildTabWithSections(provider, showContinueWatching: false);
   }
 
   Widget _buildTvShowsTab(HomeScreenProvider provider) {
+    if (provider.tvShows.isEmpty) {
+      return const EmptyStateWidget(
+        title: 'No TV Shows Found',
+        message: 'No content is available in this category yet.',
+        icon: Icons.live_tv_rounded,
+      );
+    }
+    return _buildTabWithSections(provider, showContinueWatching: false);
+  }
+
+  Widget _buildDefaultTab(HomeScreenProvider provider) {
+    final index = provider.selectedTabIndex;
+    final tabName = (index >= 0 && index < provider.tabs.length)
+        ? provider.tabs[index]
+        : 'Data';
+    final content = provider.getContentForTab(index);
+    if (content.isEmpty) {
+      return EmptyStateWidget(
+        title: 'No $tabName Found',
+        message: 'No content is available in this category yet.',
+        icon: Icons.movie_outlined,
+      );
+    }
     return _buildTabWithSections(provider, showContinueWatching: false);
   }
 
@@ -174,7 +227,29 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // Continue Watching - Only if requested and not empty
         if (showContinueWatching && provider.continueWatching.isNotEmpty) ...[
-          _buildSectionHeader('▶ Continue Watching'),
+          _buildSectionHeader(
+            '▶ Continue Watching',
+            onMore: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ContentGridScreen(
+                    title: 'Continue Watching',
+                    contentList: provider.continueWatching
+                        .map((e) {
+                          if (e.content != null) return e.content!;
+                          return Content(
+                            title: e.title,
+                            poster: e.image,
+                            banner: e.image,
+                          );
+                        })
+                        .toList(),
+                  ),
+                ),
+              );
+            },
+          ),
           const SizedBox(height: 10),
           _buildContinueRow(provider),
           const SizedBox(height: 24),

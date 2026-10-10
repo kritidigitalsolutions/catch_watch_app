@@ -17,8 +17,11 @@ class _SplashScreenState extends State<SplashScreen> {
     super.initState();
 
     Future.delayed(const Duration(seconds: 3), () {
+      if (!mounted) return;
       if (HiveService.isLogin()) {
         Navigator.pushReplacementNamed(context, '/home');
+      } else if (HiveService.isOnboardingCompleted()) {
+        Navigator.pushReplacementNamed(context, '/login');
       } else {
         Navigator.pushReplacementNamed(context, '/onboarding');
       }

@@ -1,8 +1,9 @@
 class AppUrl {
-  // static const String serverUrl = 'http://192.168.1.19:5000';
-  static const String serverUrl = 'https://api.catchandwatch.com';
+  static const String serverUrl = 'http://192.168.1.9:5000';
+  // static const String serverUrl = 'https://api.catchandwatch.com';
   // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
+  // static const String baseUrl = "https://api.catchandwatch.com/api";
 
   // Auth Endpoints
   static const String sendOtp = '$baseUrl/auth/send-otp';
@@ -12,6 +13,12 @@ class AppUrl {
   static String getOtherProfileDetails(String username) => '$baseUrl/user/profile-details/$username';
   static String getOtherProfileStats(String userId) => '$baseUrl/user/profile-stats/$userId';
   static const String updateProfile = '$baseUrl/user/update-profile';
+  /// Account Deletion Endpoint
+  /// HTTP Method: DELETE /api/user/delete-account
+  /// Required Headers:
+  /// - Authorization: Bearer <USER_ACCESS_TOKEN>
+  /// - Content-Type: application/json
+  static const String deleteAccount = '$baseUrl/user/delete-account';
   static const String getLegal = '$baseUrl/legal';
   static const String getHelp = '$baseUrl/help';
   static const String watchlist = '$baseUrl/watchlist';
@@ -20,6 +27,7 @@ class AppUrl {
   /// plans & subscriptions
   static const String getPlans = '$baseUrl/plan';
   static const String getBluetickPlans = '$baseUrl/plan/bluetick';
+  static const String getOrangetickPlans = '$baseUrl/plan/orangetick';
   static const String subscribe = '$baseUrl/subscription/subscribe';
   static const String cancelSubscription = '$baseUrl/subscription/cancel';
   static const String subscriptionStatus = '$baseUrl/subscription/status';
@@ -27,7 +35,6 @@ class AppUrl {
   /// verification
   static const String applyVerification = '$baseUrl/verification/apply';
   static const String verificationStatus = '$baseUrl/verification/status';
-  static const String cancelVerification = '$baseUrl/verification/cancel';
   static const String updateVerification = '$baseUrl/verification/update';
   static const String getContent = '$baseUrl/content';
   static const String getCategories = '$baseUrl/categories';
@@ -76,8 +83,10 @@ class AppUrl {
   static String deleteNotification(String id) => '$baseUrl/notifications/$id';
   static const String deleteAllNotifications = '$baseUrl/notifications';
   /// payment
+  static const String paymentOrder = '$baseUrl/payment/create-order';
   static const String createOrder = '$baseUrl/payment/create-order';
   static const String verifyPayment = '$baseUrl/payment/verify';
+  static const String verifyApplePayment = '$baseUrl/payment/verify-apple';
 
   /// ads
   static const String adEvent = '$baseUrl/ads/event';

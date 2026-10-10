@@ -26,6 +26,14 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>We need camera access for video calls and capturing photos.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>We need microphone access for audio and video calls.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>We need access to your photo library to upload videos.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Catch &amp; Watch needs access to save photos and videos to your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -49,6 +57,13 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>voip</string>
+		<string>audio</string>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
@@ -66,27 +81,5 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-
-	<key>NSCameraUsageDescription</key>
-    <string>We need camera access for video calls and capturing photos.</string>
-
-    <key>NSMicrophoneUsageDescription</key>
-    <string>We need microphone access for audio and video calls.</string>
-
-    <key>NSPhotoLibraryUsageDescription</key>
-    <string>This app needs gallery access to select photos.</string>
-
-    <key>NSPhotoLibraryUsageDescription</key>
-    <string>We need access to your photo library to upload videos.</string>
-
-    <key>UIBackgroundModes</key>
-    <array>
-        <string>voip</string>
-        <string>audio</string>
-        <string>fetch</string>
-        <string>remote-notification</string>
-    </array>
-
-
 </dict>
 </plist>

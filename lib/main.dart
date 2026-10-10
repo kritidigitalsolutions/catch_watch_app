@@ -9,6 +9,7 @@ import 'package:catch_watch/view_model/after_login_provider/profile_provider.dar
 import 'package:catch_watch/view_model/after_login_provider/video_upload_provider.dart';
 import 'package:catch_watch/view_model/before_login_provider/auth_providers.dart';
 import 'package:catch_watch/views/before_login_Pages/onboarding_screen.dart';
+import 'package:catch_watch/views/before_login_Pages/login_screen.dart';
 import 'package:catch_watch/views/before_login_Pages/splash_screen.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/utils/text_style.dart';
@@ -104,6 +105,7 @@ class MyApp extends StatelessWidget {
       routes: {
         '/': (context) => const SplashScreen(),
         '/onboarding': (context) => const OnboardingScreen(),
+        '/login': (context) => const LoginScreen(),
         '/home': (context) => const MyHomePage(),
       },
     );
@@ -136,10 +138,13 @@ class MyHomePage extends StatelessWidget {
       });
     }
 
+    final bool isProfile = ctr.pageIndex == 4;
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
-          value: const SystemUiOverlayStyle(
+          value: SystemUiOverlayStyle(
             statusBarColor: Colors.transparent,
-            statusBarIconBrightness: Brightness.dark,
+            statusBarIconBrightness: isProfile ? Brightness.light : Brightness.dark,
+            statusBarBrightness: isProfile ? Brightness.dark : Brightness.light,
             systemNavigationBarColor: Colors.transparent,
             systemNavigationBarIconBrightness: Brightness.dark,
           ),
@@ -158,11 +163,14 @@ class MyHomePage extends StatelessWidget {
               }
             },
             child: Scaffold(
-              appBar: AppBar(
-                toolbarHeight: 0,
-                backgroundColor: AppColors.white,
-                automaticallyImplyLeading: false,
-              ),
+              appBar: isProfile
+                  ? null
+                  : AppBar(
+                      toolbarHeight: 0,
+                      backgroundColor: AppColors.white,
+                      elevation: 0,
+                      automaticallyImplyLeading: false,
+                    ),
               backgroundColor: AppColors.white,
 
               // Separate Bottom Navigation

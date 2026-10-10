@@ -9,6 +9,8 @@ class HiveService {
   static const String likesBoxName = 'likesBox';
   static const String statsBoxName = 'statsBox';
   static const String keysBoxName = 'keysBox';
+  static const String appSettingsBoxName = 'appSettingsBox';
+  static const String onboardingCompletedKey = 'has_completed_onboarding';
 
 
   static Future<void> init() async {
@@ -21,6 +23,7 @@ class HiveService {
     await Hive.openBox(likesBoxName);
     await Hive.openBox(statsBoxName);
     await Hive.openBox(keysBoxName);
+    await Hive.openBox(appSettingsBoxName);
   }
 
 
@@ -149,5 +152,17 @@ class HiveService {
   static bool isProfileComplete() {
     final user = getUser();
     return user != null && user.isNewUser == false;
+  }
+
+  // --- Onboarding Persistence ---
+  static Box get _appSettingsBox => Hive.box(appSettingsBoxName);
+
+  static Future<void> setOnboardingCompleted(bool completed) async {
+    await _appSettingsBox.put(onboardingCompletedKey, completed);
+  }
+
+  static bool isOnboardingCompleted() {
+    if (!Hive.isBoxOpen(appSettingsBoxName)) return false;
+    return _appSettingsBox.get(onboardingCompletedKey, defaultValue: false) == true;
   }
 }

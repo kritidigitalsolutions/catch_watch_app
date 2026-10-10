@@ -15,6 +15,24 @@ class PlanRepository {
     }
   }
 
+  Future<PlanResponse> getOrangetickPlans() async {
+    try {
+      dynamic response = await _apiService.getApi(AppUrl.getOrangetickPlans);
+      return PlanResponse.fromJson(response);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<PlanResponse> getBluetickPlans() async {
+    try {
+      dynamic response = await _apiService.getApi(AppUrl.getBluetickPlans);
+      return PlanResponse.fromJson(response);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<dynamic> subscribe(String planId) async {
     try {
       dynamic response = await _apiService.postApi(AppUrl.subscribe, {'planId': planId});
@@ -58,9 +76,28 @@ class PlanRepository {
     }
   }
 
+  Future<dynamic> createPaymentOrder(String planId) async {
+    try {
+      final body = {'planId': planId};
+      dynamic response = await _apiService.postApi(AppUrl.paymentOrder, body);
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<dynamic> verifyPayment(Map<String, dynamic> data) async {
     try {
       dynamic response = await _apiService.postApi(AppUrl.verifyPayment, data);
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> verifyApplePayment(Map<String, dynamic> data) async {
+    try {
+      dynamic response = await _apiService.postApi(AppUrl.verifyApplePayment, data);
       return response;
     } catch (e) {
       rethrow;

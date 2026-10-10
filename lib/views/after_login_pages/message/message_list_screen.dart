@@ -305,64 +305,65 @@ class _MessageListScreenState extends State<MessageListScreen> {
                     ),
                   )
                 else ...[
-                  // Active Now (Optional Instagram feature)
-                  SizedBox(
-                    height: 100,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      itemCount: conversations.length,
-                      itemBuilder: (context, index) {
-                        final chat = conversations[index];
-                        if (chat.partner?.isOnline != true) return const SizedBox.shrink();
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                          child: Column(
-                            children: [
-                              Stack(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 30,
-                                    backgroundImage: chat.partner?.profileImage != null && chat.partner!.profileImage!.isNotEmpty
-                                        ? NetworkImage(chat.partner!.profileImage!)
-                                        : null,
-                                    child: chat.partner?.profileImage == null || chat.partner!.profileImage!.isEmpty
-                                        ? const Icon(Icons.person, size: 30)
-                                        : null,
-                                  ),
-                                  Positioned(
-                                    bottom: 0,
-                                    right: 0,
-                                    child: Container(
-                                      width: 15,
-                                      height: 15,
-                                      decoration: BoxDecoration(
-                                        color: Colors.green,
-                                        border: Border.all(color: Colors.white, width: 2),
-                                        shape: BoxShape.circle,
+                  // Active Now - only show if there are actual online users
+                  if (conversations.any((c) => c.partner?.isOnline == true)) ...[
+                    SizedBox(
+                      height: 100,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        children: conversations
+                            .where((c) => c.partner?.isOnline == true)
+                            .map((chat) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                            child: Column(
+                              children: [
+                                Stack(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 30,
+                                      backgroundImage: chat.partner?.profileImage != null && chat.partner!.profileImage!.isNotEmpty
+                                          ? NetworkImage(chat.partner!.profileImage!)
+                                          : null,
+                                      child: chat.partner?.profileImage == null || chat.partner!.profileImage!.isEmpty
+                                          ? const Icon(Icons.person, size: 30)
+                                          : null,
+                                    ),
+                                    Positioned(
+                                      bottom: 0,
+                                      right: 0,
+                                      child: Container(
+                                        width: 15,
+                                        height: 15,
+                                        decoration: BoxDecoration(
+                                          color: Colors.green,
+                                          border: Border.all(color: Colors.white, width: 2),
+                                          shape: BoxShape.circle,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                (chat.partner?.name ?? '').split(' ')[0],
-                                style: text12(),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  (chat.partner?.name ?? '').split(' ')[0],
+                                  style: text12(),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
                     ),
-                  ),
-
-                  const Divider(height: 1),
+                    const Divider(height: 1),
+                  ],
 
                   // Chat List
                   Expanded(
                     child: ListView.builder(
                       itemCount: conversations.length,
+                      padding: const EdgeInsets.only(top: 4, bottom: 16),
                       itemBuilder: (context, index) {
                         final chat = conversations[index];
                         final unreadCount = chat.unreadCount ?? 0;

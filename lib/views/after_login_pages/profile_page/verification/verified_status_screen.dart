@@ -83,12 +83,12 @@ class VerifiedStatusScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           Text(
-            'Verified Status Active',
+            'Orange Tick Active',
             style: text24(fontWeight: FontWeight.w900, color: AppColors.primary),
           ),
           const SizedBox(height: 8),
           Text(
-            'You are a verified user',
+            'You are a verified Orange Tick creator',
             style: text16(color: AppColors.textSecondary, fontWeight: FontWeight.w500),
           ),
         ],
@@ -98,7 +98,7 @@ class VerifiedStatusScreen extends StatelessWidget {
 
   Widget _buildBenefitsList() {
     final benefits = [
-      ('Official Verified Badge', 'Show authenticity with the verified badge.', Icons.verified_user_rounded),
+      ('Official Orange Tick Badge', 'Show authenticity with the Orange Tick badge.', Icons.verified_user_rounded),
       ('Advanced Account Protection', 'Enhanced security for your account data.', Icons.security_rounded),
       ('Fake Account Protection', 'Proactive monitoring for impersonation.', Icons.gpp_good_rounded),
       ('Priority Customer Support', 'Direct access to our specialized VIP team.', Icons.support_agent_rounded),

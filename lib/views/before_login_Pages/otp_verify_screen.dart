@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pinput/pinput.dart';
@@ -18,16 +19,28 @@ class OtpScreen extends StatefulWidget {
 class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
   final TextEditingController _pinController = TextEditingController();
   final FocusNode _pinFocusNode = FocusNode();
+  late final TapGestureRecognizer _editTapRecognizer;
 
   @override
   void initState() {
     super.initState();
+    _pinController.clear();
+    _editTapRecognizer = TapGestureRecognizer()..onTap = _handleBackOrEdit;
     listenForCode(); // Removed await as it's a void function
     _printAppSignature();
-    // Ensure focus on the first box
+    // Ensure focus on the first box and provider OTP is clean
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _pinFocusNode.requestFocus();
+      if (mounted) {
+        context.read<AuthProvider>().clearOtp();
+        _pinFocusNode.requestFocus();
+      }
     });
+  }
+
+  void _handleBackOrEdit() {
+    _pinController.clear();
+    context.read<AuthProvider>().goBackToLogin();
+    Navigator.pop(context);
   }
 
   @override
@@ -48,6 +61,7 @@ class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
 
   @override
   void dispose() {
+    _editTapRecognizer.dispose();
     unregisterListener();
     _pinController.dispose();
     _pinFocusNode.dispose();
@@ -64,8 +78,10 @@ class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
 
-    // Update controller if OTP is auto-filled in provider
-    if (auth.otpCode.length == 6 && _pinController.text != auth.otpCode) {
+    // Keep controller in sync if OTP is auto-filled in provider or reset
+    if (auth.otpCode.isEmpty && _pinController.text.isNotEmpty) {
+      _pinController.clear();
+    } else if (auth.otpCode.length == 6 && _pinController.text != auth.otpCode) {
       _pinController.text = auth.otpCode;
     }
 
@@ -89,79 +105,82 @@ class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
       border: Border.all(color: AppColors.primary),
     );
 
-    return Scaffold(
-      backgroundColor: AppColors.white,
-      appBar: AppBar(
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
-          onPressed: () => context.read<AuthProvider>().goBackToLogin(),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          _pinController.clear();
+          context.read<AuthProvider>().goBackToLogin();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.white,
+        appBar: AppBar(
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
+            onPressed: _handleBackOrEdit,
+          ),
         ),
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 16),
-              const _CatchAndWatchLogo(),
-              const SizedBox(height: 28),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const SizedBox(height: 16),
+                const _CatchAndWatchLogo(),
+                const SizedBox(height: 28),
 
-              Text(
-                'Welcome to Catch & Watch',
-                style: text20(fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Your entertainment starts here.',
-                style: text14(color: AppColors.textSecondary),
-                textAlign: TextAlign.center,
-              ),
-
-              const SizedBox(height: 32),
-
-              // ── OTP card ────────────────────────────────────
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: AppColors.grey100,
-                  borderRadius: BorderRadius.circular(16),
+                Text(
+                  'Welcome to Catch & Watch',
+                  style: text20(fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Verify your number',
-                      style: text16(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 8),
-                    RichText(
-                      text: TextSpan(
-                        style: text12(color: AppColors.textSecondary),
-                        children: [
-                          TextSpan(
-                            text:
-                                'A verification code has been sent to ${auth.maskedPhone} Wrong number? ',
-                          ),
-                          WidgetSpan(
-                            child: GestureDetector(
-                              onTap: () =>
-                                  context.read<AuthProvider>().goBackToLogin(),
-                              child: Text(
-                                'Edit',
-                                style: text12(
-                                  color: AppColors.blue,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                const SizedBox(height: 8),
+                Text(
+                  'Your entertainment starts here.',
+                  style: text14(color: AppColors.textSecondary),
+                  textAlign: TextAlign.center,
+                ),
+
+                const SizedBox(height: 32),
+
+                // ── OTP card ────────────────────────────────────
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppColors.grey100,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Verify your number',
+                        style: text16(fontWeight: FontWeight.w600),
                       ),
-                    ),
+                      const SizedBox(height: 8),
+                      RichText(
+                        text: TextSpan(
+                          style: text12(color: AppColors.textSecondary),
+                          children: [
+                            TextSpan(
+                              text:
+                                  'A verification code has been sent to ${auth.maskedPhone}\nWrong number? ',
+                            ),
+                            TextSpan(
+                              text: 'Edit',
+                              style: text12(
+                                color: AppColors.blue,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              recognizer: _editTapRecognizer,
+                            ),
+                          ],
+                        ),
+                      ),
                     const SizedBox(height: 20),
 
                     // OTP boxes using Pinput
@@ -249,8 +268,9 @@ class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class _CatchAndWatchLogo extends StatelessWidget {

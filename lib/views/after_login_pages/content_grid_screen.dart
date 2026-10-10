@@ -1,6 +1,7 @@
 import 'package:catch_watch/models/content_model.dart';
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
+import 'package:catch_watch/utils/empty_state_widget.dart';
 import 'package:catch_watch/utils/text_style.dart';
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
@@ -37,7 +38,11 @@ class ContentGridScreen extends StatelessWidget {
         ),
       ),
       body: contentList.isEmpty
-          ? const Center(child: Text('No content available'))
+          ? EmptyStateWidget(
+              title: 'No $title Found',
+              message: 'No content is available in this category yet.',
+              icon: Icons.movie_outlined,
+            )
           : GridView.builder(
               padding: const EdgeInsets.all(16),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -78,6 +83,7 @@ class _GridItem extends StatelessWidget {
           builder: (_) => ShortVideoPlayerScreen(
             isVisible: true,
             initialReels: [ReelModel.fromContent(content)],
+            showBackButton: true,
           ),
         ),
       );

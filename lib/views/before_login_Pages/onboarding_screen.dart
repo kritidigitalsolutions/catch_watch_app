@@ -1,4 +1,5 @@
 import 'package:catch_watch/utils/custom_button.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/views/before_login_Pages/login_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -31,13 +32,11 @@ class OnboardingScreen extends StatelessWidget {
             top: 50,
             right: 20,
             child: TextButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const LoginScreen(),
-                  ),
-                );
+              onPressed: () async {
+                await HiveService.setOnboardingCompleted(true);
+                if (context.mounted) {
+                  Navigator.pushReplacementNamed(context, '/login');
+                }
               },
               child: Text(
                 "Skip",
@@ -84,16 +83,14 @@ class OnboardingScreen extends StatelessWidget {
                   child: AppButton(title:  provider.currentPage == provider.onboardingData.length - 1
                       ? "Get Started"
                       : "Next",
-                  onTap: (){
+                  onTap: () async {
                     if (provider.currentPage < provider.onboardingData.length - 1) {
                       provider.nextPage();
                     } else {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const LoginScreen(),
-                        ),
-                      );
+                      await HiveService.setOnboardingCompleted(true);
+                      if (context.mounted) {
+                        Navigator.pushReplacementNamed(context, '/login');
+                      }
                     }
                   },
                   ),

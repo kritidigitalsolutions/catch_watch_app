@@ -10,6 +10,7 @@ import 'package:catch_watch/views/after_login_pages/profile_page/verification/ve
 import 'package:catch_watch/views/after_login_pages/profile_page/verification/verified_status_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/vip_support/vip_support_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/legal_policies_list_screen.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/delete_account_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../res/app_colors.dart';
@@ -44,11 +45,13 @@ class MenuScreen extends StatelessWidget {
                     },
                   ),
                   _divider(),
-                  if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.isVerified != true && provider.user?.blueTick != true) ...[
+                  if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.hasVerifiedTick != true) ...[
                     _menuItem(
                       Icons.verified_user_outlined,
-                      'Get Blue Tick',
+                      'Get Orange Tick',
                       onTap: () {
+                        debugPrint('[ORANGE_TICK_DEBUG] Get Orange Tick clicked');
+                        debugPrint('[ORANGE_TICK_DEBUG] Current Route: ${ModalRoute.of(context)?.settings.name ?? 'menu_screen'}');
                         Navigator.push(
                           context,
                           MaterialPageRoute(
@@ -72,7 +75,7 @@ class MenuScreen extends StatelessWidget {
                     },
                   ),
                   _divider(),
-                  if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
+                  if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.hasVerifiedTick == true) ...[
                     // _menuItem(
                     //   Icons.verified_user_rounded,
                     //   'Verified User',
@@ -141,6 +144,8 @@ class MenuScreen extends StatelessWidget {
                   const SizedBox(height: 16),
                   _divider(),
                   _logoutItem(context, provider),
+                  _divider(),
+                  _deleteAccountItem(context, provider),
                   const SizedBox(height: 32),
                 ],
               ),
@@ -233,10 +238,10 @@ class MenuScreen extends StatelessWidget {
                               fontWeight: FontWeight.w800,
                             ),
                           ),
-                          if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
+                          if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.hasVerifiedTick == true) ...[
                             const SizedBox(width: 4),
                             const Icon(Icons.verified_rounded, 
-                                color: Colors.blue, size: 16),
+                                color: AppColors.primary, size: 16),
                           ],
                         ],
                       ),
@@ -332,6 +337,47 @@ class MenuScreen extends StatelessWidget {
             Expanded(
               child: Text(
                 'Log Out',
+                style: text15(
+                  color: AppColors.error,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.error,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _deleteAccountItem(BuildContext context, ProfileProvider provider) {
+    return InkWell(
+      onTap: () => showDeleteAccountDialog(context),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF0F0),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.delete_outline_rounded,
+                color: AppColors.error,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                'Delete Account',
                 style: text15(
                   color: AppColors.error,
                   fontWeight: FontWeight.w700,

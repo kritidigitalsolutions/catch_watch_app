@@ -190,6 +190,13 @@ class HomeScreenProvider extends ChangeNotifier {
     }
   }
 
+  List<Content> getContentForTab(int index) => _getContentForTab(index);
+
+  List<Content> get currentTabContent => _getContentForTab(_selectedTabIndex);
+
+  bool get isCurrentTabEmpty => _getContentForTab(_selectedTabIndex).isEmpty;
+
+
   List<Content> get currentTabBanners {
     final baseList = _getContentForTab(_selectedTabIndex);
     final banners = baseList.where((c) => c.isNewContent == true).toList();

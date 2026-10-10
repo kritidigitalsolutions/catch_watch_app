@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../models/leaderboard_model.dart';
 import '../../res/app_colors.dart';
+import '../../utils/empty_state_widget.dart';
 import '../../utils/text_style.dart';
 import '../../view_model/after_login_provider/wallet_provider.dart';
 import '../../view_model/after_login_provider/profile_provider.dart';
@@ -13,8 +14,6 @@ class LeaderboardScreen extends StatefulWidget {
   @override
   State<LeaderboardScreen> createState() => _LeaderboardScreenState();
 }
-
-// enum LeaderboardFilter { day, week, month, year } // Removed as we use TimeFilter from WalletProvider
 
 class _LeaderboardScreenState extends State<LeaderboardScreen> {
   String _selectedTimeframe = 'all';
@@ -31,10 +30,68 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     });
   }
 
+  int _getUserPoints(LeaderboardUser user) {
+    if (_selectedTimeframe == 'all') {
+      if (user.totalPoints != null && user.totalPoints! > 0) {
+        return user.totalPoints!;
+      }
+      return user.periodPoints ?? 0;
+    }
+    return user.periodPoints ?? user.totalPoints ?? 0;
+  }
+
+  String _getTimeframeLabel(String filter) {
+    switch (filter) {
+      case 'today':
+        return 'Today';
+      case 'week':
+        return 'This Week';
+      case 'month':
+        return 'This Month';
+      case 'year':
+        return 'This Year';
+      default:
+        return 'All Time';
+    }
+  }
+
+  List<LeaderboardUser> _getFilteredLeaderboard(List<LeaderboardUser> rawLeaderboard) {
+    List<LeaderboardUser> list = List.from(rawLeaderboard);
+    if (_selectedTimeframe != 'all') {
+      final hasPeriodPoints = list.any((u) => (u.periodPoints ?? 0) > 0);
+      if (hasPeriodPoints) {
+        list.sort((a, b) => (b.periodPoints ?? 0).compareTo(a.periodPoints ?? 0));
+        list = list.asMap().entries.map((entry) {
+          final idx = entry.key;
+          final u = entry.value;
+          return LeaderboardUser(
+            rank: idx + 1,
+            id: u.id,
+            name: u.name,
+            username: u.username,
+            profileImage: u.profileImage,
+            blueTick: u.blueTick,
+            qualityScore: u.qualityScore,
+            creatorLevel: u.creatorLevel,
+            totalPoints: u.totalPoints,
+            periodPoints: u.periodPoints,
+            qualifiedViews: u.qualifiedViews,
+            watchMinutes: u.watchMinutes,
+            reelsCount: u.reelsCount,
+            followersCount: u.followersCount,
+            badges: u.badges,
+          );
+        }).toList();
+      }
+    }
+    return list;
+  }
+
   @override
   Widget build(BuildContext context) {
     final walletProvider = context.watch<WalletProvider>();
-    final leaderboard = walletProvider.leaderboardData?.leaderboard ?? [];
+    final rawLeaderboard = walletProvider.leaderboardData?.leaderboard ?? [];
+    final leaderboard = _getFilteredLeaderboard(rawLeaderboard);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: const SystemUiOverlayStyle(
@@ -46,29 +103,29 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
       child: Scaffold(
         backgroundColor: Colors.white,
         appBar: AppBar(
-        title: Text("Leaderboard", style: text18(color: Colors.white, fontWeight: FontWeight.bold)),
-        backgroundColor: AppColors.primary,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+          title: Text("Leaderboard", style: text18(color: Colors.white, fontWeight: FontWeight.bold)),
+          backgroundColor: AppColors.primary,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ),
+        bottomNavigationBar: _buildMyRankTile(walletProvider, leaderboard),
+        body: RefreshIndicator(
+          onRefresh: () => walletProvider.fetchLeaderboard(range: _selectedTimeframe),
+          child: _buildBody(walletProvider, leaderboard),
         ),
       ),
-      bottomNavigationBar: _buildMyRankTile(walletProvider),
-      body: walletProvider.isLoading && leaderboard.isEmpty
-          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-          : RefreshIndicator(
-              onRefresh: () => walletProvider.fetchLeaderboard(range: _selectedTimeframe),
-              child: _buildBody(walletProvider, leaderboard),
-            ),
-    ));
+    );
   }
 
   Widget _buildBody(WalletProvider provider, List<LeaderboardUser> leaderboard) {
     if (provider.error != null) {
       return ListView(
         children: [
-          SizedBox(height: MediaQuery.of(context).size.height * 0.2),
+          _buildTimeframeSelector(provider),
+          SizedBox(height: MediaQuery.of(context).size.height * 0.15),
           const Icon(Icons.error_outline_rounded, size: 48, color: Colors.redAccent),
           const SizedBox(height: 16),
           Center(
@@ -101,13 +158,27 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
       );
     }
 
+    if (provider.isLoading) {
+      return ListView(
+        children: [
+          _buildTimeframeSelector(provider),
+          SizedBox(height: MediaQuery.of(context).size.height * 0.2),
+          const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        ],
+      );
+    }
+
     if (leaderboard.isEmpty) {
       return ListView(
         children: [
-          _buildHeader(leaderboard),
           _buildTimeframeSelector(provider),
-          SizedBox(height: MediaQuery.of(context).size.height * 0.2),
-          const Center(child: Text("No rankings found for this period")),
+          const SizedBox(height: 24),
+          EmptyStateWidget(
+            title: "No Rankings Found",
+            message: "No rankings are available for ${_getTimeframeLabel(_selectedTimeframe).toLowerCase()}.",
+            icon: Icons.leaderboard_outlined,
+            isScrollable: false,
+          ),
         ],
       );
     }
@@ -153,6 +224,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           return Expanded(
             child: InkWell(
               onTap: () {
+                if (_selectedTimeframe == filter && !walletProvider.isLoading) return;
                 setState(() => _selectedTimeframe = filter);
                 walletProvider.fetchLeaderboard(range: filter);
               },
@@ -189,19 +261,27 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     );
   }
 
-  Widget _buildMyRankTile(WalletProvider walletProvider) {
+  Widget _buildMyRankTile(WalletProvider walletProvider, List<LeaderboardUser> leaderboard) {
+    if (walletProvider.isLoading) return const SizedBox.shrink();
+
     final profileProvider = context.watch<ProfileProvider>();
     final user = profileProvider.user;
-    final rank = walletProvider.leaderboardData?.currentUserRank;
+    final serverRank = walletProvider.leaderboardData?.currentUserRank;
 
-    if (user == null || rank == null || rank <= 0) return const SizedBox.shrink();
+    if (user == null) return const SizedBox.shrink();
 
-    // Try to find current user in the list to get their period points
-    final leaderboard = walletProvider.leaderboardData?.leaderboard ?? [];
+    // Try to find current user in the list to get their points and rank
     final currentUserInList = leaderboard.firstWhere(
       (u) => u.id == user.id,
-      orElse: () => LeaderboardUser(rank: rank, periodPoints: 0),
+      orElse: () => LeaderboardUser(
+        rank: serverRank,
+        periodPoints: 0,
+        totalPoints: 0,
+      ),
     );
+
+    final displayRank = currentUserInList.rank ?? serverRank;
+    if (displayRank == null || displayRank <= 0) return const SizedBox.shrink();
 
     return Container(
       decoration: BoxDecoration(
@@ -232,7 +312,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  "#$rank",
+                  "#$displayRank",
                   style: text12(color: Colors.white, fontWeight: FontWeight.bold),
                 ),
               ),
@@ -268,7 +348,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    "${currentUserInList.periodPoints ?? 0}",
+                    "${_getUserPoints(currentUserInList)}",
                     style: text16(color: AppColors.primary, fontWeight: FontWeight.bold),
                   ),
                   Text(
@@ -374,21 +454,20 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                   style: text12(color: Colors.white, fontWeight: FontWeight.bold),
                 ),
               ),
-              if (user.blueTick == true) ...[
+              if (user.hasVerifiedTick) ...[
                 const SizedBox(width: 4),
-                const Icon(Icons.verified_rounded, color: Colors.blue, size: 12),
+                const Icon(Icons.verified_rounded, color: AppColors.primary, size: 12),
               ],
             ],
           ),
           Text(
-            "${user.periodPoints ?? 0} pts",
+            "${_getUserPoints(user)} pts",
             style: text10(color: Colors.white70),
           ),
         ],
       ),
     );
   }
-
 
   Widget _buildLeaderboardTile(LeaderboardUser user) {
     return Padding(
@@ -424,9 +503,9 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                       user.name ?? '',
                       style: text14(fontWeight: FontWeight.w600),
                     ),
-                    if (user.blueTick == true) ...[
+                    if (user.hasVerifiedTick) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.verified_rounded, color: Colors.blue, size: 14),
+                      const Icon(Icons.verified_rounded, color: AppColors.primary, size: 14),
                     ],
                   ],
                 ),
@@ -442,7 +521,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
             ),
           ),
           Text(
-            "${user.periodPoints ?? 0} pts",
+            "${_getUserPoints(user)} pts",
             style: text14(color: AppColors.primary, fontWeight: FontWeight.bold),
           ),
         ],

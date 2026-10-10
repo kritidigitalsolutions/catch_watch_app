@@ -50,6 +50,7 @@ class LeaderboardUser {
   final String? username;
   final String? profileImage;
   final bool? blueTick;
+  final bool? orangeTick;
   final int? qualityScore;
   final String? creatorLevel;
   final int? totalPoints;
@@ -60,6 +61,8 @@ class LeaderboardUser {
   final int? followersCount;
   final List<String>? badges;
 
+  bool get hasVerifiedTick => (blueTick == true) || (orangeTick == true);
+
   LeaderboardUser({
     this.rank,
     this.id,
@@ -67,6 +70,7 @@ class LeaderboardUser {
     this.username,
     this.profileImage,
     this.blueTick,
+    this.orangeTick,
     this.qualityScore,
     this.creatorLevel,
     this.totalPoints,
@@ -97,6 +101,7 @@ class LeaderboardUser {
       username: json['username'],
       profileImage: json['profileImage'],
       blueTick: json['blueTick'] ?? false,
+      orangeTick: json['orangeTick'] ?? false,
       qualityScore: parseInt(json['qualityScore']),
       creatorLevel: json['creatorLevel'],
       totalPoints: parseInt(json['totalPoints']),

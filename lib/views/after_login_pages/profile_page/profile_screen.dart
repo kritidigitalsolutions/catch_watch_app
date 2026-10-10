@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/models/watchlist_model.dart';
-import 'package:catch_watch/utils/custom_button.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/video_upload_provider.dart';
@@ -16,8 +15,10 @@ import 'package:catch_watch/view_model/after_login_provider/verification_provide
 import 'package:catch_watch/views/after_login_pages/profile_page/verification/verification_main_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/vip_support/vip_support_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
+import '../../../utils/empty_state_widget.dart';
 import '../../../utils/hive_service/hive_service.dart';
 import '../../../models/content_model.dart';
 import '../../../res/app_colors.dart';
@@ -36,43 +37,57 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final ScrollController _scrollController = ScrollController();
-  bool _isCollapsed = false;
-
-  // Jab scroll is value se zyada ho, collapsed bar dikhao
-  static const double _collapseThreshold = 160.0;
+  bool _hasInitialized = false;
+  int _lastPageIndex = 4;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<ProfileProvider>().fetchProfile();
-      context.read<VerificationProvider>().fetchVerificationStatus();
-      context.read<WalletProvider>().fetchPointsSummary();
-      context.read<WalletProvider>().fetchWalletSummary();
+    debugPrint('[PROFILE_LIFECYCLE] initState');
+    if (!_hasInitialized) {
+      _hasInitialized = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        debugPrint('[PROFILE_LIFECYCLE] postFrameCallback one-time init');
+        debugPrint(
+            '[PROFILE_API_TRACE]\nAPI: fetchProfile, fetchVerificationStatus, fetchPointsSummary, fetchWalletSummary\nCaller: ProfileScreen.initState\nLifecycle: postFrameCallback\nTimestamp: ${DateTime.now().toIso8601String()}');
+        context.read<ProfileProvider>().fetchProfile();
+        context.read<VerificationProvider>().fetchVerificationStatus();
+        context.read<WalletProvider>().fetchPointsSummary();
+        context.read<WalletProvider>().fetchWalletSummary();
 
-      // Listen to page changes in HomeScreenProvider to refresh profile when navigating to it
-      final homeProvider = context.read<HomeScreenProvider>();
-      homeProvider.addListener(_homeProviderListener);
-    });
-    _scrollController.addListener(_scrollListener);
-  }
-
-  void _homeProviderListener() {
-    final homeProvider = context.read<HomeScreenProvider>();
-    if (homeProvider.pageIndex == 4) { // 4 is the Profile tab index
-       context.read<ProfileProvider>().fetchProfile();
+        // Listen to page changes in HomeScreenProvider to refresh profile when navigating to it
+        final homeProvider = context.read<HomeScreenProvider>();
+        _lastPageIndex = homeProvider.pageIndex;
+        homeProvider.addListener(_homeProviderListener);
+      });
     }
   }
 
-  void _scrollListener() {
-    final collapsed = _scrollController.offset > _collapseThreshold;
-    if (collapsed != _isCollapsed) {
-      setState(() => _isCollapsed = collapsed);
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    debugPrint('[PROFILE_LIFECYCLE] didChangeDependencies');
+  }
+
+  void _homeProviderListener() {
+    if (!mounted) return;
+    final homeProvider = context.read<HomeScreenProvider>();
+    final currentPageIndex = homeProvider.pageIndex;
+    // Only trigger fetchProfile when transitioning into Profile tab (index 4) from another tab
+    if (currentPageIndex == 4 && _lastPageIndex != 4) {
+      _lastPageIndex = 4;
+      debugPrint(
+          '[PROFILE_API_TRACE]\nAPI: fetchProfile\nCaller: ProfileScreen._homeProviderListener\nLifecycle: tab switch to Profile\nTimestamp: ${DateTime.now().toIso8601String()}');
+      context.read<ProfileProvider>().fetchProfile();
+    } else if (currentPageIndex != 4) {
+      _lastPageIndex = currentPageIndex;
     }
   }
 
   @override
   void dispose() {
+    debugPrint('[PROFILE_LIFECYCLE] dispose');
     context.read<HomeScreenProvider>().removeListener(_homeProviderListener);
     _scrollController.dispose();
     super.dispose();
@@ -80,57 +95,54 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint('[PROFILE_LIFECYCLE] build');
     final provider = context.watch<ProfileProvider>();
 
-    return Scaffold(
-      backgroundColor: AppColors.white,
-      body: Stack(
-        children: [
-          // ── Main scrollable content ──────────────────────────────────────
-          RefreshIndicator(
-            onRefresh: () => provider.fetchProfile(),
-            color: AppColors.primary,
-            child: CustomScrollView(
-              controller: _scrollController,
-              slivers: [
-                // Full expanded orange header
-                SliverToBoxAdapter(child: _ExpandedHeader(provider: provider)),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+      ),
+      child: Scaffold(
+        backgroundColor: AppColors.white,
+        body: RefreshIndicator(
+          onRefresh: () {
+            debugPrint(
+                '[PROFILE_API_TRACE]\nAPI: fetchProfile\nCaller: ProfileScreen.RefreshIndicator\nLifecycle: pull-to-refresh\nTimestamp: ${DateTime.now().toIso8601String()}');
+            return provider.fetchProfile(forceRefresh: true);
+          },
+          color: AppColors.primary,
+          child: CustomScrollView(
+            controller: _scrollController,
+            slivers: [
+              // Full expanded orange header
+              SliverToBoxAdapter(child: _ExpandedHeader(provider: provider)),
 
-                // Stats Section (New position and design)
-                SliverToBoxAdapter(child: _buildStatsSection(context, provider)),
+              // Stats Section (New position and design)
+              SliverToBoxAdapter(child: _buildStatsSection(context, provider)),
 
-                // Tab row
-                SliverToBoxAdapter(child: _buildTabRow(provider)),
+              // Tab row
+              SliverToBoxAdapter(child: _buildTabRow(provider)),
 
-                // Divider
-                const SliverToBoxAdapter(
-                  child: Divider(
-                    color: Color(0xFFF0F0F0),
-                    thickness: 1,
-                    height: 1,
-                  ),
+              // Divider
+              const SliverToBoxAdapter(
+                child: Divider(
+                  color: Color(0xFFF0F0F0),
+                  thickness: 1,
+                  height: 1,
                 ),
+              ),
 
-                // Grid
-                _buildGrid(provider),
+              // Grid
+              _buildGrid(provider),
 
-                SliverToBoxAdapter(
-                  child: SizedBox(height: MediaQuery.paddingOf(context).bottom + 80),
-                ),
-              ],
-            ),
+              SliverToBoxAdapter(
+                child: SizedBox(height: MediaQuery.paddingOf(context).bottom + 80),
+              ),
+            ],
           ),
-
-          // ── Collapsed sticky bar (only visible after scroll threshold) ───
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeInOut,
-            top: _isCollapsed ? 0 : -80, // slide in from top
-            left: 0,
-            right: 0,
-            child: _CollapsedBar(provider: provider),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -265,6 +277,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
       items.insert(0, uploadProvider);
     }
 
+    if (provider.isLoading && items.isEmpty) {
+      return const SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 48),
+          child: Center(
+            child: CircularProgressIndicator(color: AppColors.primary),
+          ),
+        ),
+      );
+    }
+
+    if (items.isEmpty) {
+      if (provider.activeTab == ProfileTab.saved) {
+        return const SliverToBoxAdapter(
+          child: EmptyStateWidget(
+            title: 'No Saved Posts Found',
+            message: "You haven't saved any posts yet.",
+            icon: Icons.bookmark_outline_rounded,
+            isScrollable: false,
+          ),
+        );
+      } else {
+        return const SliverToBoxAdapter(
+          child: EmptyStateWidget(
+            title: 'No Posts Found',
+            message: 'No posts are available yet.',
+            icon: Icons.grid_view_rounded,
+            isScrollable: false,
+          ),
+        );
+      }
+    }
+
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
       sliver: SliverGrid(
@@ -289,107 +334,112 @@ class _ExpandedHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final topPadding = MediaQuery.of(context).padding.top;
-
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.primary,
       ),
-      child: Stack(
-        children: [
-          Padding(
-            padding: EdgeInsets.only(top: topPadding + 16, bottom: 20, left: 14, right: 14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // Avatar
-                Container(
-                  padding: const EdgeInsets.all(2.5),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
+      child: SafeArea(
+        bottom: false,
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 16, bottom: 20, left: 14, right: 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Avatar
+                  Container(
+                    padding: const EdgeInsets.all(2.5),
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                    child: provider.user?.profileImage != null && provider.user!.profileImage!.isNotEmpty
+                        ? CircleAvatar(
+                            radius: 35,
+                            backgroundImage: NetworkImage(provider.user!.profileImage!),
+                          )
+                        : CircleAvatar(
+                            radius: 35,
+                            backgroundColor: AppColors.grey200,
+                            child: const Icon(Icons.person, size: 40, color: Colors.white),
+                          ),
                   ),
-                  child: provider.user?.profileImage != null && provider.user!.profileImage!.isNotEmpty
-                      ? CircleAvatar(
-                          radius: 35,
-                          backgroundImage: NetworkImage(provider.user!.profileImage!),
-                        )
-                      : CircleAvatar(
-                          radius: 35,
-                          backgroundColor: AppColors.grey200,
-                          child: const Icon(Icons.person, size: 40, color: Colors.white),
-                        ),
-                ),
-                const SizedBox(width: 14),
-                // Info & Buttons
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            provider.name,
-                            style: text18(color: Colors.white, fontWeight: FontWeight.w900),
-                          ),
-                          if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
-                            const SizedBox(width: 6),
-                            const Icon(Icons.verified_rounded, 
-                                color: Colors.blue, size: 18),
+                  const SizedBox(width: 14),
+                  // Info & Buttons
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              provider.name,
+                              style: text18(color: Colors.white, fontWeight: FontWeight.w900),
+                            ),
+                            if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.hasVerifiedTick == true) ...[
+                              const SizedBox(width: 6),
+                              const Icon(Icons.verified_rounded, 
+                                  color: AppColors.primary, size: 18),
+                            ],
                           ],
-                        ],
-                      ),
-                      Text(
-                        provider.handle,
-                        style: text13(color: Colors.white.withOpacity(0.8)),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _actionPill(
-                            context,
-                            const Icon(Icons.stars_rounded, color: AppColors.yellow, size: 14),
-                            "${context.watch<WalletProvider>().availablePoints} Pts",
-                            () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WalletScreen())),
-                          ),
-                          if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.isVerified != true && provider.user?.blueTick != true) ...[
+                        ),
+                        Text(
+                          provider.handle,
+                          style: text13(color: Colors.white.withOpacity(0.8)),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
                             _actionPill(
                               context,
-                              const Icon(Icons.verified_rounded, color: Colors.blue, size: 12),
-                              "Get Blue Tick",
-                              () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VerificationMainScreen())),
-                              isPrimary: true,
+                              const Icon(Icons.stars_rounded, color: AppColors.yellow, size: 14),
+                              "${context.watch<WalletProvider>().availablePoints} Pts",
+                              () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WalletScreen())),
                             ),
+                            if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.hasVerifiedTick != true) ...[
+                              _actionPill(
+                                context,
+                                const Icon(Icons.verified_rounded, color: AppColors.primary, size: 12),
+                                "Get Orange Tick",
+                                () {
+                                  debugPrint('[ORANGE_TICK_DEBUG] Get Orange Tick clicked');
+                                  debugPrint('[ORANGE_TICK_DEBUG] Current Route: ${ModalRoute.of(context)?.settings.name ?? 'profile_screen'}');
+                                  Navigator.push(context, MaterialPageRoute(builder: (_) => const VerificationMainScreen()));
+                                },
+                                isPrimary: true,
+                              ),
+                            ],
                           ],
-                        ],
-                      ),
-                    ],
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          Positioned(
-            top: topPadding + 8,
-            right: 14,
-            child: Row(
-              children: [
-                _glassIconButton(
-                  Icons.grid_view_rounded,
-                  () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DashboardScreen())),
-                ),
-                const SizedBox(width: 8),
-                _glassIconButton(
-                  Icons.menu_rounded,
-                  () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MenuScreen())),
-                ),
-              ],
+            Positioned(
+              top: 8,
+              right: 14,
+              child: Row(
+                children: [
+                  _glassIconButton(
+                    Icons.grid_view_rounded,
+                    () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DashboardScreen())),
+                  ),
+                  const SizedBox(width: 8),
+                  _glassIconButton(
+                    Icons.menu_rounded,
+                    () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MenuScreen())),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -435,125 +485,7 @@ class _ExpandedHeader extends StatelessWidget {
   }
 }
 
-// ─── Collapsed sticky bar (slides in from top when scrolled) ───────────────
-class _CollapsedBar extends StatelessWidget {
-  final ProfileProvider provider;
-  const _CollapsedBar({required this.provider});
 
-  @override
-  Widget build(BuildContext context) {
-    final topPadding = MediaQuery.of(context).padding.top;
-
-    return Container(
-      padding: EdgeInsets.only(
-        top: topPadding + 8,
-        bottom: 10,
-        left: 16,
-        right: 16,
-      ),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFFF5F00), Color(0xFFCC3D00)],
-        ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(20),
-          bottomRight: Radius.circular(20),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Color(0x33FF5F00),
-            blurRadius: 12,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          // Small avatar
-          Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: Colors.white.withOpacity(0.3),
-                width: 2,
-              ),
-            ),
-            child: provider.user?.profileImage != null && provider.user!.profileImage!.isNotEmpty
-                ? CircleAvatar(
-                    radius: 18,
-                    backgroundImage: NetworkImage(provider.user!.profileImage!),
-                    backgroundColor: Colors.white,
-                    onBackgroundImageError: (_, _) {},
-                  )
-                : Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.person_rounded, size: 20, color: AppColors.primary),
-                  ),
-          ),
-          const SizedBox(width: 10),
-
-          // Name + handle
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      provider.name,
-                      style: text14(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
-                      const SizedBox(width: 4),
-                      const Icon(Icons.verified_rounded, 
-                          color: Colors.blue, size: 14),
-                    ],
-                  ],
-                ),
-                Text(
-                  '${provider.followers} Followers • ${provider.following} Following',
-                  style: text11(color: Colors.white70),
-                ),
-                Text(provider.handle, style: text11(color: Colors.white70)),
-              ],
-            ),
-          ),
-
-          const SizedBox(width: 8),
-
-          // Menu button
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: CustomIconButton(
-              icon: Icons.menu_rounded,
-              color: AppColors.white,
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => MenuScreen()),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ─── Grid card ──────────────────────────────────────────────────────────────
 class _GridCard extends StatelessWidget {
@@ -562,7 +494,7 @@ class _GridCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final homeProvider = context.watch<HomeScreenProvider>();
+    final homeProvider = context.read<HomeScreenProvider>();
     final profileProvider = context.read<ProfileProvider>();
     final reelsProvider = context.read<ReelsProvider>();
     String? imageUrl;
@@ -591,6 +523,7 @@ class _GridCard extends StatelessWidget {
                 builder: (_) => ShortVideoPlayerScreen(
                   isVisible: true,
                   initialReels: [item],
+                  showBackButton: true,
                 ),
               ),
             );
@@ -620,6 +553,7 @@ class _GridCard extends StatelessWidget {
                 builder: (_) => ShortVideoPlayerScreen(
                   isVisible: true,
                   initialReels: [ReelModel.fromContent(content)],
+                  showBackButton: true,
                 ),
               ),
             );

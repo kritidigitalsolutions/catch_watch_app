@@ -162,10 +162,10 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                                     "👋 Welcome ${profileProvider.name.split(' ')[0]}",
                                     style: text18(color: Colors.white, fontWeight: FontWeight.w800),
                                   ),
-                                  if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || profileProvider.user?.isVerified == true || profileProvider.user?.blueTick == true) ...[
+                                  if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || profileProvider.user?.hasVerifiedTick == true) ...[
                                     const SizedBox(width: 6),
                                     const Icon(Icons.verified_rounded, 
-                                        color: Colors.blue, size: 18),
+                                        color: AppColors.primary, size: 18),
                                   ],
                                 ],
                               ),

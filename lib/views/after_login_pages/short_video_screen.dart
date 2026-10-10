@@ -22,12 +22,14 @@ class ShortVideoPlayerScreen extends StatefulWidget {
   final bool isVisible;
   final List<ReelModel>? initialReels;
   final int initialIndex;
+  final bool? showBackButton;
 
   const ShortVideoPlayerScreen({
     super.key,
     required this.isVisible,
     this.initialReels,
     this.initialIndex = 0,
+    this.showBackButton,
   });
 
   @override
@@ -304,6 +306,42 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
   Widget build(BuildContext context) {
     final provider = context.watch<ReelsProvider>();
     final reels = widget.initialReels ?? provider.reels;
+    final bool canPop = Navigator.canPop(context);
+    final bool shouldShowBack = widget.showBackButton ?? (canPop && widget.initialReels != null);
+
+    Widget buildBackBtn() {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(left: 12, top: 8),
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: GestureDetector(
+              onTap: () => Navigator.pop(context),
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.25),
+                    width: 1,
+                  ),
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     // Listen for targetReelId even after initState (if already on this screen)
     if (widget.isVisible && provider.targetReelId != null && widget.initialReels == null) {
@@ -311,50 +349,65 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
     }
 
     if (provider.isLoading && reels.isEmpty) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: Colors.black,
-        body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        body: Stack(
+          children: [
+            const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+            if (shouldShowBack) buildBackBtn(),
+          ],
+        ),
       );
     }
 
     if (reels.isEmpty && provider.error != null) {
       return Scaffold(
         backgroundColor: Colors.black,
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.wifi_off_rounded, size: 64, color: Colors.white.withOpacity(0.5)),
-                const SizedBox(height: 24),
-                Text(
-                  provider.error!,
-                  textAlign: TextAlign.center,
-                  style: text18(color: Colors.white, fontWeight: FontWeight.bold),
+        body: Stack(
+          children: [
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.wifi_off_rounded, size: 64, color: Colors.white.withOpacity(0.5)),
+                    const SizedBox(height: 24),
+                    Text(
+                      provider.error!,
+                      textAlign: TextAlign.center,
+                      style: text18(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 32),
+                    ElevatedButton(
+                      onPressed: () => provider.fetchReelsFeed(forceRefresh: true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                      ),
+                      child: const Text('Try Again', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 32),
-                ElevatedButton(
-                  onPressed: () => provider.fetchReelsFeed(forceRefresh: true),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  ),
-                  child: const Text('Try Again', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ],
+              ),
             ),
-          ),
+            if (shouldShowBack) buildBackBtn(),
+          ],
         ),
       );
     }
 
     if (reels.isEmpty) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: Colors.black,
-        body: Center(child: Text('No reels available', style: TextStyle(color: Colors.white))),
+        body: Stack(
+          children: [
+            const Center(child: Text('No reels available', style: TextStyle(color: Colors.white))),
+            if (shouldShowBack) buildBackBtn(),
+          ],
+        ),
       );
     }
 
@@ -367,25 +420,31 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
       ),
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: PageView.builder(
-        controller: _pageController,
-        scrollDirection: Axis.vertical,
-        itemCount: reels.length,
-        onPageChanged: _onPageChanged,
-        physics: const BouncingScrollPhysics(),
-        itemBuilder: (context, index) {
-          final reel = reels[index];
-          return _ShortVideoPage(
-            key: ValueKey(reel.id),
-            reel: reel,
-            isActive: widget.isVisible && index == _currentIndex,
-            onLike: () => provider.toggleLike(reel.id!, reel: reel),
-            onSave: () => provider.toggleBookmark(reel.id!, reel: reel),
-            onComment: () => _showComments(reel),
-          );
-        },
+        body: Stack(
+          children: [
+            PageView.builder(
+              controller: _pageController,
+              scrollDirection: Axis.vertical,
+              itemCount: reels.length,
+              onPageChanged: _onPageChanged,
+              physics: const BouncingScrollPhysics(),
+              itemBuilder: (context, index) {
+                final reel = reels[index];
+                return _ShortVideoPage(
+                  key: ValueKey(reel.id),
+                  reel: reel,
+                  isActive: widget.isVisible && index == _currentIndex,
+                  onLike: () => provider.toggleLike(reel.id!, reel: reel),
+                  onSave: () => provider.toggleBookmark(reel.id!, reel: reel),
+                  onComment: () => _showComments(reel),
+                );
+              },
+            ),
+            if (shouldShowBack) buildBackBtn(),
+          ],
+        ),
       ),
-    ));
+    );
   }
 }
 
@@ -1087,9 +1146,9 @@ class _ShortInfo extends StatelessWidget {
                   ),
                 ),
               ),
-              if (reel.user?.isVerified == true || reel.user?.blueTick == true) ...[
+              if (reel.user?.hasVerifiedTick == true) ...[
                 const SizedBox(width: 4),
-                const Icon(Icons.verified_rounded, color: Colors.blue, size: 14),
+                const Icon(Icons.verified_rounded, color: AppColors.primary, size: 14),
               ],
               if (!isSelf && reel.user?.id != null) ...[
                 const SizedBox(width: 12),

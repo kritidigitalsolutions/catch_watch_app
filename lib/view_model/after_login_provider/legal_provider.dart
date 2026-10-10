@@ -34,10 +34,44 @@ class LegalProvider extends ChangeNotifier {
   }
 
   LegalDocument? getDocumentByType(String type) {
+    if (_documents.isEmpty) return null;
+    final query = type.trim().toLowerCase().replaceAll('_', '-');
+
+    // 1. Direct exact or normalized match
     try {
-      return _documents.firstWhere((doc) => doc.type == type);
-    } catch (e) {
-      return null;
+      return _documents.firstWhere(
+        (doc) => (doc.type?.trim().toLowerCase().replaceAll('_', '-') ?? '') == query,
+      );
+    } catch (_) {}
+
+    // 2. Keyword/Alias matching (e.g. 'terms', 'terms-conditions', 'terms_of_service')
+    if (query.contains('term')) {
+      try {
+        return _documents.firstWhere(
+          (doc) => (doc.type?.toLowerCase().contains('term') ?? false) ||
+                   (doc.title?.toLowerCase().contains('term') ?? false),
+        );
+      } catch (_) {}
     }
+
+    if (query.contains('privacy')) {
+      try {
+        return _documents.firstWhere(
+          (doc) => (doc.type?.toLowerCase().contains('privacy') ?? false) ||
+                   (doc.title?.toLowerCase().contains('privacy') ?? false),
+        );
+      } catch (_) {}
+    }
+
+    if (query.contains('refund')) {
+      try {
+        return _documents.firstWhere(
+          (doc) => (doc.type?.toLowerCase().contains('refund') ?? false) ||
+                   (doc.title?.toLowerCase().contains('refund') ?? false),
+        );
+      } catch (_) {}
+    }
+
+    return null;
   }
 }

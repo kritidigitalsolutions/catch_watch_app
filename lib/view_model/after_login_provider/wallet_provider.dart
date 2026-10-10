@@ -136,9 +136,14 @@ class WalletProvider extends ChangeNotifier {
     }
   }
 
+  String _selectedLeaderboardTimeframe = 'all';
+  String get selectedLeaderboardTimeframe => _selectedLeaderboardTimeframe;
+
   Future<void> fetchLeaderboard({String range = 'all'}) async {
+    _selectedLeaderboardTimeframe = range;
     _isLoading = true;
     _error = null;
+    _leaderboardData = null; // Clear stale results so new filter doesn't show old data
     notifyListeners();
 
     try {

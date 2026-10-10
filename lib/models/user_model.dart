@@ -21,6 +21,7 @@ class UserModel {
   bool? isFollowing;
   bool? isVerified;
   bool? blueTick;
+  bool? orangeTick;
   String? createdAt;
   String? updatedAt;
 
@@ -60,6 +61,7 @@ class UserModel {
     this.isFollowing,
     this.isVerified,
     this.blueTick,
+    this.orangeTick,
     this.createdAt,
     this.updatedAt,
     this.isCreator,
@@ -114,6 +116,7 @@ class UserModel {
     isFollowing = json['isFollowing'] ?? false;
     isVerified = json['isVerified'] ?? json['verification']?['isVerified'] ?? false;
     blueTick = json['blueTick'] ?? (json['verification']?['badgeType'] == 'BLUE' && json['verification']?['isVerified'] == true) ?? false;
+    orangeTick = json['orangeTick'] ?? (json['verification']?['badgeType'] == 'ORANGE' && json['verification']?['isVerified'] == true) ?? false;
     createdAt = json['createdAt'];
     updatedAt = json['updatedAt'];
 
@@ -157,6 +160,7 @@ class UserModel {
     data['isFollowing'] = isFollowing;
     data['isVerified'] = isVerified;
     data['blueTick'] = blueTick;
+    data['orangeTick'] = orangeTick;
     data['createdAt'] = createdAt;
     data['updatedAt'] = updatedAt;
     data['isCreator'] = isCreator;
@@ -174,4 +178,7 @@ class UserModel {
     data['planId'] = planId;
     return data;
   }
+
+  /// Returns whether the user has a verified creator tick (Orange Tick / Blue Tick)
+  bool get hasVerifiedTick => (isVerified == true) || (blueTick == true) || (orangeTick == true);
 }

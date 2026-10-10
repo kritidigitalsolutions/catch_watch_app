@@ -241,9 +241,9 @@ class _SearchScreenState extends State<SearchScreen> {
             user.name ?? 'Unknown User',
             style: text16(fontWeight: FontWeight.w600),
           ),
-          if (user.isVerified == true || user.blueTick == true) ...[
+          if (user.hasVerifiedTick) ...[
             const SizedBox(width: 4),
-            const Icon(Icons.verified, color: Colors.blue, size: 16),
+            const Icon(Icons.verified, color: AppColors.primary, size: 16),
           ],
         ],
       ),

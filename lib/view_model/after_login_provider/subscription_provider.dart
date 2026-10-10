@@ -106,6 +106,28 @@ class SubscriptionProvider extends ChangeNotifier {
     }
   }
 
+  Future<Map<String, dynamic>?> createPaymentOrder(String planId) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final response = await _planRepository.createPaymentOrder(planId);
+      if (response != null && response['success'] == true) {
+        return response;
+      } else {
+        _error = response?['message'] ?? 'Failed to create payment order';
+        return null;
+      }
+    } catch (e) {
+      _error = e.toString();
+      return null;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<bool> verifyPayment(Map<String, dynamic> paymentData) async {
     _isLoading = true;
     _error = null;
@@ -114,10 +136,37 @@ class SubscriptionProvider extends ChangeNotifier {
     try {
       final response = await _planRepository.verifyPayment(paymentData);
       if (response['success'] == true) {
-        await fetchSubscriptionStatus();
+        if (paymentData['type'] != 'verification') {
+          await fetchSubscriptionStatus();
+        }
         return true;
       } else {
         _error = response['message'] ?? 'Payment verification failed';
+        return false;
+      }
+    } catch (e) {
+      _error = e.toString();
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> verifyApplePayment(Map<String, dynamic> paymentData) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final response = await _planRepository.verifyApplePayment(paymentData);
+      if (response['success'] == true) {
+        if (paymentData['type'] != 'verification') {
+          await fetchSubscriptionStatus();
+        }
+        return true;
+      } else {
+        _error = response['message'] ?? 'Apple payment verification failed';
         return false;
       }
     } catch (e) {

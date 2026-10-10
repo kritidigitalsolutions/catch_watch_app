@@ -40,30 +40,76 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
   }
 
   Future<void> _saveMedia() async {
-    setState(() => _isDownloading = true);
+    if (_isDownloading) return;
+
     try {
+      // Check photo library permission before proceeding
+      final hasAccess = await Gal.hasAccess();
+      if (!hasAccess) {
+        // Request access when user taps save
+        final granted = await Gal.requestAccess();
+        if (!granted) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Photo library permission is required to save photos and videos."),
+              ),
+            );
+          }
+          return;
+        }
+      }
+
+      setState(() => _isDownloading = true);
+
       final dio = Dio();
       final tempDir = await getTemporaryDirectory();
       final extension = widget.type == 'video' ? 'mp4' : 'jpg';
       final path = "${tempDir.path}/temp_media_${DateTime.now().millisecondsSinceEpoch}.$extension";
-      
+
       await dio.download(widget.url, path);
-      
+
       if (widget.type == 'video') {
-          await Gal.putVideo(path);
+        await Gal.putVideo(path);
       } else {
-          await Gal.putImage(path);
+        await Gal.putImage(path);
       }
-      
+
+      // Clean up temporary downloaded file
+      final tempFile = File(path);
+      if (await tempFile.exists()) {
+        try {
+          await tempFile.delete();
+        } catch (_) {}
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Saved to gallery")),
         );
       }
-    } catch (e) {
+    } on GalException catch (e) {
+      if (mounted) {
+        final message = switch (e.type) {
+          GalExceptionType.accessDenied =>
+            "Permission to access the photo library was denied.",
+          GalExceptionType.notEnoughSpace =>
+            "Not enough storage space available to save media.",
+          GalExceptionType.notSupportedFormat =>
+            "The media format is not supported.",
+          GalExceptionType.unexpected =>
+            "Failed to save media to the photo library.",
+        };
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      }
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error saving: $e")),
+          const SnackBar(
+            content: Text("Failed to save media. Please try again."),
+          ),
         );
       }
     } finally {

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:catch_watch/view_model/after_login_provider/profile_provider.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/delete_account_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -84,6 +85,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   _buildBioField(),
                   const SizedBox(height: 32),
                   _buildSaveButton(),
+                  const SizedBox(height: 16),
+                  _buildDeleteAccountButton(),
                   const SizedBox(height: 24),
                 ],
               ),
@@ -368,6 +371,26 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 'Save Changes',
                 style: text16(color: Colors.white, fontWeight: FontWeight.w700),
               ),
+      ),
+    );
+  }
+
+  Widget _buildDeleteAccountButton() {
+    return Center(
+      child: TextButton.icon(
+        onPressed: () => showDeleteAccountDialog(context),
+        icon: const Icon(
+          Icons.delete_outline_rounded,
+          color: AppColors.error,
+          size: 18,
+        ),
+        label: Text(
+          'Delete Account',
+          style: text14(
+            color: AppColors.error,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }

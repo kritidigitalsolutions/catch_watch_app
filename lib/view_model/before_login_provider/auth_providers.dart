@@ -135,6 +135,11 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
 
   void toggleTerms(bool? value) {
     _agreedToTerms = value ?? false;
+    if (_agreedToTerms &&
+        _errorMessage ==
+            'Please agree to the Terms of Service and Privacy Policy.') {
+      _errorMessage = null;
+    }
     notifyListeners();
   }
 
@@ -161,6 +166,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
 
       _isLoading = false;
       if (response.success == true) {
+        clearOtp();
         _otpSent = true;
         _startResendTimer();
         _step = AuthStep.otp;
@@ -321,6 +327,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
               isNewUser: false,
             );
             await HiveService.saveUser(userDetail);
+            await HiveService.setOnboardingCompleted(true);
             NotificationService.syncTokenToServer(null); // Sync FCM token after login
             
             // Initialize Chat Socket & E2EE
@@ -332,6 +339,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
 
           }
           _otpVerifying = false;
+          resetOtpState();
           Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(builder: (context) => const MyHomePage()),
@@ -349,10 +357,42 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
     notifyListeners();
   }
 
+  /// Resets all temporary OTP state and stops active timers/listeners
+  void resetOtpState() {
+    clearOtp();
+    _resendTimer?.cancel();
+    _resendTimer = null;
+    _canResend = false;
+    _resendSeconds = 30;
+    _otpError = null;
+    _otpSent = false;
+    _otpVerifying = false;
+    try {
+      unregisterListener();
+    } catch (e) {
+      debugPrint('Error unregistering listener: $e');
+    }
+    notifyListeners();
+  }
+
+  /// Cancels OTP verification and returns to login step
+  /// Note: Keeps [_phoneNumber] intact so the user can edit their number
   void goBackToLogin() {
     _step = AuthStep.login;
-    clearOtp();
-    notifyListeners();
+    resetOtpState();
+  }
+
+  /// Completely resets all authentication provider state (phone, OTP, terms, errors)
+  /// Used upon logout and account deletion
+  void resetAuthState({bool clearPhone = true}) {
+    if (clearPhone) {
+      _phoneNumber = '';
+    }
+    _errorMessage = null;
+    _agreedToTerms = false;
+    _isLoading = false;
+    _step = AuthStep.login;
+    resetOtpState();
   }
 
   Future<void> verifyFromAutoFill(String code, BuildContext context) async {
@@ -515,6 +555,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
           isNewUser: false,
         );
         await HiveService.saveUser(userDetail);
+        await HiveService.setOnboardingCompleted(true);
         NotificationService.syncTokenToServer(null); // Sync FCM token after profile complete
         
         // Initialize Chat Socket & E2EE
@@ -527,6 +568,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
 
         _profileSaving = false;
         _step = AuthStep.done;
+        resetOtpState();
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const MyHomePage()),

@@ -1,37 +1,78 @@
 import 'package:catch_watch/utils/custom_button.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/policy_screen.dart';
 
 import '../../res/app_colors.dart';
 import '../../utils/text_style.dart';
 import '../../view_model/before_login_provider/auth_providers.dart';
 
 
-class LoginScreen extends StatelessWidget {
+class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  late final TextEditingController _phoneController;
+  late final TapGestureRecognizer _termsRecognizer;
+  late final TapGestureRecognizer _privacyRecognizer;
+
+  @override
+  void initState() {
+    super.initState();
+    final auth = context.read<AuthProvider>();
+    _phoneController = TextEditingController(text: auth.phoneNumber);
+    _termsRecognizer = TapGestureRecognizer()
+      ..onTap = () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const PolicyScreen(type: 'terms-conditions'),
+          ),
+        );
+      };
+    _privacyRecognizer = TapGestureRecognizer()
+      ..onTap = () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const PolicyScreen(type: 'privacy-policy'),
+          ),
+        );
+      };
+  }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    _termsRecognizer.dispose();
+    _privacyRecognizer.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
 
+    // Keep controller in sync if provider phone was cleared (logout, delete account)
+    if (_phoneController.text != auth.phoneNumber && auth.phoneNumber.isEmpty) {
+      _phoneController.text = '';
+    }
+
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
-          onPressed: () => Navigator.maybePop(context),
-        ),
-      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
               const _CatchAndWatchLogo(),
               const SizedBox(height: 28),
 
@@ -111,7 +152,7 @@ class LoginScreen extends StatelessWidget {
                           // Phone input
                           Expanded(
                             child: TextFormField(
-                              initialValue: auth.phoneNumber,
+                              controller: _phoneController,
                               keyboardType: TextInputType.phone,
                               maxLength: 10,
                               inputFormatters: [
@@ -145,21 +186,9 @@ class LoginScreen extends StatelessWidget {
                 ),
               ),
 
-              const SizedBox(height: 20),
-
-              // ── Continue button ──────────────────────────────
-              AppButton(
-                title: 'Continue',
-                isLoading: auth.isLoading,
-                onTap: (){
-
-                  context.read<AuthProvider>().sendOtp(context);
-                },),
-
-
               const SizedBox(height: 16),
 
-              // ── Terms ────────────────────────────────────────
+              // ── Terms & Privacy acceptance ───────────────────
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -184,6 +213,7 @@ class LoginScreen extends StatelessWidget {
                             style: text12(
                                 color: AppColors.blue,
                                 fontWeight: FontWeight.w500),
+                            recognizer: _termsRecognizer,
                           ),
                           const TextSpan(text: ' and '),
                           TextSpan(
@@ -191,6 +221,7 @@ class LoginScreen extends StatelessWidget {
                             style: text12(
                                 color: AppColors.blue,
                                 fontWeight: FontWeight.w500),
+                            recognizer: _privacyRecognizer,
                           ),
                           const TextSpan(text: '.'),
                         ],
@@ -198,6 +229,17 @@ class LoginScreen extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // ── Continue button ──────────────────────────────
+              AppButton(
+                title: 'Continue',
+                isLoading: auth.isLoading,
+                onTap: () {
+                  context.read<AuthProvider>().sendOtp(context);
+                },
               ),
 
               const SizedBox(height: 24),
