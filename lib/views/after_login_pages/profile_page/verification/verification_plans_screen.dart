@@ -690,6 +690,62 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
         ? '/ Month'
         : (plan.duration != null ? '/ ${plan.duration} Days' : '/ Month');
 
+    if (Platform.isIOS) {
+      final String productId = plan.effectiveAppleProductId;
+      final product = IapService.instance.getProduct(productId) ??
+          IapService.instance.getProduct(orangeTickProductId);
+
+      if (product != null && product.price.isNotEmpty) {
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Flexible(
+              child: Text(
+                product.price,
+                style: text30(
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Text(
+                durationLabel,
+                style: text14(
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+      }
+
+      final bool isUnavailable =
+          IapService.instance.isProductNotFound(productId) ||
+          (IapService.instance.isProductQueried(productId) &&
+              IapService.instance.getProduct(productId) == null &&
+              IapService.instance.getProduct(orangeTickProductId) == null);
+
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Flexible(
+            child: Text(
+              isUnavailable ? 'Unavailable' : 'Loading...',
+              style: text24(
+                fontWeight: FontWeight.w800,
+                color: AppColors.grey500,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.baseline,
       textBaseline: TextBaseline.alphabetic,

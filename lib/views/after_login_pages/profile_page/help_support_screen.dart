@@ -124,15 +124,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     final isVerified = verificationProvider.currentApplication?.status == 'approved' || 
                        profileProvider.user?.hasVerifiedTick == true;
 
-    // Manually add Live Chat as instructed not to change it
     final List<Map<String, dynamic>> staticOptions = [
-      {
-        'icon': Icons.chat_bubble_outline_rounded,
-        'title': 'Live Chat',
-        'badge': 'Online',
-        'badgeColor': AppColors.success,
-        'onTap': () {},
-      },
       if (isVerified)
         {
           'icon': Icons.support_agent_rounded,
@@ -171,6 +163,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     }).toList();
 
     final allOptions = [...staticOptions, ...apiOptions];
+    if (allOptions.isEmpty) return const SizedBox.shrink();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

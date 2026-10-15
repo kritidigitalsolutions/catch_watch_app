@@ -334,6 +334,20 @@ class _ExpandedHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final verProvider = context.watch<VerificationProvider>();
+    final bool hasOrangeTick = provider.user?.orangeTick == true;
+    final bool hasBlueTick = provider.user?.blueTick == true;
+    final bool isOrangeTickAppApproved = verProvider.currentApplication?.status?.trim().toLowerCase() == 'approved' &&
+        (verProvider.badgeType?.toUpperCase() == 'ORANGE' ||
+            verProvider.currentApplication?.plan?.isOrangeTickPlan == true);
+    final bool canShowGetOrangeTick = !hasOrangeTick;
+    final bool isBlueTickAppApproved = verProvider.currentApplication?.status?.trim().toLowerCase() == 'approved' &&
+        (verProvider.badgeType?.toUpperCase() == 'BLUE' ||
+            verProvider.currentApplication?.plan?.isBlueTickPlan == true ||
+            (hasBlueTick && !hasOrangeTick));
+    final bool hasApprovedOrangeTick = hasOrangeTick || isOrangeTickAppApproved;
+    final bool showVerifiedBadge = hasApprovedOrangeTick || hasBlueTick || isBlueTickAppApproved;
+
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.primary,
@@ -378,10 +392,13 @@ class _ExpandedHeader extends StatelessWidget {
                               provider.name,
                               style: text18(color: Colors.white, fontWeight: FontWeight.w900),
                             ),
-                            if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.hasVerifiedTick == true) ...[
+                            if (showVerifiedBadge) ...[
                               const SizedBox(width: 6),
-                              const Icon(Icons.verified_rounded, 
-                                  color: AppColors.primary, size: 18),
+                              Icon(
+                                Icons.verified_rounded, 
+                                color: (hasBlueTick || isBlueTickAppApproved) ? Colors.blue : Colors.white, 
+                                size: 18,
+                              ),
                             ],
                           ],
                         ),
@@ -400,10 +417,10 @@ class _ExpandedHeader extends StatelessWidget {
                               "${context.watch<WalletProvider>().availablePoints} Pts",
                               () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WalletScreen())),
                             ),
-                            if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.hasVerifiedTick != true) ...[
+                            if (canShowGetOrangeTick) ...[
                               _actionPill(
                                 context,
-                                const Icon(Icons.verified_rounded, color: AppColors.primary, size: 12),
+                                const Icon(Icons.verified_rounded, color: Colors.white, size: 12),
                                 "Get Orange Tick",
                                 () {
                                   debugPrint('[ORANGE_TICK_DEBUG] Get Orange Tick clicked');

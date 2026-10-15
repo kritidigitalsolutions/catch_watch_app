@@ -328,13 +328,13 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
             );
             await HiveService.saveUser(userDetail);
             await HiveService.setOnboardingCompleted(true);
-            NotificationService.syncTokenToServer(null); // Sync FCM token after login
+            await NotificationService.syncTokenToServer(); // Sync FCM token after login
             
             // Initialize Chat Socket & E2EE
             if (context.mounted) {
               final chatProvider = Provider.of<ChatProvider>(context, listen: false);
               chatProvider.initSocket();
-              chatProvider.initE2EE();
+              chatProvider.ensureReady();
             }
 
           }
@@ -556,13 +556,13 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
         );
         await HiveService.saveUser(userDetail);
         await HiveService.setOnboardingCompleted(true);
-        NotificationService.syncTokenToServer(null); // Sync FCM token after profile complete
+        await NotificationService.syncTokenToServer(); // Sync FCM token after profile complete
         
         // Initialize Chat Socket & E2EE
         if (context.mounted) {
           final chatProvider = Provider.of<ChatProvider>(context, listen: false);
           chatProvider.initSocket();
-          chatProvider.initE2EE();
+          chatProvider.ensureReady();
         }
 
 

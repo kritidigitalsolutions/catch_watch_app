@@ -1403,36 +1403,6 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
           }
         }
 
-        // Step 2.5: Pricing mismatch guard (Requirement 9)
-        // If the backend price and actual Apple StoreKit price differ, block purchase with clear message
-        final product =
-            IapService.instance.getProduct(
-              widget.plan.effectiveAppleProductId,
-            ) ??
-            IapService.instance.getProduct(orangeTickProductId);
-        if (product != null) {
-          final backendPrice = widget.plan.price ?? 0;
-          final storeKitRawPrice = product.rawPrice;
-          if ((storeKitRawPrice - backendPrice).abs() > 0.01) {
-            debugPrint(
-              '[ORANGE_TICK_FLOW] Price mismatch blocked purchase: backend=₹$backendPrice, storeKit=${product.price} ($storeKitRawPrice)',
-            );
-            IapService.instance.endOrangeTickPurchaseAttempt();
-            IapService.instance.unregisterOrangeTickHandler();
-            if (mounted) {
-              setState(() {
-                _isSubmitting = false;
-                _isPurchasing = false;
-                _isPurchaseInitiatedByButton = false;
-              });
-              _showPriceMismatchDialog(
-                backendPrice: backendPrice,
-                storeKitPrice: product.price,
-              );
-            }
-            return;
-          }
-        }
 
         // Step 3: Trigger fresh Apple StoreKit purchase (no Razorpay order needed for Apple IAP)
         debugPrint(
@@ -1478,11 +1448,28 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
           if (!mounted) return;
           if (response != null && response['order'] != null) {
             final order = response['order'];
-            final razorpayKey = response['key'];
+            final rawKey = response['key'];
+            final razorpayKey =
+                (rawKey is String && rawKey.trim().isNotEmpty)
+                    ? rawKey.trim()
+                    : null;
+
+            if (razorpayKey == null) {
+              debugPrint(
+                '[ORANGE_TICK_FLOW] Payment initialization failed: missing or empty Razorpay key',
+              );
+              if (mounted) {
+                _showSubmissionErrorDialog(
+                  'Payment gateway configuration error. Please contact support.',
+                );
+              }
+              return;
+            }
+
             final user = context.read<ProfileProvider>().user;
 
             var options = {
-              'key': razorpayKey ?? 'rzp_test_SztpB3DjlEhcKW',
+              'key': razorpayKey,
               'amount': order['amount'],
               'name': 'Catch Watch Verification',
               'order_id': order['id'],
@@ -1767,54 +1754,6 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
     );
   }
 
-  void _showPriceMismatchDialog({
-    required int backendPrice,
-    required String storeKitPrice,
-  }) {
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            const Icon(
-              Icons.warning_amber_rounded,
-              color: Colors.orange,
-              size: 28,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Price Mismatch',
-                style: text16(fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-        content: Text(
-          'The selected plan price is ₹$backendPrice, but Apple App Store is configured for $storeKitPrice.\n\nTo prevent incorrect charges, this purchase has been blocked. Please contact support or update the plan pricing.',
-          style: text14(color: AppColors.textSecondary),
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(dialogCtx),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: Text(
-              'OK',
-              style: text14(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   void _showExpiredSubscriptionDialog({
     required String txId,
@@ -1891,7 +1830,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
           IapService.instance.isProductNotFound(orangeTickProductId)) {
         return 'Subscription Unavailable';
       }
-      return 'Submit & Subscribe$priceStr';
+      return 'Submit & Subscribe';
     }
     return 'Submit & Pay$priceStr';
   }

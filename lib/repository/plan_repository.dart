@@ -63,12 +63,19 @@ class PlanRepository {
     }
   }
 
-  Future<dynamic> createOrder(String planId, {String? promoCode}) async {
+  Future<dynamic> createOrder(
+    String planId, {
+    String? promoCode,
+    bool? isUpgrade,
+    String? currentSubscriptionId,
+  }) async {
     try {
-      final body = {
-        'planId': planId,
-        if (promoCode != null) 'promoCode': promoCode,
-      };
+      final Map<String, dynamic> body = {'planId': planId};
+      if (promoCode != null) body['promoCode'] = promoCode;
+      if (isUpgrade == true) body['isUpgrade'] = true;
+      if (currentSubscriptionId != null) {
+        body['currentSubscriptionId'] = currentSubscriptionId;
+      }
       dynamic response = await _apiService.postApi(AppUrl.createOrder, body);
       return response;
     } catch (e) {

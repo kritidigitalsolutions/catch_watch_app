@@ -16,6 +16,7 @@ import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:vibration/vibration.dart';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
@@ -38,6 +39,8 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   SocketService();
 
   RtcEngine? _engine;
+  bool _isEngineInitialized = false;
+  Future<bool>? _engineInitCompleter;
 
   CallModel? _currentCall;
 
@@ -54,6 +57,9 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   bool _isAccepting = false;
   bool _isEnding = false;
   bool _isRejecting = false;
+
+  bool _isJoiningChannel = false;
+  bool _isChannelJoined = false;
 
   bool _isInCallScreen = false;
 
@@ -93,7 +99,7 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   // ============================================================
 
   RtcEngine? get engine =>
-      _engine;
+      _isEngineInitialized ? _engine : null;
 
   CallModel? get currentCall =>
       _currentCall;
@@ -151,6 +157,9 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   CallProvider() {
     WidgetsBinding.instance.addObserver(this);
+    if (HiveService.isLogin()) {
+      _socketService.connect();
+    }
     _initSocketListeners();
     _initNotificationListener();
     _initCallKitListener();
@@ -161,6 +170,9 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       debugPrint('📱 App resumed, checking for active calls...');
+      if (HiveService.isLogin()) {
+        _socketService.connect();
+      }
       _checkActiveCalls();
     }
   }
@@ -177,9 +189,10 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
           
           if (_status == CallStatus.idle) {
             final callData = calls.first;
-            final String? callId = _extractCallIdFromCallKitData(callData);
+            final String? rawCallId = _extractCallIdFromCallKitData(callData);
+            final String? callId = await _resolveCallIdAsync(rawCallId);
             
-            if (callId != null) {
+            if (callId != null && RegExp(r'^[0-9a-fA-F]{24}$').hasMatch(callId)) {
               debugPrint('📥 Cold start: Transitioning to call screen for $callId');
               
               _isCaller = false;
@@ -209,6 +222,8 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
               } catch (e) {
                 debugPrint('❌ Error fetching call details: $e');
               }
+            } else if (rawCallId != null) {
+              debugPrint('⚠️ Cold start: Active CallKit call found but cannot resolve ID ($rawCallId)');
             }
           } else {
             return; // Already in a call state
@@ -308,16 +323,88 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   // ============================================================
-  // UUID
+  // UUID & CALL ID RESOLUTION
   // ============================================================
 
-  String _getUuidFromCallId(
-      String callId,
-      ) {
+  static final Map<String, String> _uuidToCallIdMap = {};
+
+  static void registerCallId(String callId, [String? uuid]) {
+    final String computedUuid = uuid ?? _getUuidFromCallIdStatic(callId);
+    _uuidToCallIdMap[computedUuid] = callId;
+    _uuidToCallIdMap[callId] = callId;
+  }
+
+  static String _getUuidFromCallIdStatic(String callId) {
     return const Uuid().v5(
       Uuid.NAMESPACE_URL,
       callId,
     );
+  }
+
+  String _getUuidFromCallId(
+      String callId,
+      ) {
+    final String uuid = const Uuid().v5(
+      Uuid.NAMESPACE_URL,
+      callId,
+    );
+    _uuidToCallIdMap[uuid] = callId;
+    _uuidToCallIdMap[callId] = callId;
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString('call_uuid_$uuid', callId);
+      prefs.setString('last_incoming_call_id', callId);
+    }).catchError((_) {});
+    return uuid;
+  }
+
+  String? _resolveCallId(String? idOrUuid) {
+    if (idOrUuid == null || idOrUuid.trim().isEmpty) return null;
+    final String trimmed = idOrUuid.trim();
+
+    // 1. Direct cache lookup
+    if (_uuidToCallIdMap.containsKey(trimmed)) {
+      return _uuidToCallIdMap[trimmed];
+    }
+
+    // 2. Check if _currentCall matches either directly or by UUID
+    if (_currentCall?.sId != null && _currentCall!.sId!.isNotEmpty) {
+      final String currentSid = _currentCall!.sId!;
+      if (currentSid == trimmed || _getUuidFromCallId(currentSid) == trimmed) {
+        return currentSid;
+      }
+    }
+
+    // 3. If already a 24-character hexadecimal MongoDB ObjectId
+    if (RegExp(r'^[0-9a-fA-F]{24}$').hasMatch(trimmed)) {
+      return trimmed;
+    }
+
+    // 4. Fallback to _currentCall.sId if present
+    if (_currentCall?.sId != null && _currentCall!.sId!.isNotEmpty) {
+      return _currentCall!.sId;
+    }
+
+    return trimmed;
+  }
+
+  Future<String?> _resolveCallIdAsync(String? idOrUuid) async {
+    final String? resolvedSync = _resolveCallId(idOrUuid);
+    if (resolvedSync != null && RegExp(r'^[0-9a-fA-F]{24}$').hasMatch(resolvedSync)) {
+      return resolvedSync;
+    }
+
+    if (idOrUuid != null && idOrUuid.isNotEmpty) {
+      try {
+        final SharedPreferences prefs = await SharedPreferences.getInstance();
+        final String? stored = prefs.getString('call_uuid_$idOrUuid') ?? prefs.getString('last_incoming_call_id');
+        if (stored != null && stored.isNotEmpty) {
+          _uuidToCallIdMap[idOrUuid] = stored;
+          return stored;
+        }
+      } catch (_) {}
+    }
+
+    return resolvedSync;
   }
 
   // ============================================================
@@ -424,49 +511,64 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _handleCallKitAccept(
       CallEventActionCallAccept event,
       ) async {
+    final String? rawCallId =
+    _extractCallIdFromCallKitEvent(
+      event,
+    );
     try {
-      final String? callId =
-      _extractCallIdFromCallKitEvent(
-        event,
-      );
-
       debugPrint(
-        '📞 CallKit ACCEPT Event Received',
+        '📞 CallKit ACCEPT Event Received: rawCallId=$rawCallId',
       );
 
-      // Wait a moment for the app to initialize if it was terminated
+      // Guard against duplicate / re-entrant accept calls.
+      // On iOS, setCallConnected() causes CXAnswerCallAction to re-emit ACTION_CALL_ACCEPT.
+      if (_status == CallStatus.active || _isAccepting) {
+        debugPrint(
+          '⚠️ Call already active or accepting, ignoring duplicate CallKit accept',
+        );
+        return;
+      }
+
+      // Wait a moment for navigator to be ready if app was cold started
       int retry = 0;
-      while (navigatorKey.currentState == null && retry < 5) {
-        await Future.delayed(const Duration(milliseconds: 500));
+      while (navigatorKey.currentState == null && retry < 10) {
+        await Future.delayed(const Duration(milliseconds: 300));
         retry++;
       }
+
+      final String? callId = await _resolveCallIdAsync(rawCallId);
 
       // --------------------------------------------------------
       // If current call is already loaded, use it.
       // --------------------------------------------------------
 
       if (_currentCall != null &&
-          (_currentCall!.sId == callId || callId == null)) {
+          (_currentCall!.sId == callId ||
+           callId == null ||
+           (rawCallId != null && _currentCall!.sId != null && _getUuidFromCallId(_currentCall!.sId!) == rawCallId))) {
         await acceptCall();
         return;
       }
 
       // --------------------------------------------------------
       // Otherwise fetch call details.
-      // This is important when the app was terminated.
       // --------------------------------------------------------
 
-      if (callId == null) {
+      if (callId == null || !RegExp(r'^[0-9a-fA-F]{24}$').hasMatch(callId)) {
         debugPrint(
-          '❌ CallKit accept: no call ID',
+          '❌ CallKit accept: cannot resolve to valid MongoDB call ID ($rawCallId -> $callId)',
         );
-
+        _showError('Unable to identify incoming call.');
+        if (rawCallId != null) {
+          await FlutterCallkitIncoming.endCall(rawCallId);
+        }
+        await FlutterCallkitIncoming.endAllCalls();
+        _endCallLocally();
         return;
       }
 
       debugPrint(
-        '📥 Fetching call details for '
-            '$callId',
+        '📥 Fetching call details for $callId',
       );
 
       final CallModel call =
@@ -509,6 +611,17 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint(
         '$stackTrace',
       );
+
+      _showError('Failed to accept call: $e');
+
+      // Dismiss CallKit to ensure native screen does not remain stuck at "Ringing..."
+      if (rawCallId != null) {
+        try {
+          await FlutterCallkitIncoming.endCall(rawCallId);
+        } catch (_) {}
+      }
+      await FlutterCallkitIncoming.endAllCalls();
+      _endCallLocally();
     }
   }
 
@@ -519,18 +632,20 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _handleCallKitDecline(
       CallEventActionCallDecline event,
       ) async {
+    final String? rawCallId =
+    _extractCallIdFromCallKitEvent(
+      event,
+    );
     try {
       debugPrint(
-        '📞 CallKit DECLINE',
+        '📞 CallKit DECLINE: rawCallId=$rawCallId',
       );
 
-      final String? callId =
-      _extractCallIdFromCallKitEvent(
-        event,
-      );
+      final String? callId = _resolveCallId(rawCallId);
 
       if (_currentCall == null &&
-          callId != null) {
+          callId != null &&
+          RegExp(r'^[0-9a-fA-F]{24}$').hasMatch(callId)) {
         try {
           final CallModel call =
           await _callRepository
@@ -558,6 +673,14 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint(
         '$stackTrace',
       );
+
+      if (rawCallId != null) {
+        try {
+          await FlutterCallkitIncoming.endCall(rawCallId);
+        } catch (_) {}
+      }
+      await FlutterCallkitIncoming.endAllCalls();
+      _endCallLocally();
     }
   }
 
@@ -783,6 +906,8 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
+    _getUuidFromCallId(incomingCallId);
+
     // ----------------------------------------------------------
     // DUPLICATE
     // ----------------------------------------------------------
@@ -918,7 +1043,10 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       _startTimer();
 
-      _joinChannel();
+      // Only the caller joins here. The receiver joins via acceptCall().
+      if (_isCaller && !_isChannelJoined && !_isJoiningChannel) {
+        _joinChannel();
+      }
 
       notifyListeners();
 
@@ -1008,8 +1136,21 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   void _endCallLocally() {
     _status =
         CallStatus.ended;
+    _isAccepting = false;
+    _isJoiningChannel = false;
+    _isChannelJoined = false;
+    _isCaller = false;
+
+    // Reset media controls to default state for future calls
+    _isMuted = false;
+    _isVideoOff = false;
+    _isSpeakerOn = true;
+    _remoteVideoMuted = false;
     
     WakelockPlus.disable();
+
+    // Immediately leave and dispose RTC engine to prevent error -17 on rapid reconnect or new calls
+    _disposeEngine();
 
     notifyListeners();
 
@@ -1026,8 +1167,6 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
           _remoteUid = null;
 
           _durationSeconds = 0;
-
-          _disposeEngine();
 
           notifyListeners();
         }
@@ -1051,6 +1190,16 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
             'to $receiverId',
       );
 
+      final bool isVideo = type == 'video';
+      final bool permissionsGranted = await _checkCallPermissions(isVideoCall: isVideo);
+      if (!permissionsGranted) {
+        debugPrint('❌ Outgoing call aborted: required permissions not granted');
+        _status = CallStatus.idle;
+        _isCaller = false;
+        notifyListeners();
+        return;
+      }
+
       _isCaller = true;
 
       _status =
@@ -1063,6 +1212,12 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
         receiverId,
         type,
       );
+
+      final token = call.agoraToken?.trim();
+      final uid = call.agoraUid;
+      if (token == null || token.isEmpty || uid == null || uid <= 0) {
+        throw Exception('Server did not provide required call credentials (token/UID).');
+      }
 
       _currentCall = call;
 
@@ -1153,20 +1308,16 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
       // AGORA
       // --------------------------------------------------------
 
-      _initEngine()
-          .then(
-            (_) {
-          debugPrint(
-            '✅ Agora initialized',
-          );
-        },
-      )
-          .catchError(
-            (e) {
-          debugPrint(
-            '❌ Agora init error: $e',
-          );
-        },
+      final bool initialized = await _initEngine();
+      if (!initialized) {
+        debugPrint(
+          '❌ Outgoing call aborted: required permissions not granted',
+        );
+        endCall();
+        return;
+      }
+      debugPrint(
+        '✅ Agora initialized',
       );
 
       notifyListeners();
@@ -1191,7 +1342,8 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   // ============================================================
 
   Future<void> acceptCall() async {
-    if (_isAccepting) {
+    if (_isAccepting || _status == CallStatus.active || _isChannelJoined) {
+      debugPrint('⚠️ Accept call ignored: already accepting, active, or joined');
       return;
     }
 
@@ -1217,6 +1369,7 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     try {
       _isAccepting = true;
+      _isCaller = false;
 
       notifyListeners();
 
@@ -1233,6 +1386,17 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
           .acceptCall(
         callId,
       );
+
+      final token = updatedCall.agoraToken?.trim();
+      final uid = updatedCall.agoraUid;
+      if (token == null || token.isEmpty || uid == null || uid <= 0) {
+        debugPrint('❌ Accept call failed: server did not return valid token/UID');
+        _isAccepting = false;
+        _showError('Unable to connect call: invalid server credentials.');
+        await endCall();
+        notifyListeners();
+        return;
+      }
 
       _currentCall =
           updatedCall;
@@ -1268,7 +1432,16 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
         '🎧 Initializing Agora',
       );
 
-      await _initEngine();
+      final bool initialized = await _initEngine();
+      if (!initialized) {
+        debugPrint(
+          '❌ Cannot join channel: required permissions not granted',
+        );
+        _isAccepting = false;
+        await endCall();
+        notifyListeners();
+        return;
+      }
 
       debugPrint(
         '🎧 Joining channel: '
@@ -1330,6 +1503,9 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
           ),
         );
       } catch (_) {}
+      await FlutterCallkitIncoming.endAllCalls();
+      _endCallLocally();
+      _removeCallScreen();
     }
   }
 
@@ -1537,17 +1713,20 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    if (!_isInCallScreen) {
-      return;
+    try {
+      // Safety: pop until we reach a non-call route (e.g., home or chat)
+      navigator.popUntil((route) {
+        final String? name = route.settings.name;
+        // If we hit something that ISN'T a call screen, stop popping.
+        // This ensures we always leave at least one route (Home) in the stack.
+        return name != '/call' && name != '/incoming-call';
+      });
+    } catch (e) {
+      debugPrint('⚠️ Error popping call screen: $e');
+      if (navigator.canPop()) {
+        navigator.pop();
+      }
     }
-
-    // Safety: only pop if we are actually on a call screen to avoid black screen
-    navigator.popUntil((route) {
-      final String? name = route.settings.name;
-      // If we hit something that ISN'T a call screen, stop popping.
-      // This ensures we always leave at least one route (Home) in the stack.
-      return name != '/call' && name != '/incoming-call';
-    });
 
     _isInCallScreen = false;
   }
@@ -1584,8 +1763,10 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   // ============================================================
 
   void _showError(
-      String message,
-      ) {
+    String message, {
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
     final BuildContext? context =
         navigatorKey.currentContext;
 
@@ -1593,6 +1774,7 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(
@@ -1601,6 +1783,14 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
         backgroundColor: Colors.red,
         behavior:
         SnackBarBehavior.floating,
+        duration: const Duration(seconds: 5),
+        action: actionLabel != null && onAction != null
+            ? SnackBarAction(
+                label: actionLabel,
+                textColor: Colors.white,
+                onPressed: onAction,
+              )
+            : null,
       ),
     );
   }
@@ -1711,121 +1901,343 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   // AGORA INITIALIZATION
   // ============================================================
 
-  Future<void> _initEngine() async {
-    if (_engine != null) {
-      return;
+  Future<bool> _checkCallPermissions({required bool isVideoCall}) async {
+    final List<Permission> permissionsToRequest = [
+      Permission.microphone,
+      if (isVideoCall) Permission.camera,
+    ];
+
+    try {
+      final Map<Permission, PermissionStatus> statuses =
+          await permissionsToRequest.request();
+
+      final micStatus = statuses[Permission.microphone];
+      final camStatus = statuses[Permission.camera];
+
+      final bool micGranted = micStatus?.isGranted == true;
+      final bool cameraGranted = !isVideoCall || (camStatus?.isGranted == true);
+
+      if (!micGranted || !cameraGranted) {
+        final bool micPermanentlyDenied = micStatus?.isPermanentlyDenied == true || micStatus?.isRestricted == true;
+        final bool camPermanentlyDenied = isVideoCall && (camStatus?.isPermanentlyDenied == true || camStatus?.isRestricted == true);
+
+        final String missing = !micGranted && !cameraGranted
+            ? 'Microphone and Camera permissions are'
+            : !micGranted
+                ? 'Microphone permission is'
+                : 'Camera permission is';
+
+        if (micPermanentlyDenied || camPermanentlyDenied) {
+          _showError(
+            '$missing permanently denied or restricted. Please enable access in Settings to continue.',
+            actionLabel: 'Settings',
+            onAction: openAppSettings,
+          );
+        } else {
+          _showError('$missing required to make or receive calls.');
+        }
+
+        debugPrint('❌ Call permission check failed: mic=$micGranted, cam=$cameraGranted');
+        return false;
+      }
+      return true;
+    } catch (e) {
+      debugPrint('❌ Error requesting call permissions: $e');
+      _showError('Unable to request required call permissions: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _initEngine() async {
+    // If already fully initialized and live, return immediately.
+    if (_isEngineInitialized && _engine != null) {
+      return true;
     }
 
-    await [
-      Permission.microphone,
-      Permission.camera,
-    ].request();
+    // If an initialization is currently in flight, await the existing future to prevent races.
+    if (_engineInitCompleter != null) {
+      debugPrint('⏳ [AGORA_RTC_STAGE] Engine initialization already in flight, awaiting existing lifecycle');
+      return await _engineInitCompleter!;
+    }
 
-    _engine =
-        createAgoraRtcEngine();
+    _engineInitCompleter = _performEngineInit();
+    try {
+      final bool success = await _engineInitCompleter!;
+      return success;
+    } finally {
+      _engineInitCompleter = null;
+    }
+  }
 
-    await _engine!.initialize(
-      const RtcEngineContext(
-        appId: AgoraConfig.appId,
-        channelProfile:
-        ChannelProfileType
-            .channelProfileCommunication,
-      ),
-    );
+  Future<bool> _performEngineInit() async {
+    debugPrint('🚀 [AGORA_RTC_STAGE] Stage 1: Checking permissions');
+    final bool isVideoCall = _currentCall?.type == 'video';
+    final bool permissionsGranted = await _checkCallPermissions(isVideoCall: isVideoCall);
+    if (!permissionsGranted) {
+      debugPrint('❌ [AGORA_RTC_STAGE] Stage 1 Failed: Required permissions not granted');
+      return false;
+    }
 
-    _engine!.registerEventHandler(
-      RtcEngineEventHandler(
-        onJoinChannelSuccess:
-            (
-            RtcConnection connection,
-            int elapsed,
-            ) {
-          debugPrint(
-            '✅ Local user '
-                '${connection.localUid} joined',
-          );
+    // Clean up any stale or lingering engine instance before creating a fresh one
+    if (_engine != null) {
+      debugPrint('🧹 [AGORA_RTC_STAGE] Cleaning up stale RTC engine instance before fresh initialization');
+      await _disposeEngine();
+    }
 
-          _engine!
-              .setEnableSpeakerphone(
-            _isSpeakerOn,
-          )
-              .catchError(
-                (e) {
+    RtcEngine? newEngine;
+    try {
+      debugPrint('🚀 [AGORA_RTC_STAGE] Stage 2: Creating and initializing RtcEngine');
+      newEngine = createAgoraRtcEngine();
+
+      await newEngine.initialize(
+        const RtcEngineContext(
+          appId: AgoraConfig.appId,
+          channelProfile:
+              ChannelProfileType.channelProfileCommunication,
+        ),
+      );
+
+      debugPrint('🚀 [AGORA_RTC_STAGE] Stage 3: Registering event handlers');
+      newEngine.registerEventHandler(
+        RtcEngineEventHandler(
+          onJoinChannelSuccess:
+              (
+              RtcConnection connection,
+              int elapsed,
+              ) {
+            debugPrint(
+              '✅ [AGORA_RTC] Local user ${connection.localUid} joined channel (elapsed: ${elapsed}ms)',
+            );
+
+            _isChannelJoined = true;
+            _isJoiningChannel = false;
+
+            newEngine
+                ?.setEnableSpeakerphone(
+              _isSpeakerOn,
+            )
+                .then((_) {
               debugPrint(
-                '❌ Speaker error: $e',
+                '🔊 [AGORA_RTC] Speakerphone set to $_isSpeakerOn on join',
               );
-            },
-          );
-        },
-        onUserJoined:
-            (
-            RtcConnection connection,
-            int remoteUid,
-            int elapsed,
-            ) {
-          debugPrint(
-            '👤 Remote user joined: '
-                '$remoteUid',
-          );
+            })
+                .catchError(
+                  (e) {
+                debugPrint(
+                  '❌ [AGORA_RTC] Speaker error on join: $e',
+                );
+              },
+            );
+          },
+          onUserJoined:
+              (
+              RtcConnection connection,
+              int remoteUid,
+              int elapsed,
+              ) {
+            debugPrint(
+              '👤 [AGORA_RTC] Remote user joined: $remoteUid (elapsed: ${elapsed}ms)',
+            );
 
-          _remoteUid =
-              remoteUid;
+            _remoteUid =
+                remoteUid;
 
-          notifyListeners();
-        },
-        onUserOffline:
-            (
-            RtcConnection connection,
-            int remoteUid,
-            UserOfflineReasonType reason,
-            ) {
-          debugPrint(
-            '👤 Remote user left: '
-                '$remoteUid',
-          );
-
-          _remoteUid = null;
-          _remoteVideoMuted = false;
-
-          notifyListeners();
-
-          if (_status ==
-              CallStatus.active) {
-            endCall();
-          }
-        },
-        onUserMuteVideo: (connection, remoteUid, muted) {
-          debugPrint('👤 Remote user video mute: $muted');
-          if (_remoteUid == remoteUid) {
-            _remoteVideoMuted = muted;
             notifyListeners();
-          }
-        },
-        onLeaveChannel:
-            (
+          },
+          onUserOffline:
+              (
+              RtcConnection connection,
+              int remoteUid,
+              UserOfflineReasonType reason,
+              ) {
+            debugPrint(
+              '👤 [AGORA_RTC] Remote user left: $remoteUid (reason: $reason)',
+            );
+
+            _remoteUid = null;
+            _remoteVideoMuted = false;
+
+            notifyListeners();
+
+            if (_status ==
+                CallStatus.active) {
+              endCall();
+            }
+          },
+          onUserMuteAudio: (connection, remoteUid, muted) {
+            debugPrint('👤 [AGORA_RTC] Remote user $remoteUid audio muted: $muted');
+          },
+          onUserMuteVideo: (connection, remoteUid, muted) {
+            debugPrint('👤 [AGORA_RTC] Remote user $remoteUid video muted: $muted');
+            if (_remoteUid == remoteUid) {
+              _remoteVideoMuted = muted;
+              notifyListeners();
+            }
+          },
+          onAudioRoutingChanged: (int routing) {
+            debugPrint(
+              '🔊 [AGORA_RTC] Audio routing changed: $routing (1: earpiece, 3: speakerphone, 4: headset)',
+            );
+          },
+          onFirstRemoteAudioFrame: (connection, userId, elapsed) {
+            debugPrint(
+              '🎧 [AGORA_RTC] First remote audio frame decoded from user: $userId (elapsed: ${elapsed}ms)',
+            );
+          },
+          onLeaveChannel:
+              (
+              RtcConnection connection,
+              RtcStats stats,
+              ) {
+            debugPrint(
+              '📴 [AGORA_RTC] Local user left channel: ${connection.channelId}',
+            );
+            _isChannelJoined = false;
+            _isJoiningChannel = false;
+          },
+          onError: (ErrorCodeType err, String msg) async {
+            debugPrint('❌ [AGORA_RTC] Engine error: $err - $msg');
+            if (err == ErrorCodeType.errTokenExpired ||
+                err == ErrorCodeType.errInvalidToken) {
+              final success = await _refreshRtcToken();
+              if (!success) {
+                _showError('Call authentication failed: $msg');
+                await endCall();
+              }
+            }
+          },
+          onTokenPrivilegeWillExpire:
+              (RtcConnection connection, String token) async {
+            debugPrint('⚠️ [AGORA_RTC] Token privilege will expire soon');
+            await _refreshRtcToken();
+          },
+          onRequestToken: (RtcConnection connection) async {
+            debugPrint('⚠️ [AGORA_RTC] Token expired, requesting fresh token');
+            final success = await _refreshRtcToken();
+            if (!success) {
+              _showError('Call disconnected: authentication token expired.');
+              await endCall();
+            }
+          },
+          onConnectionStateChanged: (
             RtcConnection connection,
-            RtcStats stats,
-            ) {
-          debugPrint(
-            '📴 Local user left channel',
-          );
-        },
-      ),
-    );
+            ConnectionStateType state,
+            ConnectionChangedReasonType reason,
+          ) async {
+            debugPrint('🌐 [AGORA_RTC] Connection state: $state, reason: $reason');
+            if (reason ==
+                    ConnectionChangedReasonType.connectionChangedTokenExpired ||
+                reason ==
+                    ConnectionChangedReasonType.connectionChangedInvalidToken) {
+              debugPrint(
+                '⚠️ [AGORA_RTC] Token expired/invalid reported by connection state change',
+              );
+              final success = await _refreshRtcToken();
+              if (!success) {
+                _showError('Call connection lost: invalid or expired session token.');
+                await endCall();
+              }
+            } else if (state == ConnectionStateType.connectionStateFailed) {
+              debugPrint('❌ [AGORA_RTC] Connection failed');
+              _showError(
+                'Call connection failed. Please check your network and try again.',
+              );
+              await endCall();
+            }
+          },
+        ),
+      );
 
-    // ----------------------------------------------------------
-    // VIDEO
-    // ----------------------------------------------------------
+      debugPrint('🚀 [AGORA_RTC_STAGE] Stage 4: Configuring audio subsystems');
+      await newEngine.enableAudio();
+      await newEngine.enableLocalAudio(true);
+      await newEngine.muteLocalAudioStream(_isMuted);
+      await newEngine.muteAllRemoteAudioStreams(false);
+      await newEngine.adjustRecordingSignalVolume(100);
+      await newEngine.adjustPlaybackSignalVolume(100);
 
-    if (_currentCall?.type ==
-        'video') {
-      await _engine!.enableVideo();
+      try {
+        await newEngine.setDefaultAudioRouteToSpeakerphone(_isSpeakerOn);
+      } catch (e) {
+        debugPrint('⚠️ [AGORA_RTC_STAGE] Pre-join setDefaultAudioRouteToSpeakerphone warning: $e');
+      }
 
-      await _engine!
-          .startPreview();
-    } else {
-      await _engine!
-          .disableVideo();
+      debugPrint('🚀 [AGORA_RTC_STAGE] Stage 5: Configuring video subsystems (isVideo: $isVideoCall)');
+      if (isVideoCall) {
+        await newEngine.enableVideo();
+        await newEngine.startPreview();
+      } else {
+        await newEngine.disableVideo();
+      }
+
+      // Only assign the initialized instance once all setup stages succeed
+      _engine = newEngine;
+      _isEngineInitialized = true;
+      debugPrint('✅ [AGORA_RTC_STAGE] RTC engine initialization completed successfully');
+      return true;
+    } catch (e, stack) {
+      debugPrint('❌ [AGORA_RTC_STAGE] Engine initialization failed: $e\n$stack');
+      _isEngineInitialized = false;
+      _engine = null;
+      if (newEngine != null) {
+        try {
+          await newEngine.release();
+        } catch (_) {}
+      }
+      return false;
+    }
+  }
+
+  // ============================================================
+  // REFRESH RTC TOKEN
+  // ============================================================
+
+  bool _isRefreshingRtcToken = false;
+
+  Future<bool> _refreshRtcToken() async {
+    final callId = _currentCall?.sId;
+    if (callId == null || callId.isEmpty) {
+      debugPrint('❌ [AGORA_RTC] Cannot refresh token: missing callId');
+      return false;
+    }
+
+    if (_isRefreshingRtcToken) {
+      debugPrint(
+        '⏳ [AGORA_RTC] Token refresh already in progress, skipping duplicate request',
+      );
+      return false;
+    }
+
+    _isRefreshingRtcToken = true;
+    try {
+      debugPrint('🔄 [AGORA_RTC] Fetching fresh token for call: $callId');
+      final String freshToken = await _callRepository.getCallToken(callId);
+      final trimmedToken = freshToken.trim();
+
+      if (trimmedToken.isEmpty) {
+        throw Exception('Received empty token from backend');
+      }
+
+      // Ensure current call is still active and unchanged
+      if (_currentCall?.sId != callId) {
+        debugPrint(
+          '⚠️ [AGORA_RTC] Call changed or ended during token refresh. Discarding token.',
+        );
+        return false;
+      }
+
+      _currentCall!.agoraToken = trimmedToken;
+
+      if (_engine != null) {
+        await _engine!.renewToken(trimmedToken);
+        debugPrint('✅ [AGORA_RTC] Renewed Agora RTC token successfully');
+      }
+      return true;
+    } catch (e) {
+      debugPrint('❌ [AGORA_RTC] Failed to refresh token: $e');
+      return false;
+    } finally {
+      _isRefreshingRtcToken = false;
     }
   }
 
@@ -1834,37 +2246,128 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   // ============================================================
 
   Future<void> _joinChannel() async {
-    if (_engine == null ||
-        _currentCall == null) {
+    if (_currentCall == null) {
       return;
     }
 
-    final String? channelName =
-        _currentCall!.channelName;
-
-    if (channelName == null ||
-        channelName.isEmpty) {
-      throw Exception(
-        'Agora channel name is missing',
-      );
+    if (_isChannelJoined || _isJoiningChannel) {
+      debugPrint('⚠️ [AGORA_RTC_STAGE] Channel already joined or join in progress, skipping duplicate');
+      return;
     }
 
-    await _engine!.joinChannel(
-      token:
-      _currentCall!.agoraToken ??
-          '',
-      channelId:
-      channelName,
-      uid:
-      _currentCall!.agoraUid ??
-          (int.tryParse(
-            HiveService.userId ??
-                '0',
-          ) ??
-              0),
-      options:
-      const ChannelMediaOptions(),
-    );
+    // Stage 1: Engine readiness verification
+    if (!_isEngineInitialized || _engine == null) {
+      debugPrint('🎧 [AGORA_RTC_STAGE] Engine not initialized prior to join, initializing now...');
+      final initialized = await _initEngine();
+      if (!initialized || _engine == null) {
+        debugPrint(
+          '❌ [AGORA_RTC_STAGE] Stage 1 Failed: Cannot join channel because engine initialization failed',
+        );
+        _showError('Unable to initialize call engine. Please check permissions and try again.');
+        await endCall();
+        return;
+      }
+    }
+
+    // Stage 2: Media & Token validation
+    final String? channelName = _currentCall!.channelName;
+    if (channelName == null || channelName.trim().isEmpty) {
+      debugPrint('❌ [AGORA_RTC_STAGE] Stage 2 Failed: missing channelName');
+      _showError('Unable to connect call: channel name missing.');
+      await endCall();
+      return;
+    }
+
+    var token = _currentCall!.agoraToken?.trim();
+    if (token == null || token.isEmpty) {
+      final callId = _currentCall!.sId;
+      if (callId != null && callId.isNotEmpty) {
+        debugPrint(
+          '⚠️ [AGORA_RTC_STAGE] agoraToken missing on joinChannel, attempting recovery fetch...',
+        );
+        final refreshed = await _refreshRtcToken();
+        if (refreshed) {
+          token = _currentCall!.agoraToken?.trim();
+        }
+      }
+    }
+
+    if (token == null || token.isEmpty) {
+      debugPrint(
+        '❌ [AGORA_RTC_STAGE] Stage 2 Failed: agoraToken is missing or empty',
+      );
+      _showError('Unable to connect call: authentication token missing.');
+      await endCall();
+      return;
+    }
+
+    final int? uid = _currentCall!.agoraUid;
+    if (uid == null || uid <= 0) {
+      debugPrint(
+        '❌ [AGORA_RTC_STAGE] Stage 2 Failed: agoraUid missing or invalid ($uid)',
+      );
+      _showError('Unable to connect call: valid user identifier missing.');
+      await endCall();
+      return;
+    }
+
+    _isJoiningChannel = true;
+
+    // Stage 3: Audio Pre-Routing (Non-fatal if audio routing throws prior to active channel)
+    try {
+      await _engine!.setDefaultAudioRouteToSpeakerphone(_isSpeakerOn);
+      debugPrint('🔊 [AGORA_RTC_STAGE] Stage 3: Default audio route configured to speaker: $_isSpeakerOn');
+    } catch (e) {
+      debugPrint('⚠️ [AGORA_RTC_STAGE] Stage 3 Non-fatal: Pre-join speakerphone warning: $e');
+    }
+
+    // Stage 4: Channel Join Execution
+    try {
+      debugPrint(
+        '🎧 [AGORA_RTC_STAGE] Stage 4: Executing joinChannel (channel: ${channelName.trim()}, uid: $uid)',
+      );
+      final bool isVideo = _currentCall?.type == 'video';
+
+      await _engine!.joinChannel(
+        token: token,
+        channelId: channelName.trim(),
+        uid: uid,
+        options: ChannelMediaOptions(
+          clientRoleType: ClientRoleType.clientRoleBroadcaster,
+          channelProfile: ChannelProfileType.channelProfileCommunication,
+          publishMicrophoneTrack: !_isMuted,
+          publishCameraTrack: isVideo && !_isVideoOff,
+          autoSubscribeAudio: true,
+          autoSubscribeVideo: isVideo,
+          enableAudioRecordingOrPlayout: true,
+        ),
+      );
+      _isChannelJoined = true;
+      _isJoiningChannel = false;
+      debugPrint('✅ [AGORA_RTC_STAGE] Stage 4 Success: Joined channel: ${channelName.trim()}');
+    } on AgoraRtcException catch (e) {
+      _isJoiningChannel = false;
+      _isChannelJoined = false;
+      debugPrint('❌ [AGORA_RTC_STAGE] Stage 4 AgoraRtcException: code ${e.code}, message: ${e.message}');
+      _showError('Failed to join call channel (error ${e.code}).');
+      await endCall();
+      return;
+    } catch (e) {
+      _isJoiningChannel = false;
+      _isChannelJoined = false;
+      debugPrint('❌ [AGORA_RTC_STAGE] Stage 4 Generic Exception: $e');
+      _showError('Failed to join call channel: $e');
+      await endCall();
+      return;
+    }
+
+    // Stage 5: Post-Join Speakerphone Enforcement
+    try {
+      await _engine!.setEnableSpeakerphone(_isSpeakerOn);
+      debugPrint('🔊 [AGORA_RTC_STAGE] Stage 5: Post-join speakerphone set to $_isSpeakerOn');
+    } catch (e) {
+      debugPrint('⚠️ [AGORA_RTC_STAGE] Stage 5 Non-fatal: Post-join speakerphone warning: $e');
+    }
   }
 
   // ============================================================
@@ -1872,13 +2375,16 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   // ============================================================
 
   void toggleMute() {
-    _isMuted =
-    !_isMuted;
+    _isMuted = !_isMuted;
+    debugPrint('🎤 [CALL] Toggling mute: $_isMuted');
 
     _engine
-        ?.muteLocalAudioStream(
-      _isMuted,
-    );
+        ?.muteLocalAudioStream(_isMuted)
+        .then((_) {
+      debugPrint('🎤 [CALL] Mute updated successfully: $_isMuted');
+    }).catchError((e) {
+      debugPrint('❌ [CALL] Mute toggle error: $e');
+    });
 
     notifyListeners();
   }
@@ -1887,20 +2393,27 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   // VIDEO
   // ============================================================
 
-  Future<void> toggleVideo() async {
+  void toggleVideo() {
     if (_engine == null) return;
-    
+
     _isVideoOff = !_isVideoOff;
+    debugPrint('📹 [CALL] Toggling video: $_isVideoOff');
 
-    if (_isVideoOff) {
-      await _engine?.stopPreview();
-      await _engine?.enableLocalVideo(false);
-    } else {
-      await _engine?.enableLocalVideo(true);
-      await _engine?.startPreview();
-    }
+    () async {
+      try {
+        if (_isVideoOff) {
+          await _engine?.stopPreview();
+          await _engine?.enableLocalVideo(false);
+        } else {
+          await _engine?.enableLocalVideo(true);
+          await _engine?.startPreview();
+        }
 
-    await _engine?.muteLocalVideoStream(_isVideoOff);
+        await _engine?.muteLocalVideoStream(_isVideoOff);
+      } catch (e) {
+        debugPrint('❌ [CALL] Video toggle error: $e');
+      }
+    }();
 
     notifyListeners();
   }
@@ -1910,20 +2423,15 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   // ============================================================
 
   void toggleSpeaker() {
-    _isSpeakerOn =
-    !_isSpeakerOn;
-
-    debugPrint('🔊 Toggling speaker: $_isSpeakerOn');
+    _isSpeakerOn = !_isSpeakerOn;
+    debugPrint('🔊 [CALL] Toggling speaker: $_isSpeakerOn');
 
     _engine
-        ?.setEnableSpeakerphone(
-      _isSpeakerOn,
-    )
+        ?.setEnableSpeakerphone(_isSpeakerOn)
         .then((_) {
-      debugPrint('🔊 Speakerphone set to $_isSpeakerOn');
-    })
-        .catchError((e) {
-      debugPrint('❌ Speaker toggle error: $e');
+      debugPrint('🔊 [CALL] Speakerphone set to $_isSpeakerOn');
+    }).catchError((e) {
+      debugPrint('❌ [CALL] Speaker toggle error: $e');
     });
 
     notifyListeners();
@@ -1934,23 +2442,34 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   // ============================================================
 
   void switchCamera() {
-    _engine?.switchCamera();
+    debugPrint('📷 [CALL] Switching camera');
+    _engine?.switchCamera().then((_) {
+      debugPrint('📷 [CALL] Camera switched successfully');
+    }).catchError((e) {
+      debugPrint('❌ [CALL] Switch camera error: $e');
+    });
   }
 
   // ============================================================
   // DISPOSE AGORA
   // ============================================================
 
-  void _disposeEngine() {
-    try {
-      _engine?.leaveChannel();
-    } catch (_) {}
-
-    try {
-      _engine?.release();
-    } catch (_) {}
-
+  Future<void> _disposeEngine() async {
+    _isEngineInitialized = false;
+    final engineToDispose = _engine;
     _engine = null;
+    _isChannelJoined = false;
+    _isJoiningChannel = false;
+
+    if (engineToDispose != null) {
+      try {
+        await engineToDispose.leaveChannel();
+      } catch (_) {}
+
+      try {
+        await engineToDispose.release();
+      } catch (_) {}
+    }
   }
 
   // ============================================================

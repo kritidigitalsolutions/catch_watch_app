@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
@@ -19,6 +21,7 @@ import 'package:catch_watch/data/network/api_network_service.dart';
 import 'package:catch_watch/data/network/base_api_service.dart';
 import 'package:catch_watch/res/appUrl.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class NotificationService {
   static final FirebaseMessaging _messaging =
@@ -47,6 +50,15 @@ class NotificationService {
   static Stream<RemoteMessage>
   get foregroundMessageStream =>
       _foregroundMessageController.stream;
+
+  /// Prevent duplicate initialization of notification listeners
+  static bool _initialized = false;
+
+  /// Cached FCM token to ensure deferred / post-login synchronization
+  static String? _cachedFcmToken;
+
+  /// Tracks whether the active FCM token has been synchronized to the backend
+  static bool _tokenSynced = false;
 
   // ============================================================
   // CONSTANTS
@@ -81,10 +93,19 @@ class NotificationService {
   // ============================================================
 
   static String _getUuidFromCallId(String callId) {
-    return const Uuid().v5(
+    final String uuid = const Uuid().v5(
       Uuid.NAMESPACE_URL,
       callId,
     );
+    _persistCallIdMapping(callId, uuid);
+    return uuid;
+  }
+
+  static void _persistCallIdMapping(String callId, String uuid) {
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString('call_uuid_$uuid', callId);
+      prefs.setString('last_incoming_call_id', callId);
+    }).catchError((_) {});
   }
 
   // ============================================================
@@ -174,18 +195,28 @@ class NotificationService {
   static String? _extractCallId(
       Map<String, dynamic> data,
       ) {
-    final dynamic value =
-        data['callId'] ??
-            data['_id'] ??
-            data['id'];
+    dynamic value = data['callId'] ??
+        data['call_id'] ??
+        data['_id'] ??
+        data['id'];
+
+    if (value == null && data['call'] != null) {
+      if (data['call'] is Map) {
+        value = data['call']['_id'] ?? data['call']['id'] ?? data['call']['callId'];
+      }
+    }
+
+    if (value == null && data['data'] != null) {
+      if (data['data'] is Map) {
+        value = data['data']['callId'] ?? data['data']['_id'] ?? data['data']['id'];
+      }
+    }
 
     if (value == null) {
       return null;
     }
 
-    final String result =
-    value.toString().trim();
-
+    final String result = value.toString().trim();
     if (result.isEmpty) {
       return null;
     }
@@ -196,17 +227,20 @@ class NotificationService {
   static bool _isIncomingCall(
       Map<String, dynamic> data,
       ) {
-    final String type =
-        data['type']
+    final String type = (data['type'] ?? data['notificationType'] ?? data['event'])
             ?.toString()
             .toUpperCase() ??
-            '';
+        '';
 
-    final String? callId =
-    _extractCallId(data);
+    final String callType = (data['callType'] ?? '')?.toString().toUpperCase() ?? '';
+    final bool hasCallId = _extractCallId(data) != null;
 
     return type == callType ||
-        type == incomingCallType;
+        type == incomingCallType ||
+        type == 'CALL_INCOMING' ||
+        type == 'VIDEO_CALL' ||
+        type == 'AUDIO_CALL' ||
+        (hasCallId && (type == 'VIDEO' || type == 'AUDIO' || callType == 'VIDEO' || callType == 'AUDIO'));
   }
 
   static bool _isCallEndType(
@@ -483,6 +517,17 @@ class NotificationService {
   // ============================================================
 
   static Future<void> init() async {
+    if (_initialized) {
+      if (kDebugMode) {
+        debugPrint('🔔 [NotificationService] Already initialized; checking token sync state.');
+      }
+      if (HiveService.isLogin() && !_tokenSynced) {
+        await syncTokenToServer();
+      }
+      return;
+    }
+    _initialized = true;
+
     try {
       tz_latest.initializeTimeZones();
 
@@ -498,7 +543,16 @@ class NotificationService {
 
       const DarwinInitializationSettings
       ios =
-      DarwinInitializationSettings();
+      DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+        defaultPresentAlert: true,
+        defaultPresentSound: true,
+        defaultPresentBadge: true,
+        defaultPresentBanner: true,
+        defaultPresentList: true,
+      );
 
       await _localNotifications.initialize(
         const InitializationSettings(
@@ -514,11 +568,23 @@ class NotificationService {
           debugPrint(
             'Payload: ${response.payload}',
           );
+
+          if (response.payload != null && response.payload!.isNotEmpty) {
+            try {
+              final Map<String, dynamic> data =
+                  Map<String, dynamic>.from(jsonDecode(response.payload!));
+              _foregroundMessageController.add(
+                RemoteMessage(data: data),
+              );
+            } catch (e) {
+              debugPrint('Error routing local notification tap payload: $e');
+            }
+          }
         },
       );
 
       // --------------------------------------------------------
-      // ANDROID NOTIFICATION PERMISSION
+      // NOTIFICATION PERMISSIONS
       // --------------------------------------------------------
 
       if (Platform.isAndroid) {
@@ -569,24 +635,67 @@ class NotificationService {
             playSound: true,
           ),
         );
-      }
+      } else if (Platform.isIOS) {
+        final NotificationSettings settings = await _messaging.requestPermission(
+          alert: true,
+          announcement: false,
+          badge: true,
+          carPlay: false,
+          criticalAlert: false,
+          provisional: false,
+          sound: true,
+        );
 
-      // --------------------------------------------------------
-      // FCM TOKEN
-      // --------------------------------------------------------
+        if (kDebugMode) {
+          debugPrint('iOS Notification requestPermission() result: ${settings.authorizationStatus}');
+        }
 
-      final String? token =
-      await _messaging.getToken();
+        final NotificationSettings currentSettings =
+            await _messaging.getNotificationSettings();
 
-      debugPrint(
-        '🔥 FCM TOKEN: $token',
-      );
+        debugPrint('🔔 [iOS Notification Settings - getNotificationSettings()]');
+        debugPrint('  - authorizationStatus: ${currentSettings.authorizationStatus}');
+        debugPrint('  - alert: ${currentSettings.alert}');
+        debugPrint('  - sound: ${currentSettings.sound}');
+        debugPrint('  - badge: ${currentSettings.badge}');
+        debugPrint('  - lockScreen: ${currentSettings.lockScreen}');
+        debugPrint('  - notificationCenter: ${currentSettings.notificationCenter}');
+        debugPrint('  - showPreviews: ${currentSettings.showPreviews}');
+        debugPrint('  - criticalAlert: ${currentSettings.criticalAlert}');
 
-      if (token != null) {
-        await syncTokenToServer(
-          token,
+        final IOSFlutterLocalNotificationsPlugin? iosLocalPlugin =
+            _localNotifications.resolvePlatformSpecificImplementation<
+                IOSFlutterLocalNotificationsPlugin>();
+        if (iosLocalPlugin != null) {
+          try {
+            final NotificationsEnabledOptions? localPerms =
+                await iosLocalPlugin.checkPermissions();
+            debugPrint('🔔 [iOS Local Notifications - checkPermissions()]');
+            debugPrint('  - isEnabled: ${localPerms?.isEnabled}');
+            debugPrint('  - isAlertEnabled: ${localPerms?.isAlertEnabled}');
+            debugPrint('  - isSoundEnabled: ${localPerms?.isSoundEnabled}');
+            debugPrint('  - isBadgeEnabled: ${localPerms?.isBadgeEnabled}');
+            debugPrint('  - isProvisionalEnabled: ${localPerms?.isProvisionalEnabled}');
+            debugPrint('  - isCriticalEnabled: ${localPerms?.isCriticalEnabled}');
+          } catch (e) {
+            debugPrint('⚠️ [iOS Local Notifications] Error querying checkPermissions(): $e');
+          }
+        }
+
+        await _messaging.setForegroundNotificationPresentationOptions(
+          alert: true,
+          badge: true,
+          sound: true,
         );
       }
+
+      // --------------------------------------------------------
+      // FCM TOKEN RETRIEVAL & DEFERRED REGISTRATION
+      // --------------------------------------------------------
+
+      // Non-blocking deferred token registration so startup and runApp()
+      // are never blocked by APNs readiness or remote server syncing.
+      _retrieveAndSyncTokenWithRetry();
 
       // --------------------------------------------------------
       // FCM TOKEN REFRESH
@@ -594,9 +703,12 @@ class NotificationService {
 
       _messaging.onTokenRefresh.listen(
             (newToken) {
-          debugPrint(
-            '🔄 FCM TOKEN REFRESHED: $newToken',
-          );
+          if (newToken.isNotEmpty) {
+            debugPrint('CURRENT_FCM_TOKEN: $newToken');
+          }
+          if (kDebugMode) {
+            debugPrint('🔄 FCM TOKEN REFRESHED (available: ${newToken.isNotEmpty}, length: ${newToken.length})');
+          }
 
           syncTokenToServer(
             newToken,
@@ -654,10 +766,11 @@ class NotificationService {
             // --------------------------------------------------
 
             if (_isIncomingCall(data)) {
-              // We DO NOT call _showIncomingCallKit(data, isForeground: true) here
-              // to avoid redundant native notifications in foreground.
-              // The CallProvider handles the in-app UI via the stream.
-              debugPrint('📲 Foreground incoming call: suppressing native notification');
+              debugPrint('📲 Foreground incoming call: piping to CallProvider stream');
+              _foregroundMessageController.add(
+                message,
+              );
+              return;
             }
 
             // --------------------------------------------------
@@ -718,7 +831,10 @@ class NotificationService {
       // --------------------------------------------------------
 
       final RemoteMessage? initialMessage =
-      await _messaging.getInitialMessage();
+      await _messaging.getInitialMessage().timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => null,
+      );
 
       if (initialMessage != null) {
         debugPrint(
@@ -739,14 +855,18 @@ class NotificationService {
       }
 
       // --------------------------------------------------------
-      // REQUEST PERMISSIONS
+      // REQUEST PERMISSIONS (Android CallKit)
       // --------------------------------------------------------
 
-      await requestPermission();
+      if (Platform.isAndroid) {
+        await requestPermission();
+      }
 
-      debugPrint(
-        '✅ NotificationService initialized',
-      );
+      if (kDebugMode) {
+        debugPrint(
+          '✅ NotificationService initialized',
+        );
+      }
     } catch (e, stackTrace) {
       debugPrint(
         '❌ NotificationService init error: $e',
@@ -794,38 +914,159 @@ class NotificationService {
   }
 
   // ============================================================
+  // DEFERRED TOKEN RETRIEVAL & RETRY
+  // ============================================================
+
+  static Future<String?> _getFcmTokenSafely() async {
+    try {
+      if (Platform.isIOS) {
+        final apnsToken = await _messaging.getAPNSToken();
+        if (apnsToken == null || apnsToken.isEmpty) {
+          if (kDebugMode) {
+            debugPrint('ℹ️ [FCM_GET] APNs token not yet available on iOS; deferring getToken().');
+          }
+          return null;
+        }
+      }
+      final token = await _messaging.getToken();
+      if (token != null && token.isNotEmpty) {
+        _cachedFcmToken = token;
+      }
+      return token;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ [FCM_GET] Notice: FCM getToken() deferred: $e');
+      }
+      return null;
+    }
+  }
+
+  static Future<void> _retrieveAndSyncTokenWithRetry() async {
+    try {
+      String? token;
+      if (Platform.isIOS) {
+        // Poll for APNs token readiness with bounded stepped backoff (up to 6 attempts: 1s, 2s, 3s, 4s, 5s, 6s)
+        int retry = 0;
+        const int maxRetries = 6;
+        while (retry < maxRetries) {
+          try {
+            final apnsToken = await _messaging.getAPNSToken();
+            if (apnsToken != null && apnsToken.isNotEmpty) {
+              if (kDebugMode) {
+                debugPrint('✅ [APNs] APNs token ready on attempt ${retry + 1} (length: ${apnsToken.length})');
+              }
+              break;
+            }
+          } catch (e) {
+            if (kDebugMode) {
+              debugPrint('ℹ️ [APNs] Query attempt ${retry + 1}: $e');
+            }
+          }
+          retry++;
+          await Future.delayed(Duration(seconds: retry));
+        }
+      }
+
+      token = await _getFcmTokenSafely();
+      if (token == null && !Platform.isIOS) {
+        try {
+          token = await _messaging.getToken();
+        } catch (_) {}
+      }
+
+      if (token != null && token.isNotEmpty) {
+        _cachedFcmToken = token;
+        debugPrint('CURRENT_FCM_TOKEN: $token');
+        if (kDebugMode) {
+          debugPrint('🔥 [FCM] FCM token retrieved successfully (length: ${token.length})');
+        }
+        await syncTokenToServer(token);
+      } else {
+        debugPrint('CURRENT_FCM_TOKEN: null (FCM token retrieval deferred or APNs token not yet ready)');
+        if (kDebugMode) {
+          debugPrint('⚠️ [FCM] FCM token unavailable after initial launch attempts. Will synchronize on authentication or token refresh.');
+        }
+      }
+    } catch (e) {
+      debugPrint('CURRENT_FCM_TOKEN: Error retrieving token: $e');
+      if (kDebugMode) {
+        debugPrint('⚠️ [FCM] Error during deferred FCM token retrieval/sync: $e');
+      }
+    }
+  }
+
+  // ============================================================
   // TOKEN SYNC
   // ============================================================
 
-  static Future<void> syncTokenToServer(
+  static Future<void> syncTokenToServer([
       String? token,
-      ) async {
+      ]) async {
     try {
+      final effectiveToken = token ?? _cachedFcmToken ?? await _getFcmTokenSafely();
+
+      if (effectiveToken != null && effectiveToken.isNotEmpty) {
+        _cachedFcmToken = effectiveToken;
+        debugPrint('CURRENT_FCM_TOKEN: $effectiveToken');
+      }
+
       if (!HiveService.isLogin()) {
+        if (kDebugMode) {
+          debugPrint('ℹ️ [FCM_SYNC] User not logged in. Caching FCM token for post-login sync (len: ${effectiveToken?.length ?? 0}).');
+        }
         return;
       }
 
-      final String? fcmToken =
-          token ?? await _messaging.getToken();
-
-      if (fcmToken == null) {
+      if (effectiveToken == null || effectiveToken.isEmpty) {
+        if (kDebugMode) {
+          debugPrint('⚠️ [FCM_SYNC] FCM token not available yet. Skipping backend sync.');
+        }
         return;
       }
 
-      debugPrint(
-        '🔥 Syncing FCM token',
-      );
+      if (kDebugMode) {
+        debugPrint('🔥 [FCM_SYNC] Syncing FCM token to backend (length: ${effectiveToken.length})...');
+      }
 
       await _apiService.patchApi(
         AppUrl.updateFcmToken,
         {
-          'fcmToken': fcmToken,
+          'fcmToken': effectiveToken,
         },
       );
+
+      _tokenSynced = true;
+      if (kDebugMode) {
+        debugPrint('✅ [FCM_SYNC] FCM token synced successfully to backend');
+      }
     } catch (e) {
-      debugPrint(
-        '❌ Error syncing FCM token: $e',
+      if (kDebugMode) {
+        debugPrint(
+          '❌ [FCM_SYNC] Error syncing FCM token: $e',
+        );
+      }
+    }
+  }
+
+  static Future<void> clearTokenOnLogout() async {
+    try {
+      _tokenSynced = false;
+      if (!HiveService.isLogin()) {
+        return;
+      }
+      await _apiService.patchApi(
+        AppUrl.updateFcmToken,
+        {
+          'fcmToken': '',
+        },
       );
+      if (kDebugMode) {
+        debugPrint('✅ [FCM_SYNC] Cleared FCM token on server on logout');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ [FCM_SYNC] Error clearing FCM token on logout: $e');
+      }
     }
   }
 
@@ -931,20 +1172,22 @@ class NotificationService {
               'notification_img_'
               '${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-          localImagePath =
+          final String downloadedPath =
           await _downloadAndSaveFile(
             imageUrl,
             fileName,
           );
 
+          localImagePath = downloadedPath;
+
           bigPictureStyleInformation =
               BigPictureStyleInformation(
                 FilePathAndroidBitmap(
-                  localImagePath,
+                  downloadedPath,
                 ),
                 largeIcon:
                 FilePathAndroidBitmap(
-                  localImagePath,
+                  downloadedPath,
                 ),
                 contentTitle: title,
                 summaryText: body,
@@ -967,7 +1210,7 @@ class NotificationService {
         styleInformation:
         messagingStyle ??
             bigPictureStyleInformation,
-        largeIcon: localImagePath != null
+        largeIcon: localImagePath != null && localImagePath.isNotEmpty
             ? FilePathAndroidBitmap(
           localImagePath,
         )
@@ -976,6 +1219,8 @@ class NotificationService {
         AndroidNotificationCategory.message,
       );
 
+      final String? finalAttachmentPath = localImagePath;
+
       await _localNotifications.show(
         message.hashCode,
         title,
@@ -983,21 +1228,169 @@ class NotificationService {
         NotificationDetails(
           android: androidDetails,
           iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+            presentBanner: true,
+            presentList: true,
+            interruptionLevel: InterruptionLevel.active,
+            threadIdentifier: conversationId,
             attachments:
-            localImagePath != null
+            finalAttachmentPath != null && finalAttachmentPath.isNotEmpty
                 ? [
               DarwinNotificationAttachment(
-                localImagePath,
+                finalAttachmentPath,
               ),
             ]
                 : null,
           ),
         ),
+        payload: jsonEncode(message.data),
       );
     } catch (e) {
       debugPrint(
         '❌ Normal notification error: $e',
       );
+    }
+  }
+
+  // ============================================================
+  // LOCAL CHAT NOTIFICATION (FOREGROUND SOCKET.IO FLOW)
+  // ============================================================
+
+  /// Set of message IDs that have already triggered a notification display to prevent duplicates.
+  static final Set<String> _notifiedChatMsgIds = <String>{};
+
+  /// Shows a local notification for an incoming chat message received via Socket.IO
+  /// when the app is in the foreground and the user is not actively viewing that conversation.
+  static Future<void> showLocalChatNotification({
+    required String messageId,
+    required String conversationId,
+    required String senderName,
+    required String body,
+    String? senderId,
+    String? senderImage,
+    String? groupName,
+  }) async {
+    try {
+      final String lifecycleState =
+          WidgetsBinding.instance.lifecycleState?.name ?? 'unknown';
+      final bool isActiveMatch =
+          activeChatId != null && activeChatId == conversationId;
+
+      debugPrint(
+        '🔔 [ChatNotification] Received incoming chat msg: ID=$messageId, convId=$conversationId, lifecycleState=$lifecycleState, isActiveMatch=$isActiveMatch',
+      );
+
+      // 1. Suppress if current active conversation matches
+      if (isActiveMatch) {
+        debugPrint(
+          '🚫 [ChatNotification] Suppressed: conversation $conversationId is currently active.',
+        );
+        return;
+      }
+
+      // 2. Suppress if message was sent by the current user
+      final currentUserId = HiveService.userId;
+      if (currentUserId != null &&
+          currentUserId.isNotEmpty &&
+          senderId != null &&
+          senderId == currentUserId) {
+        debugPrint(
+          '🚫 [ChatNotification] Suppressed: message was sent by self ($senderId).',
+        );
+        return;
+      }
+
+      // 3. Deduplication check
+      if (messageId.isNotEmpty) {
+        if (_notifiedChatMsgIds.contains(messageId)) {
+          debugPrint(
+            '🚫 [ChatNotification] Suppressed: duplicate notification for messageId $messageId',
+          );
+          return;
+        }
+        _notifiedChatMsgIds.add(messageId);
+        if (_notifiedChatMsgIds.length > 500) {
+          _notifiedChatMsgIds.remove(_notifiedChatMsgIds.first);
+        }
+      }
+
+      final String title = senderName.trim().isNotEmpty ? senderName.trim() : 'CatchWatch';
+      final String displayBody = body.trim().isNotEmpty ? body.trim() : 'New message';
+
+      debugPrint(
+        '📲 [ChatNotification] Attempting local notification display for messageId: $messageId',
+      );
+
+      final Person person = Person(
+        name: title,
+        key: senderId,
+      );
+
+      final MessagingStyleInformation messagingStyle = MessagingStyleInformation(
+        person,
+        conversationTitle: groupName,
+        messages: [
+          Message(
+            displayBody,
+            DateTime.now(),
+            person,
+          ),
+        ],
+      );
+
+      final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+        notificationChannelId,
+        notificationChannelName,
+        importance: Importance.max,
+        priority: Priority.high,
+        icon: '@mipmap/ic_launcher',
+        styleInformation: messagingStyle,
+        category: AndroidNotificationCategory.message,
+      );
+
+      final DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+        presentBanner: true,
+        presentList: true,
+        interruptionLevel: InterruptionLevel.active,
+        threadIdentifier: conversationId,
+      );
+
+      final NotificationDetails platformDetails = NotificationDetails(
+        android: androidDetails,
+        iOS: iosDetails,
+      );
+
+      final Map<String, dynamic> payloadMap = {
+        'type': 'CHAT_MESSAGE',
+        'conversationId': conversationId,
+        'messageId': messageId,
+        'senderId': senderId ?? '',
+        'senderName': senderName,
+      };
+
+      await _localNotifications.show(
+        messageId.hashCode,
+        title,
+        displayBody,
+        platformDetails,
+        payload: jsonEncode(payloadMap),
+      );
+
+      debugPrint(
+        '✅ [ChatNotification] Local notification shown successfully for messageId: $messageId',
+      );
+    } catch (e, st) {
+      debugPrint(
+        '❌ [ChatNotification] Notification plugin error: $e',
+      );
+      if (kDebugMode) {
+        debugPrint('$st');
+      }
     }
   }
 

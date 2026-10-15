@@ -164,8 +164,11 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                                   ),
                                   if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || profileProvider.user?.hasVerifiedTick == true) ...[
                                     const SizedBox(width: 6),
-                                    const Icon(Icons.verified_rounded, 
-                                        color: AppColors.primary, size: 18),
+                                    Icon(
+                                      Icons.verified_rounded, 
+                                      color: (profileProvider.user?.blueTick == true) ? Colors.blue : Colors.white, 
+                                      size: 18,
+                                    ),
                                   ],
                                 ],
                               ),

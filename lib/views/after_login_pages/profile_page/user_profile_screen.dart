@@ -10,6 +10,13 @@ import 'package:catch_watch/views/after_login_pages/message/chat_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:catch_watch/models/user_model.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
+import 'package:catch_watch/utils/share_helper.dart';
+import 'package:catch_watch/views/after_login_pages/report/report_bottom_sheet.dart';
+import 'package:catch_watch/view_model/after_login_provider/block_provider.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/block_confirmation_dialog.dart';
+import 'package:catch_watch/view_model/after_login_provider/user_search_provider.dart';
 import '../../../utils/empty_state_widget.dart';
 import '../../../view_model/after_login_provider/profile_provider.dart';
 
@@ -186,6 +193,99 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   Widget _buildGrid(UserProfileProvider provider) {
+    if (provider.isBlocked) {
+      return SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
+                  color: AppColors.grey100,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.block_rounded, size: 48, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'You blocked this user',
+                style: text16(fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'You will no longer see posts or reels from @${provider.user?.username ?? ''}.',
+                textAlign: TextAlign.center,
+                style: text14(color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () {
+                  showUnblockConfirmationDialog(
+                    context: context,
+                    userId: provider.user!.id!,
+                    username: provider.user?.username,
+                    name: provider.user?.name,
+                    onConfirmUnblock: () async {
+                      try {
+                        final res = await context.read<BlockProvider>().unblockUser(provider.user!.id!);
+                        if (res != null && res.success) {
+                          context.read<ReelsProvider>().onUserUnblocked(provider.user!.id!);
+                          context.read<UserProfileProvider>().setBlockedByMe(false);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(res.message),
+                                backgroundColor: AppColors.primary,
+                              ),
+                            );
+                          }
+                          return true;
+                        }
+                        return false;
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(e.toString().replaceAll('Exception: ', '')),
+                              backgroundColor: AppColors.error,
+                            ),
+                          );
+                        }
+                        return false;
+                      }
+                    },
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                ),
+                child: const Text('Unblock', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (provider.isBlockedBy) {
+      return const SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 24, vertical: 48),
+          child: EmptyStateWidget(
+            title: 'User Unavailable',
+            message: 'This account content is not available.',
+            icon: Icons.person_off_outlined,
+            isScrollable: false,
+          ),
+        ),
+      );
+    }
+
     if (provider.userReels.isEmpty) {
       return const SliverToBoxAdapter(
         child: EmptyStateWidget(
@@ -322,24 +422,49 @@ class _ExpandedHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.18),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Center(
-                      child: Icon(
-                        Icons.arrow_back_ios_new_rounded,
-                        color: Colors.white,
-                        size: 18,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Center(
+                          child: Icon(
+                            Icons.arrow_back_ios_new_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                    if (user.id != null && user.id != HiveService.userId)
+                      GestureDetector(
+                        onTap: () => _showOtherUserProfileMenu(context, user),
+                        behavior: HitTestBehavior.opaque,
+                        child: Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.18),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Center(
+                            child: Icon(
+                              Icons.more_vert_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 14),
                 Row(
@@ -394,66 +519,113 @@ class _ExpandedHeader extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Selector<ProfileProvider, bool>(
-                        selector: (_, p) => p.isUserFollowed(user.id!),
-                        builder: (context, isFollowing, _) {
-                          return _actionButton(
-                            context,
-                            isFollowing ? 'Following' : 'Follow',
-                            isFollowing ? Colors.white.withOpacity(0.2) : Colors.white,
-                            isFollowing ? Colors.white : const Color(0xFFFF5F00),
-                            () {
-                              provider.toggleFollow(
-                                user.id!,
-                                onSuccess: () {
-                                  final actualFollowing = provider.user?.isFollowing ?? false;
-                                  context.read<ReelsProvider>().updateFollowStatus(
-                                    user.id!,
-                                    actualFollowing,
-                                  );
-                                  context.read<ProfileProvider>().syncFollowStatus(
-                                    user.id!,
-                                    actualFollowing,
-                                  );
-                                },
-                              );
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _actionButton(
-                        context,
-                        'Message',
-                        Colors.white.withOpacity(0.15),
-                        Colors.white,
-                        () async {
-                          final chatProvider = context.read<ChatProvider>();
-                          final convId = await chatProvider.createConversation(user.id!);
-                          if (convId != null && context.mounted) {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => ChatScreen(
-                                  conversationId: convId,
-                                  partnerId: user.id!,
-                                  name: user.name ?? '',
-                                  username: user.username ?? '',
-                                  image: user.profileImage ?? '',
+                if (provider.isBlocked)
+                  _actionButton(
+                    context,
+                    'Unblock',
+                    Colors.white,
+                    const Color(0xFFFF5F00),
+                    () {
+                      showUnblockConfirmationDialog(
+                        context: context,
+                        userId: user.id!,
+                        username: user.username,
+                        name: user.name,
+                        onConfirmUnblock: () async {
+                          try {
+                            final res = await context.read<BlockProvider>().unblockUser(user.id!);
+                            if (res != null && res.success) {
+                              context.read<ReelsProvider>().onUserUnblocked(user.id!);
+                              context.read<UserProfileProvider>().setBlockedByMe(false);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(res.message),
+                                    backgroundColor: AppColors.primary,
+                                  ),
+                                );
+                              }
+                              return true;
+                            }
+                            return false;
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(e.toString().replaceAll('Exception: ', '')),
+                                  backgroundColor: AppColors.error,
                                 ),
-                              ),
-                            );
+                              );
+                            }
+                            return false;
                           }
-                        }, // Message action
+                        },
+                      );
+                    },
+                  )
+                else if (provider.isBlockedBy)
+                  const SizedBox.shrink()
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Selector<ProfileProvider, bool>(
+                          selector: (_, p) => p.isUserFollowed(user.id!),
+                          builder: (context, isFollowing, _) {
+                            return _actionButton(
+                              context,
+                              isFollowing ? 'Following' : 'Follow',
+                              isFollowing ? Colors.white.withOpacity(0.2) : Colors.white,
+                              isFollowing ? Colors.white : const Color(0xFFFF5F00),
+                              () {
+                                provider.toggleFollow(
+                                  user.id!,
+                                  onSuccess: () {
+                                    final actualFollowing = provider.user?.isFollowing ?? false;
+                                    context.read<ReelsProvider>().updateFollowStatus(
+                                      user.id!,
+                                      actualFollowing,
+                                    );
+                                    context.read<ProfileProvider>().syncFollowStatus(
+                                      user.id!,
+                                      actualFollowing,
+                                    );
+                                  },
+                                );
+                              },
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _actionButton(
+                          context,
+                          'Message',
+                          Colors.white.withOpacity(0.15),
+                          Colors.white,
+                          () async {
+                            final chatProvider = context.read<ChatProvider>();
+                            final convId = await chatProvider.createConversation(user.id!);
+                            if (convId != null && context.mounted) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ChatScreen(
+                                    conversationId: convId,
+                                    partnerId: user.id!,
+                                    name: user.name ?? '',
+                                    username: user.username ?? '',
+                                    image: user.profileImage ?? '',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
                 const SizedBox(height: 28),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -665,10 +837,199 @@ class _CollapsedBar extends StatelessWidget {
               );
             },
           ),
+          if (user.id != null && user.id != HiveService.userId) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _showOtherUserProfileMenu(context, user),
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.more_vert_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
+}
+
+void _showOtherUserProfileMenu(BuildContext context, UserModel user) {
+  if (user.id == null || user.id!.isEmpty) return;
+  if (user.id == HiveService.userId) return;
+
+  final blockProvider = context.read<BlockProvider>();
+  final userProfileProvider = context.read<UserProfileProvider>();
+  final bool isBlocked = userProfileProvider.isBlocked || blockProvider.isUserBlocked(user.id!);
+
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: const Color(0xFF1E1E1E),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (modalCtx) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 6),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.share_outlined, color: Colors.white),
+              title: const Text('Share Profile', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(modalCtx);
+                ShareHelper.shareContent(
+                  title: 'Catch Watch Profile',
+                  text: 'Check out ${user.name ?? 'this creator'} on Catch&Watch: @${user.username ?? ''}',
+                  contentId: user.id,
+                  contentType: 'user',
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.flag_outlined, color: Colors.redAccent),
+              title: const Text('Report Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+              subtitle: Text(
+                'Report @${user.username ?? ''} for spam, abuse, or impersonation',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(modalCtx);
+                showReportBottomSheet(
+                  context,
+                  targetType: 'user',
+                  targetId: user.id!,
+                  targetTitle: 'Report Profile',
+                );
+              },
+            ),
+            if (isBlocked)
+              ListTile(
+                leading: const Icon(Icons.lock_open_rounded, color: Colors.greenAccent),
+                title: const Text('Unblock User', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                subtitle: Text(
+                  'Allow @${user.username ?? ''} to see your profile and content',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(modalCtx);
+                  showUnblockConfirmationDialog(
+                    context: context,
+                    userId: user.id!,
+                    username: user.username,
+                    name: user.name,
+                    onConfirmUnblock: () async {
+                      try {
+                        final res = await context.read<BlockProvider>().unblockUser(user.id!);
+                        if (res != null && res.success) {
+                          context.read<ReelsProvider>().onUserUnblocked(user.id!);
+                          context.read<UserProfileProvider>().setBlockedByMe(false);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(res.message),
+                                backgroundColor: AppColors.primary,
+                              ),
+                            );
+                          }
+                          return true;
+                        }
+                        return false;
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(e.toString().replaceAll('Exception: ', '')),
+                              backgroundColor: AppColors.error,
+                            ),
+                          );
+                        }
+                        return false;
+                      }
+                    },
+                  );
+                },
+              )
+            else
+              ListTile(
+                leading: const Icon(Icons.block_rounded, color: Colors.redAccent),
+                title: const Text('Block User', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600)),
+                subtitle: Text(
+                  'Block @${user.username ?? ''} and hide their content',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(modalCtx);
+                  showBlockConfirmationDialog(
+                    context: context,
+                    userId: user.id!,
+                    username: user.username,
+                    name: user.name,
+                    onConfirmBlock: () async {
+                      try {
+                        final res = await context.read<BlockProvider>().blockUser(
+                          user.id!,
+                          username: user.username,
+                          name: user.name,
+                          profileImage: user.profileImage,
+                        );
+                        if (res != null && res.success) {
+                          context.read<ReelsProvider>().onUserBlocked(user.id!);
+                          context.read<UserSearchProvider>().onUserBlocked(user.id!);
+                          context.read<ProfileProvider>().syncFollowStatus(user.id!, false);
+                          context.read<UserProfileProvider>().setBlockedByMe(true);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(res.message),
+                                backgroundColor: AppColors.primary,
+                              ),
+                            );
+                          }
+                          return true;
+                        }
+                        return false;
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(e.toString().replaceAll('Exception: ', '')),
+                              backgroundColor: AppColors.error,
+                            ),
+                          );
+                        }
+                        return false;
+                      }
+                    },
+                  );
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      );
+    },
+  );
 }
 
 class _GridCard extends StatelessWidget {

@@ -23,16 +23,31 @@ class SocketService {
 
   io.Socket? _socket;
   bool _isConnected = false;
+  bool _isAuthBlocked = false;
+  String? _blockedToken;
+  VoidCallback? onAccountDisabled;
+
   final StreamController<Map<String, dynamic>> _messageStreamController = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<Map<String, dynamic>> get messageStream => _messageStreamController.stream;
   bool get isConnected => _isConnected;
+  bool get isAuthBlocked => _isAuthBlocked;
+
+  void resetAuthBlock() {
+    _isAuthBlocked = false;
+    _blockedToken = null;
+  }
 
   void connect() {
     debugPrint('[SOCKET_DEBUG] Socket CONNECT called from: ${_getSocketCaller()}');
     final token = HiveService.getToken();
     if (token == null) {
       debugPrint('Socket.io Connection deferred: No token found');
+      return;
+    }
+
+    if (_isAuthBlocked && _blockedToken == token) {
+      debugPrint('[SOCKET] Connection attempt suppressed: Account is disabled or token invalid.');
       return;
     }
 
@@ -46,6 +61,8 @@ class SocketService {
       _socket = io.io(serverUrl, io.OptionBuilder()
         .setTransports(['websocket']) // Use WebSocket transport
         .disableAutoConnect()         // Disable auto-connection
+        .setReconnectionAttempts(3)   // Stop endless reconnect loops on failure
+        .setReconnectionDelay(2000)
         .setQuery({'token': token})    // Pass token as query parameter
         .build());
 
@@ -53,6 +70,8 @@ class SocketService {
 
       _socket!.onConnect((_) {
         _isConnected = true;
+        _isAuthBlocked = false;
+        _blockedToken = null;
         debugPrint('[SOCKET_DEBUG] Socket.io Connected');
       });
 
@@ -61,12 +80,30 @@ class SocketService {
         debugPrint('[SOCKET_DEBUG] Socket.io Disconnected');
       });
 
+      void handlePermanentAuthError(dynamic data) {
+        final msg = data?.toString() ?? '';
+        debugPrint('Socket.io Error: $msg');
+        if (msg.contains('Account disabled') ||
+            msg.contains('Authentication error') ||
+            msg.contains('jwt expired') ||
+            msg.contains('invalid token')) {
+          debugPrint('[SOCKET] Permanent auth failure detected: $msg. Disconnecting and stopping reconnection.');
+          _isAuthBlocked = true;
+          _blockedToken = token;
+          _socket?.disconnect();
+          _socket?.dispose();
+          _socket = null;
+          _isConnected = false;
+          onAccountDisabled?.call();
+        }
+      }
+
       _socket!.onConnectError((data) {
-        debugPrint('Socket.io Connection Error: $data');
+        handlePermanentAuthError(data);
       });
 
       _socket!.onError((data) {
-        debugPrint('Socket.io Error: $data');
+        handlePermanentAuthError(data);
       });
 
       // Listen to all common chat and call events and pipe them to the stream
@@ -105,15 +142,21 @@ class SocketService {
     }
   }
 
-  void disconnect() {
+  void disconnect({bool clearAuthBlock = false}) {
     debugPrint('[SOCKET_DEBUG] Socket DISCONNECT called from: ${_getSocketCaller()}');
+    if (clearAuthBlock) {
+      _isAuthBlocked = false;
+      _blockedToken = null;
+    }
     _socket?.disconnect();
+    _socket?.dispose();
+    _socket = null;
     _isConnected = false;
   }
 
   void dispose() {
     debugPrint('[SOCKET_DEBUG] Socket DISPOSE called from: ${_getSocketCaller()}');
-    disconnect();
+    disconnect(clearAuthBlock: true);
     _messageStreamController.close();
   }
 }

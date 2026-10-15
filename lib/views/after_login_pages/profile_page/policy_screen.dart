@@ -141,7 +141,7 @@ class _PolicyScreenState extends State<PolicyScreen> {
           LegalSection(
             heading: '3. Content & Acceptable Use',
             paragraphs: [
-              'Catch & Watch allows users to watch stories, short films, and upload content. You agree not to upload or share content that is unlawful, defamatory, obscene, infringing on intellectual property, or abusive.',
+              'Catch & Watch allows users to watch stories, short films, and upload user-generated content. There is zero tolerance for objectionable, harmful, or abusive content. Users strictly agree not to upload, share, or transmit content that is unlawful, defamatory, obscene, sexually explicit, harassing, hateful, violent, infringing on intellectual property, or abusive.',
             ],
           ),
           LegalSection(
@@ -153,7 +153,7 @@ class _PolicyScreenState extends State<PolicyScreen> {
           LegalSection(
             heading: '5. Account Suspension & Termination',
             paragraphs: [
-              'We reserve the right to suspend or terminate your account at any time if you violate these terms or engage in behavior harmful to other users or the platform.',
+              'Catch & Watch enforces zero tolerance for abusive users. We reserve the right to immediately remove objectionable content and suspend or permanently terminate the account of any user who violates these terms or engages in abusive, harassing, or prohibited behavior.',
             ],
           ),
           LegalSection(

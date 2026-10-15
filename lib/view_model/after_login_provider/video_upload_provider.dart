@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:catch_watch/repository/reels_repository.dart';
 import 'package:dio/dio.dart' as dio;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -367,7 +368,9 @@ class VideoUploadProvider extends ChangeNotifier {
         },
       );
 
-      debugPrint("✅ Upload Response: $response");
+      if (kDebugMode) {
+        debugPrint("✅ Upload Response: $response");
+      }
 
       bool isSuccess = false;
       String? message;

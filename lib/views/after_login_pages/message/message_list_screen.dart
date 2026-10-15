@@ -419,7 +419,7 @@ class _MessageListScreenState extends State<MessageListScreen> {
                             style: text16(fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.w500),
                           ),
                           subtitle: Text(
-                            chat.lastMessage?.text ?? 'No messages',
+                            chat.lastMessage?.displayText ?? 'No messages',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: text14(

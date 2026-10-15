@@ -25,32 +25,67 @@ class VerificationStatusResponse {
             json['data'] != null ||
             json['verification'] != null);
 
-    final dynamic dataObj = json['data'] ?? json['verification'] ?? json['application'];
-
-    status = (json['status'] ??
-            (dataObj is Map ? dataObj['status'] : null) ??
-            json['verificationStatus'])
-        ?.toString();
-
-    final rawIsVerified = json['isVerified'] ?? (dataObj is Map ? dataObj['isVerified'] : null);
-    if (rawIsVerified is bool) {
-      isVerified = rawIsVerified;
-    } else if (rawIsVerified != null) {
-      isVerified = rawIsVerified.toString().toLowerCase() == 'true';
-    }
-
-    badgeType = (json['badgeType'] ?? (dataObj is Map ? dataObj['badgeType'] : null))?.toString();
-    message = json['message']?.toString();
+    final dynamic appObj = json['application'] ??
+        (json['data'] is Map ? json['data']['application'] : null);
+    final dynamic verObj = json['verification'] ??
+        (json['data'] is Map ? json['data']['verification'] : null);
 
     final appMap = _extractApplicationMap(json);
     if (appMap != null) {
       application = VerificationApplication.fromJson(appMap);
-      if (status == null || status!.isEmpty) {
-        status = application?.status;
-      }
     } else {
       application = null;
     }
+
+    // Status precedence:
+    // 1. Dedicated application status
+    // 2. Dedicated verification object status
+    // 3. Explicit verificationStatus field
+    // 4. Root status (only if explicit verification payload, not generic user profile)
+    status = application?.status ??
+        (verObj is Map ? (verObj['status'] ?? verObj['verificationStatus'])?.toString() : null) ??
+        json['verificationStatus']?.toString() ??
+        (json['application'] != null || verObj != null ? json['status']?.toString() : null);
+
+    if (status == null && json['status'] != null) {
+      final s = json['status'].toString().toUpperCase();
+      if (s == 'PENDING' ||
+          s == 'UNDER_REVIEW' ||
+          s == 'IN_REVIEW' ||
+          s == 'VERIFIED' ||
+          s == 'APPROVED' ||
+          s == 'REJECTED' ||
+          s == 'NOT_VERIFIED' ||
+          s == 'CANCELLED' ||
+          s == 'CANCELED') {
+        if (json.containsKey('badgeType') ||
+            json.containsKey('application') ||
+            json.containsKey('verification') ||
+            json.containsKey('verificationStatus')) {
+          status = json['status'].toString();
+        }
+      }
+    }
+
+    // Creator isVerified precedence:
+    final dynamic rawIsVerified = (verObj is Map ? verObj['isVerified'] : null) ??
+        (appObj is Map ? appObj['isVerified'] : null) ??
+        json['isCreatorVerified'] ??
+        (json['verification'] != null ? json['isVerified'] : null);
+
+    if (rawIsVerified is bool) {
+      isVerified = rawIsVerified;
+    } else if (rawIsVerified != null) {
+      isVerified = rawIsVerified.toString().toLowerCase() == 'true';
+    } else {
+      isVerified = null;
+    }
+
+    badgeType = (json['badgeType'] ??
+            (verObj is Map ? verObj['badgeType'] : null) ??
+            (appObj is Map ? appObj['badgeType'] : null))
+        ?.toString();
+    message = json['message']?.toString();
   }
 
   static Map<String, dynamic>? _extractApplicationMap(Map<String, dynamic> json) {
@@ -99,14 +134,16 @@ class VerificationStatusResponse {
   }
 
   static bool _hasApplicationFields(Map<String, dynamic> map) {
-    return map.containsKey('fullName') ||
-        map.containsKey('governmentIdType') ||
-        map.containsKey('governmentIdNumber') ||
-        map.containsKey('idFront') ||
-        map.containsKey('idType') ||
-        map.containsKey('planId') ||
-        map.containsKey('appliedAt') ||
-        (map.containsKey('_id') && (map.containsKey('reason') || map.containsKey('plan')));
+    final bool hasDoc = (map['governmentIdType'] != null && map['governmentIdType'].toString().isNotEmpty) ||
+        (map['governmentIdNumber'] != null && map['governmentIdNumber'].toString().isNotEmpty) ||
+        (map['idFront'] != null && map['idFront'].toString().isNotEmpty) ||
+        (map['idBack'] != null && map['idBack'].toString().isNotEmpty) ||
+        (map['selfie'] != null && map['selfie'].toString().isNotEmpty);
+
+    final bool hasVerMeta = (map['appliedAt'] != null && map['appliedAt'].toString().isNotEmpty) ||
+        (map['verificationStatus'] != null && map['verificationStatus'].toString().isNotEmpty);
+
+    return hasDoc || hasVerMeta;
   }
 }
 

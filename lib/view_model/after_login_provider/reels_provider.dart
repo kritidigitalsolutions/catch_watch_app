@@ -13,12 +13,50 @@ class ReelsProvider extends ChangeNotifier {
   }
 
   List<ReelModel> _reels = [];
+  List<ReelModel> _feedReels = [];
+  List<ReelModel> _searchResults = [];
+  bool _isSearching = false;
+  bool _hasFetchedFeed = false;
   bool _isLoading = false;
+  bool _isSearchLoading = false;
   String? _error;
+  String? _searchError;
 
   List<ReelModel> get reels => _reels;
+  List<ReelModel> get feedReels => _feedReels;
+  List<ReelModel> get searchResults => _searchResults;
+  bool get isSearching => _isSearching;
+  bool get hasFetchedFeed => _hasFetchedFeed;
   bool get isLoading => _isLoading;
+  bool get isSearchLoading => _isSearchLoading;
   String? get error => _error;
+  String? get searchError => _searchError;
+
+  void clearSearch() {
+    _isSearching = false;
+    _searchResults = [];
+    _searchError = null;
+    notifyListeners();
+  }
+
+  void reset() {
+    _reels = [];
+    _feedReels = [];
+    _searchResults = [];
+    _isSearching = false;
+    _hasFetchedFeed = false;
+    _isLoading = false;
+    _isSearchLoading = false;
+    _error = null;
+    _searchError = null;
+    _targetReelId = null;
+    _likedIds.clear();
+    _bookmarkedIds.clear();
+    _followingIds.clear();
+    _blockedUserIds.clear();
+    _hasFetchedInitialInteractions = false;
+    notifyListeners();
+  }
 
   String? _targetReelId;
   void setTargetReelId(String? id) {
@@ -31,9 +69,25 @@ class ReelsProvider extends ChangeNotifier {
   final Set<String> _likedIds = {};
   final Set<String> _bookmarkedIds = {};
   final Set<String> _followingIds = {};
+  final Set<String> _blockedUserIds = {};
   bool _hasFetchedInitialInteractions = false;
 
   bool isUserFollowed(String userId) => _followingIds.contains(userId);
+  bool isCreatorBlocked(String userId) => _blockedUserIds.contains(userId);
+
+  void onUserBlocked(String userId) {
+    _blockedUserIds.add(userId);
+    _feedReels.removeWhere((r) => r.user?.id == userId);
+    _reels.removeWhere((r) => r.user?.id == userId);
+    _searchResults.removeWhere((r) => r.user?.id == userId);
+    _followingIds.remove(userId);
+    notifyListeners();
+  }
+
+  void onUserUnblocked(String userId) {
+    _blockedUserIds.remove(userId);
+    notifyListeners();
+  }
 
   Future<void> applyInteractionsTo(List<ReelModel> reelList) async {
     if (!_hasFetchedInitialInteractions) {
@@ -67,39 +121,157 @@ class ReelsProvider extends ChangeNotifier {
   }
 
   Future<void> fetchReelsFeed({bool forceRefresh = false}) async {
-    if (!forceRefresh && _reels.isNotEmpty) return;
+    // 1. Guard against concurrent in-flight requests
+    if (_isLoading) return;
+
+    // 2. Return cached feed if already fetched, not empty, and not force-refreshing
+    if (!forceRefresh && _hasFetchedFeed && _reels.isNotEmpty) {
+      return;
+    }
 
     _isLoading = true;
     _error = null;
+    if (forceRefresh && _feedReels.isEmpty) {
+      _hasFetchedFeed = false;
+    }
     notifyListeners();
 
     try {
-      // Re-fetch interactions on force refresh to sync following state
+      // Re-fetch interactions asynchronously without blocking the reels feed request
       if (forceRefresh || !_hasFetchedInitialInteractions) {
-        await _fetchInitialInteractions();
+        _fetchInitialInteractions().catchError((e) {
+          debugPrint('Error fetching initial interactions: $e');
+        });
       }
 
       final response = await _reelsRepository.getReelsFeed();
-      if (response['success'] == true) {
-        final List<ReelModel> fetchedReels = (response['reels'] as List)
-            .map((e) => ReelModel.fromJson(e))
-            .toList();
+      
+      dynamic rawList;
+      bool isSuccess = false;
+      String? errorMessage;
 
-        // Sync with local sets
-        _applyLocalInteractions(fetchedReels);
+      if (response is List) {
+        rawList = response;
+        isSuccess = true;
+      } else if (response is Map) {
+        final bool isExplicitFailure = response['success'] == false ||
+            response['success']?.toString().toLowerCase() == 'false' ||
+            response['status'] == 'error' ||
+            response['status'] == 'fail' ||
+            (response['status'] is int && response['status'] >= 400) ||
+            (response['statusCode'] is int && response['statusCode'] >= 400);
 
-        // Also update local sets from fetched data
-        for (var reel in fetchedReels) {
-          if (reel.userInteraction == 'LIKE') {
-            _likedIds.add(reel.id!);
-            HiveService.toggleLikeLocal(reel.id!, true);
+        errorMessage = response['message']?.toString() ?? response['error']?.toString();
+
+        if (!isExplicitFailure) {
+          if (response['reels'] is List) {
+            rawList = response['reels'];
+            isSuccess = true;
+          } else if (response['feed'] is List) {
+            rawList = response['feed'];
+            isSuccess = true;
+          } else if (response['data'] is List) {
+            rawList = response['data'];
+            isSuccess = true;
+          } else if (response['data'] is Map) {
+            final dataMap = response['data'] as Map;
+            if (dataMap['reels'] is List) {
+              rawList = dataMap['reels'];
+              isSuccess = true;
+            } else if (dataMap['feed'] is List) {
+              rawList = dataMap['feed'];
+              isSuccess = true;
+            }
+          } else if (response['success'] == true ||
+              response['success']?.toString().toLowerCase() == 'true' ||
+              response['status'] == 'success' ||
+              response['status'] == 200 ||
+              response['statusCode'] == 200) {
+            isSuccess = true;
           }
-          if (reel.isBookmarked == true) _bookmarkedIds.add(reel.id!);
         }
+      }
 
-        _reels = fetchedReels;
+      if (isSuccess && rawList is List) {
+        if (rawList.isEmpty) {
+          // Genuinely empty feed
+          _feedReels = [];
+          _reels = [];
+          _hasFetchedFeed = true;
+          _error = null;
+        } else {
+          final List<ReelModel> fetchedReels = [];
+          int invalidCount = 0;
+          String? firstError;
+
+          for (var item in rawList) {
+            if (item is Map) {
+              try {
+                final Map<String, dynamic> itemMap = Map<String, dynamic>.from(item);
+                // Validate that the item has reel characteristics
+                final bool hasId = itemMap['_id'] != null || itemMap['id'] != null;
+                final bool hasMedia = (itemMap['videoUrl'] != null && itemMap['videoUrl'].toString().isNotEmpty) ||
+                    (itemMap['mediaUrl'] != null && itemMap['mediaUrl'].toString().isNotEmpty) ||
+                    (itemMap['video'] != null && itemMap['video'].toString().isNotEmpty) ||
+                    (itemMap['url'] != null && itemMap['url'].toString().isNotEmpty);
+                final bool isAd = itemMap['isAd'] == true || itemMap['isAd']?.toString().toLowerCase() == 'true';
+
+                // Skip unrelated nested objects or empty maps
+                if (!hasId && !hasMedia && !isAd) {
+                  invalidCount++;
+                  continue;
+                }
+
+                final reel = ReelModel.fromJson(itemMap);
+                if (reel.user?.id != null && _blockedUserIds.contains(reel.user!.id)) {
+                  continue;
+                }
+                fetchedReels.add(reel);
+              } catch (e, stack) {
+                invalidCount++;
+                firstError ??= e.toString();
+                debugPrint('Error parsing reel item: $e\n$stack');
+              }
+            } else {
+              invalidCount++;
+            }
+          }
+
+          if (fetchedReels.isEmpty) {
+            // All items were invalid or failed to parse - report meaningful error
+            _error = firstError != null
+                ? 'Failed to parse reel data: $firstError'
+                : 'Invalid reels data format received from server';
+            // Do not mark _hasFetchedFeed as true, so it's treated as an error state rather than false empty state
+          } else {
+            // Sync with local sets
+            _applyLocalInteractions(fetchedReels);
+
+            // Also update local sets from fetched data
+            for (var reel in fetchedReels) {
+              if (reel.id != null) {
+                if (reel.userInteraction == 'LIKE') {
+                  _likedIds.add(reel.id!);
+                  HiveService.toggleLikeLocal(reel.id!, true);
+                }
+                if (reel.isBookmarked == true) {
+                  _bookmarkedIds.add(reel.id!);
+                }
+              }
+            }
+
+            _feedReels = fetchedReels;
+            _reels = fetchedReels;
+            _hasFetchedFeed = true;
+            _error = null;
+          }
+        }
+      } else if (!isSuccess && errorMessage != null) {
+        _error = errorMessage;
+      } else if (isSuccess && rawList == null) {
+        _error = 'No reels data found in server response';
       } else {
-        _error = 'Failed to fetch reels';
+        _error = errorMessage ?? 'Failed to fetch reels';
       }
     } catch (e) {
       _error = e.toString();
@@ -163,16 +335,22 @@ class ReelsProvider extends ChangeNotifier {
     // Not in current list, fetch it and insert at top
     try {
       final response = await _reelsRepository.getReelById(reelId);
-      if (response['success'] == true) {
-        final targetReel = ReelModel.fromJson(response['reel']);
+      if (response != null && (response['success'] == true || response['reel'] != null || response['data'] != null)) {
+        final reelData = response['reel'] ?? response['data'];
+        if (reelData is Map) {
+          final targetReel = ReelModel.fromJson(Map<String, dynamic>.from(reelData));
 
-        // Sync with local sets
-        if (_likedIds.contains(targetReel.id)) targetReel.userInteraction = 'LIKE';
-        if (_bookmarkedIds.contains(targetReel.id)) targetReel.isBookmarked = true;
+          // Sync with local sets
+          if (targetReel.id != null) {
+            if (_likedIds.contains(targetReel.id)) targetReel.userInteraction = 'LIKE';
+            if (_bookmarkedIds.contains(targetReel.id)) targetReel.isBookmarked = true;
+          }
 
-        _reels.insert(0, targetReel);
-        _reels = List.from(_reels);
-        notifyListeners();
+          _feedReels.insert(0, targetReel);
+          _reels.insert(0, targetReel);
+          _reels = List.from(_reels);
+          notifyListeners();
+        }
       }
     } catch (e) {
       debugPrint('Error fetching specific reel: $e');
@@ -180,27 +358,90 @@ class ReelsProvider extends ChangeNotifier {
   }
 
   Future<void> searchReels(String query) async {
-    _isLoading = true;
-    _error = null;
+    _isSearchLoading = true;
+    _searchError = null;
+    _isSearching = true;
     notifyListeners();
 
     try {
       final response = await _reelsRepository.searchReels(query);
-      if (response['success'] == true) {
-        final List<ReelModel> fetchedReels = (response['reels'] as List)
-            .map((e) => ReelModel.fromJson(e))
-            .toList();
+      
+      dynamic rawList;
+      bool isSuccess = false;
+      String? errorMessage;
+
+      if (response is List) {
+        rawList = response;
+        isSuccess = true;
+      } else if (response is Map) {
+        final bool isExplicitFailure = response['success'] == false ||
+            response['success']?.toString().toLowerCase() == 'false' ||
+            response['status'] == 'error' ||
+            response['status'] == 'fail' ||
+            (response['status'] is int && response['status'] >= 400) ||
+            (response['statusCode'] is int && response['statusCode'] >= 400);
+
+        errorMessage = response['message']?.toString() ?? response['error']?.toString();
+
+        if (!isExplicitFailure) {
+          if (response['reels'] is List) {
+            rawList = response['reels'];
+            isSuccess = true;
+          } else if (response['data'] is List) {
+            rawList = response['data'];
+            isSuccess = true;
+          } else if (response['data'] is Map && (response['data'] as Map)['reels'] is List) {
+            rawList = (response['data'] as Map)['reels'];
+            isSuccess = true;
+          } else if (response['success'] == true ||
+              response['success']?.toString().toLowerCase() == 'true' ||
+              response['status'] == 'success' ||
+              response['status'] == 200 ||
+              response['statusCode'] == 200) {
+            isSuccess = true;
+          }
+        }
+      }
+
+      if (isSuccess && rawList is List) {
+        final List<ReelModel> fetchedReels = [];
+        for (var item in rawList) {
+          if (item is Map) {
+            try {
+              final Map<String, dynamic> itemMap = Map<String, dynamic>.from(item);
+              final bool hasId = itemMap['_id'] != null || itemMap['id'] != null;
+              final bool hasMedia = (itemMap['videoUrl'] != null && itemMap['videoUrl'].toString().isNotEmpty) ||
+                  (itemMap['mediaUrl'] != null && itemMap['mediaUrl'].toString().isNotEmpty) ||
+                  (itemMap['video'] != null && itemMap['video'].toString().isNotEmpty) ||
+                  (itemMap['url'] != null && itemMap['url'].toString().isNotEmpty);
+              final bool isAd = itemMap['isAd'] == true || itemMap['isAd']?.toString().toLowerCase() == 'true';
+
+              if (!hasId && !hasMedia && !isAd) continue;
+
+              final reel = ReelModel.fromJson(itemMap);
+              if (reel.user?.id != null && _blockedUserIds.contains(reel.user!.id)) {
+                continue;
+              }
+              fetchedReels.add(reel);
+            } catch (e) {
+              debugPrint('Error parsing search reel: $e');
+            }
+          }
+        }
 
         _applyLocalInteractions(fetchedReels);
 
-        _reels = fetchedReels;
+        _searchResults = fetchedReels;
+        _searchError = null;
       } else {
-        _error = 'No reels found';
+        _searchResults = [];
+        _searchError = errorMessage ?? 'No reels found';
       }
     } catch (e) {
-      _error = e.toString();
+      _searchResults = [];
+      _searchError = e.toString();
     } finally {
-      _isLoading = false;
+      _isSearchLoading = false;
       notifyListeners();
     }
   }
@@ -212,6 +453,8 @@ class ReelsProvider extends ChangeNotifier {
     
     final mainIndex = _reels.indexWhere((r) => r.id == reelId);
     if (mainIndex != -1) targetReels.add(_reels[mainIndex]);
+    final searchIndex = _searchResults.indexWhere((r) => r.id == reelId);
+    if (searchIndex != -1) targetReels.add(_searchResults[searchIndex]);
 
     final bool wasLiked = _likedIds.contains(reelId);
     
@@ -286,6 +529,8 @@ class ReelsProvider extends ChangeNotifier {
     
     final mainIndex = _reels.indexWhere((r) => r.id == reelId);
     if (mainIndex != -1) targetReels.add(_reels[mainIndex]);
+    final searchIndex = _searchResults.indexWhere((r) => r.id == reelId);
+    if (searchIndex != -1) targetReels.add(_searchResults[searchIndex]);
 
     final bool currentlyBookmarked = _bookmarkedIds.contains(reelId);
 
@@ -368,6 +613,8 @@ class ReelsProvider extends ChangeNotifier {
         if (reel != null) targetReels.add(reel);
         final index = _reels.indexWhere((r) => r.id == reelId);
         if (index != -1) targetReels.add(_reels[index]);
+        final searchIndex = _searchResults.indexWhere((r) => r.id == reelId);
+        if (searchIndex != -1) targetReels.add(_searchResults[searchIndex]);
 
         for (var r in targetReels) {
           r.commentsCount = (r.commentsCount ?? 0) + 1;
@@ -514,6 +761,8 @@ class ReelsProvider extends ChangeNotifier {
         if (reel != null) targetReels.add(reel);
         final index = _reels.indexWhere((r) => r.id == reelId);
         if (index != -1) targetReels.add(_reels[index]);
+        final searchIndex = _searchResults.indexWhere((r) => r.id == reelId);
+        if (searchIndex != -1) targetReels.add(_searchResults[searchIndex]);
 
         for (var r in targetReels) {
           r.sharesCount = newShares ?? (r.sharesCount ?? 0) + 1;
@@ -536,6 +785,8 @@ class ReelsProvider extends ChangeNotifier {
         if (reel != null) targetReels.add(reel);
         final index = _reels.indexWhere((r) => r.id == reelId);
         if (index != -1) targetReels.add(_reels[index]);
+        final searchIndex = _searchResults.indexWhere((r) => r.id == reelId);
+        if (searchIndex != -1) targetReels.add(_searchResults[searchIndex]);
 
         for (var r in targetReels) {
           r.commentsCount = count;

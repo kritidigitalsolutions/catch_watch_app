@@ -3,14 +3,13 @@ import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_sc
 import 'package:catch_watch/views/after_login_pages/profile_page/edit_profile_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/wish_list_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/help_support_screen.dart';
-import 'package:catch_watch/views/after_login_pages/profile_page/policy_screen.dart';
 import 'package:catch_watch/view_model/after_login_provider/profile_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/verification_provider.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/verification/verification_main_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/verification/verified_status_screen.dart';
-import 'package:catch_watch/views/after_login_pages/profile_page/vip_support/vip_support_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/legal_policies_list_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/delete_account_dialog.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/blocked_users_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../res/app_colors.dart';
@@ -22,6 +21,9 @@ class MenuScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<ProfileProvider>();
+    final bool hasOrangeTick = provider.user?.orangeTick == true;
+    final bool canShowGetOrangeTick = !hasOrangeTick;
+
     return Scaffold(
       backgroundColor: AppColors.white,
       body: Column(
@@ -45,7 +47,7 @@ class MenuScreen extends StatelessWidget {
                     },
                   ),
                   _divider(),
-                  if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.hasVerifiedTick != true) ...[
+                  if (canShowGetOrangeTick) ...[
                     _menuItem(
                       Icons.verified_user_outlined,
                       'Get Orange Tick',
@@ -76,19 +78,19 @@ class MenuScreen extends StatelessWidget {
                   ),
                   _divider(),
                   if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.hasVerifiedTick == true) ...[
-                    // _menuItem(
-                    //   Icons.verified_user_rounded,
-                    //   'Verified User',
-                    //   onTap: () {
-                    //     Navigator.push(
-                    //       context,
-                    //       MaterialPageRoute(
-                    //         builder: (_) => const VerifiedStatusScreen(),
-                    //       ),
-                    //     );
-                    //   },
-                    // ),
-                    // _divider(),
+                    _menuItem(
+                      Icons.verified_user_rounded,
+                      'Verified User',
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const VerifiedStatusScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                    _divider(),
                   ],
                   _menuItem(
                     Icons.notifications_outlined,
@@ -141,6 +143,19 @@ class MenuScreen extends StatelessWidget {
                       );
                     },
                   ),
+                  _divider(),
+                  _menuItem(
+                    Icons.block_rounded,
+                    'Blocked Users',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const BlockedUsersScreen(),
+                        ),
+                      );
+                    },
+                  ),
                   const SizedBox(height: 16),
                   _divider(),
                   _logoutItem(context, provider),
@@ -185,7 +200,7 @@ class MenuScreen extends StatelessWidget {
               height: 110,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.06),
+                color: Colors.white.withValues(alpha: 0.06),
               ),
             ),
           ),
@@ -206,7 +221,7 @@ class MenuScreen extends StatelessWidget {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: Colors.white.withOpacity(0.35),
+                        color: Colors.white.withValues(alpha: 0.35),
                         width: 2.5,
                       ),
                     ),
@@ -238,11 +253,32 @@ class MenuScreen extends StatelessWidget {
                               fontWeight: FontWeight.w800,
                             ),
                           ),
-                          if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.hasVerifiedTick == true) ...[
-                            const SizedBox(width: 4),
-                            const Icon(Icons.verified_rounded, 
-                                color: AppColors.primary, size: 16),
-                          ],
+                          Builder(
+                            builder: (context) {
+                              final verProvider = context.watch<VerificationProvider>();
+                              final bool hasOrange = provider.user?.orangeTick == true;
+                              final bool hasBlue = provider.user?.blueTick == true;
+                              final bool isOrangeAppApproved = verProvider.currentApplication?.status?.trim().toLowerCase() == 'approved' &&
+                                  (verProvider.badgeType?.toUpperCase() == 'ORANGE' ||
+                                      verProvider.currentApplication?.plan?.isOrangeTickPlan == true);
+                              final bool isBlueApp = verProvider.badgeType?.toUpperCase() == 'BLUE' ||
+                                  (verProvider.currentApplication?.plan?.isBlueTickPlan == true) ||
+                                  (hasBlue && !hasOrange);
+                              final bool isBlueAppApproved = verProvider.currentApplication?.status?.trim().toLowerCase() == 'approved' && isBlueApp;
+                              final bool showBadge = hasOrange || isOrangeAppApproved || hasBlue || isBlueAppApproved;
+
+                              if (!showBadge) return const SizedBox.shrink();
+
+                              return Padding(
+                                padding: const EdgeInsets.only(left: 4),
+                                child: Icon(
+                                  Icons.verified_rounded,
+                                  color: (hasBlue || isBlueAppApproved) ? Colors.blue : Colors.white,
+                                  size: 16,
+                                ),
+                              );
+                            },
+                          ),
                         ],
                       ),
                       const SizedBox(height: 2),
@@ -268,7 +304,7 @@ class MenuScreen extends StatelessWidget {
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.18),
+          color: Colors.white.withValues(alpha: 0.18),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(icon, color: Colors.white, size: 18),
@@ -356,7 +392,7 @@ class MenuScreen extends StatelessWidget {
 
   Widget _deleteAccountItem(BuildContext context, ProfileProvider provider) {
     return InkWell(
-      onTap: () => showDeleteAccountDialog(context),
+      onTap: () => showDeleteAccountDialog(context, entryPoint: 'menu_screen'),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
         child: Row(

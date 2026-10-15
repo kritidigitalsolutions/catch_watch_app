@@ -65,10 +65,10 @@ class ReelModel {
   }
 
   ReelModel.fromJson(Map<String, dynamic> json) {
-    id = json['_id'];
+    id = json['_id'] ?? json['id'];
     if (json['user'] != null) {
-      if (json['user'] is Map<String, dynamic>) {
-        user = ReelUser.fromJson(json['user']);
+      if (json['user'] is Map) {
+        user = ReelUser.fromJson(Map<String, dynamic>.from(json['user']));
       } else if (json['user'] is String) {
         user = ReelUser(id: json['user']);
       }
@@ -84,26 +84,42 @@ class ReelModel {
 
     int parseInt(dynamic value) {
       if (value == null) return 0;
-      if (value is int) return value;
-      if (value is String) return int.tryParse(value) ?? 0;
+      if (value is num) return value.toInt();
+      if (value is String) return int.tryParse(value) ?? (double.tryParse(value)?.toInt() ?? 0);
       return 0;
     }
 
-    videoUrl = fixUrl(json['videoUrl'] ?? json['mediaUrl']);
-    thumbnail = fixUrl(json['thumbnail'] ?? json['thumbnailUrl']);
-    caption = json['caption'] ?? json['title'];
-    hashtags = json['hashtags'] != null ? List<String>.from(json['hashtags']) : [];
+    videoUrl = fixUrl(json['videoUrl'] ?? json['mediaUrl'] ?? json['video'] ?? json['url']);
+    thumbnail = fixUrl(json['thumbnail'] ?? json['thumbnailUrl'] ?? json['poster']);
+    caption = json['caption'] ?? json['title'] ?? json['description'];
+    if (json['hashtags'] != null) {
+      if (json['hashtags'] is List) {
+        hashtags = (json['hashtags'] as List)
+            .where((e) => e != null)
+            .map((e) => e.toString())
+            .toList();
+      } else if (json['hashtags'] is String) {
+        hashtags = (json['hashtags'] as String)
+            .split(RegExp(r'\s+'))
+            .where((h) => h.trim().isNotEmpty)
+            .toList();
+      } else {
+        hashtags = [];
+      }
+    } else {
+      hashtags = [];
+    }
     viewsCount = parseInt(json['viewsCount']);
     commentsCount = parseInt(json['commentsCount']);
     sharesCount = parseInt(json['sharesCount']);
     likesCount = parseInt(json['likesCount']);
     userInteraction = json['userInteraction'];
-    isBookmarked = json['isBookmarked'] ?? false;
+    isBookmarked = json['isBookmarked'] == true || json['isBookmarked']?.toString().toLowerCase() == 'true';
     status = json['status'];
     createdAt = json['createdAt'];
 
     // Ad mapping
-    isAd = json['isAd'] ?? false;
+    isAd = json['isAd'] == true || json['isAd']?.toString().toLowerCase() == 'true';
     adId = json['adId'];
     campaignId = json['campaignId'];
     advertiserId = json['advertiserId'];
@@ -131,7 +147,7 @@ class ReelUser {
 
   ReelUser({this.id, this.name, this.profileImage, this.username, this.isFollowing, this.isVerified, this.blueTick, this.orangeTick});
 
-  ReelUser.fromJson(Map<String, dynamic> json) {
+  ReelUser.fromJson(Map<dynamic, dynamic> json) {
     id = json['_id'] ?? json['id'];
     name = json['name'];
     
@@ -143,14 +159,23 @@ class ReelUser {
       return '${AppUrl.serverUrl}/$url';
     }
     
-    profileImage = fixUrl(json['profileImage']);
+    profileImage = fixUrl(json['profileImage'] ?? json['image']);
     username = json['username'];
-    isFollowing = json['isFollowing'] ?? false;
-    isVerified = json['isVerified'] ?? json['verification']?['isVerified'] ?? false;
-    blueTick = json['blueTick'] ?? (json['verification']?['badgeType'] == 'BLUE' && json['verification']?['isVerified'] == true) ?? false;
-    orangeTick = json['orangeTick'] ?? (json['verification']?['badgeType'] == 'ORANGE' && json['verification']?['isVerified'] == true) ?? false;
+    isFollowing = json['isFollowing'] == true || json['isFollowing']?.toString().toLowerCase() == 'true';
+    final dynamic ver = json['verification'];
+    final bool verIsVerified = ver is Map
+        ? (ver['isVerified'] == true || ver['isVerified']?.toString().toLowerCase() == 'true')
+        : false;
+    final String? verBadge = ver is Map ? ver['badgeType']?.toString().toUpperCase() : null;
+
+    final bool rawOrange = json['orangeTick'] == true || json['orangeTick']?.toString().toLowerCase() == 'true';
+    final bool rawBlue = json['blueTick'] == true || json['blueTick']?.toString().toLowerCase() == 'true';
+
+    orangeTick = rawOrange || (verBadge == 'ORANGE' && verIsVerified);
+    blueTick = rawBlue || (verBadge == 'BLUE' && verIsVerified);
+    isVerified = verIsVerified || (blueTick == true) || (orangeTick == true);
   }
 
   /// Returns whether the creator has a verified tick (Orange Tick / Blue Tick)
-  bool get hasVerifiedTick => (isVerified == true) || (blueTick == true) || (orangeTick == true);
+  bool get hasVerifiedTick => (blueTick == true) || (orangeTick == true);
 }

@@ -42,6 +42,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with TickerProvider
     _localController = VideoViewController(
       rtcEngine: engine,
       canvas: const VideoCanvas(uid: 0),
+      useFlutterTexture: true,
     );
   }
 
@@ -53,6 +54,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with TickerProvider
       rtcEngine: engine,
       canvas: VideoCanvas(uid: remoteUid),
       connection: RtcConnection(channelId: channelName),
+      useFlutterTexture: true,
     );
     _lastRemoteUid = remoteUid;
   }
@@ -124,7 +126,12 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with TickerProvider
             left: 0,
             right: 0,
             child: Container(
-              padding: const EdgeInsets.only(top: 50, left: 16, right: 16, bottom: 16),
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 8,
+                left: 16,
+                right: 16,
+                bottom: 16,
+              ),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
@@ -364,8 +371,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with TickerProvider
   }
 
   Widget _buildIncomingControls(BuildContext context, CallProvider provider) {
+    final double bottomInset = MediaQuery.of(context).padding.bottom;
     return Positioned(
-      bottom: 60,
+      bottom: bottomInset > 0 ? bottomInset + 32 : 50,
       left: 40,
       right: 40,
       child: Row(
@@ -421,74 +429,114 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> with TickerProvider
   }
 
   Widget _buildActiveControls(BuildContext context, CallProvider provider, dynamic call) {
+    final double bottomInset = MediaQuery.of(context).padding.bottom;
     return Positioned(
-      bottom: 40,
-      left: 20,
-      right: 20,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(30),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: Colors.white.withOpacity(0.2)),
+      bottom: bottomInset > 0 ? bottomInset + 16 : 32,
+      left: 16,
+      right: 16,
+      child: SafeArea(
+        top: false,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xE61C1C1E),
+            borderRadius: BorderRadius.circular(36),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.18),
+              width: 1.2,
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.55),
+                blurRadius: 20,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildControl(
+                iconData: provider.isMuted ? Icons.mic_off : Icons.mic,
+                bgColor: provider.isMuted ? Colors.redAccent : Colors.white24,
+                iconColor: Colors.white,
+                onTap: () => provider.toggleMute(),
+                tooltip: provider.isMuted ? 'Unmute' : 'Mute',
+              ),
+              if (call.type == 'video')
                 _buildControl(
-                  provider.isMuted ? Icons.mic_off : Icons.mic,
-                  provider.isMuted ? Colors.red.withOpacity(0.8) : Colors.white10,
-                  provider.toggleMute,
+                  iconData: provider.isVideoOff ? Icons.videocam_off : Icons.videocam,
+                  bgColor: provider.isVideoOff ? Colors.redAccent : Colors.white24,
+                  iconColor: Colors.white,
+                  onTap: () => provider.toggleVideo(),
+                  tooltip: provider.isVideoOff ? 'Turn Video On' : 'Turn Video Off',
                 ),
-                if (call.type == 'video')
-                  _buildControl(
-                    provider.isVideoOff ? Icons.videocam_off : Icons.videocam,
-                    provider.isVideoOff ? Colors.red.withOpacity(0.8) : Colors.white10,
-                    provider.toggleVideo,
-                  ),
+              _buildControl(
+                iconData: Icons.call_end,
+                bgColor: Colors.redAccent,
+                iconColor: Colors.white,
+                onTap: () => provider.endCall(),
+                isLarge: true,
+                tooltip: 'End Call',
+              ),
+              if (call.type == 'video')
                 _buildControl(
-                  Icons.call_end,
-                  Colors.red,
-                  provider.endCall,
-                  isLarge: true,
+                  iconData: Icons.switch_camera,
+                  bgColor: Colors.white24,
+                  iconColor: Colors.white,
+                  onTap: () => provider.switchCamera(),
+                  tooltip: 'Switch Camera',
                 ),
-                if (call.type == 'video')
-                  _buildControl(
-                    Icons.switch_camera,
-                    Colors.white10,
-                    provider.switchCamera,
-                  ),
-                _buildControl(
-                  provider.isSpeakerOn ? Icons.volume_up : Icons.volume_off,
-                  provider.isSpeakerOn ? Colors.white10 : Colors.orange.withOpacity(0.8),
-                  provider.toggleSpeaker,
-                ),
-              ],
-            ),
+              _buildControl(
+                iconData: provider.isSpeakerOn ? Icons.volume_up : Icons.volume_off,
+                bgColor: provider.isSpeakerOn ? AppColors.primary : Colors.white12,
+                iconColor: Colors.white,
+                onTap: () => provider.toggleSpeaker(),
+                tooltip: provider.isSpeakerOn ? 'Speaker On' : 'Speaker Off',
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildControl(IconData iconData, Color bgColor, VoidCallback onTap, {bool isLarge = false}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: isLarge ? 65 : 50,
-        width: isLarge ? 65 : 50,
-        decoration: BoxDecoration(
-          color: bgColor,
-          shape: BoxShape.circle,
-        ),
-        child: Icon(
-          iconData,
-          color: Colors.white,
-          size: isLarge ? 32 : 24,
+  Widget _buildControl({
+    required IconData iconData,
+    required Color bgColor,
+    required Color iconColor,
+    required VoidCallback onTap,
+    bool isLarge = false,
+    String? tooltip,
+  }) {
+    final double size = isLarge ? 64 : 50;
+    return Semantics(
+      label: tooltip,
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          height: size,
+          width: size,
+          decoration: BoxDecoration(
+            color: bgColor,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Center(
+            child: Icon(
+              iconData,
+              color: iconColor,
+              size: isLarge ? 32 : 24,
+            ),
+          ),
         ),
       ),
     );

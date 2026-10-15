@@ -1,3 +1,4 @@
+import 'package:catch_watch/utils/error_state_widget.dart';
 import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
 import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
 import 'package:flutter/material.dart';
@@ -34,8 +35,23 @@ class _WishListScreenState extends State<WishListScreen> {
             child: provider.isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : provider.error != null
-                    ? Center(child: Text(provider.error!))
-                    : _buildList(provider),
+                    ? RefreshIndicator(
+                        onRefresh: provider.fetchWatchlist,
+                        child: ErrorStateWidget(
+                          title: 'Unable to load WishList',
+                          message: 'Please check your internet connection and try again.',
+                          isLoading: provider.isLoading,
+                          onRetry: () {
+                            if (!provider.isLoading) {
+                              provider.fetchWatchlist();
+                            }
+                          },
+                        ),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: provider.fetchWatchlist,
+                        child: _buildList(provider),
+                      ),
           ),
         ],
       ),
@@ -98,42 +114,55 @@ class _WishListScreenState extends State<WishListScreen> {
     final items = provider.items;
 
     if (items.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 90,
-              height: 90,
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF0E8),
-                borderRadius: BorderRadius.circular(24),
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight,
               ),
-              child: const Icon(
-                Icons.favorite_outline_rounded,
-                color: AppColors.primary,
-                size: 42,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 90,
+                      height: 90,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF0E8),
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: const Icon(
+                        Icons.favorite_outline_rounded,
+                        color: AppColors.primary,
+                        size: 42,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Nothing Here Yet',
+                      style: text18(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Add movies & shows to your wish list',
+                      style: text14(color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 20),
-            Text(
-              'Nothing Here Yet',
-              style: text18(
-                color: AppColors.textPrimary,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Add movies & shows to your wish list',
-              style: text14(color: AppColors.textSecondary),
-            ),
-          ],
-        ),
+          );
+        },
       );
     }
 
     return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       itemCount: items.length,
       separatorBuilder: (_, _) => const SizedBox(height: 12),

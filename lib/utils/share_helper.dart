@@ -5,7 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:flutter/foundation.dart';
 
 class ShareHelper {
-  static const String appStoreLink = 'https://apps.apple.com/app/catch-watch/id123456789'; // TODO: Update with real ID
+  static const String appStoreLink = 'https://apps.apple.com/app/catch-watch/id6819192529';
   static const String playStoreLink = 'https://play.google.com/store/apps/details?id=com.catchandwatch1.app';
   static const String websiteUrl = 'https://catchandwatch.com';
 

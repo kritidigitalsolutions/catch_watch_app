@@ -17,6 +17,10 @@ import '../../res/appUrl.dart' show AppUrl;
 import '../../utils/text_style.dart';
 import '../../view_model/after_login_provider/profile_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
+import 'package:catch_watch/views/after_login_pages/report/report_bottom_sheet.dart';
+import 'package:catch_watch/view_model/after_login_provider/block_provider.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/block_confirmation_dialog.dart';
+import 'package:catch_watch/view_model/after_login_provider/user_search_provider.dart';
 
 class ShortVideoPlayerScreen extends StatefulWidget {
   final bool isVisible;
@@ -45,21 +49,42 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
-    
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final reelsProvider = context.read<ReelsProvider>();
       if (widget.initialReels != null) {
         reelsProvider.applyInteractionsTo(widget.initialReels!);
-      }
-      if (widget.initialReels == null) {
-        reelsProvider.fetchReelsFeed().then((_) {
-          if (reelsProvider.targetReelId != null) {
-            _handleTargetReel();
-          }
-        });
+      } else {
+        if (!reelsProvider.hasFetchedFeed && !reelsProvider.isLoading) {
+          reelsProvider.fetchReelsFeed().then((_) {
+            if (mounted && reelsProvider.targetReelId != null) {
+              _handleTargetReel();
+            }
+          });
+        }
       }
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant ShortVideoPlayerScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // When the tab becomes visible in IndexedStack
+    if (widget.isVisible && !oldWidget.isVisible) {
+      final reelsProvider = context.read<ReelsProvider>();
+      if (widget.initialReels == null) {
+        if (!reelsProvider.hasFetchedFeed && !reelsProvider.isLoading) {
+          reelsProvider.fetchReelsFeed().then((_) {
+            if (mounted && reelsProvider.targetReelId != null) {
+              _handleTargetReel();
+            }
+          });
+        } else if (reelsProvider.targetReelId != null) {
+          _handleTargetReel();
+        }
+      }
+    }
   }
 
   Future<void> _handleTargetReel() async {
@@ -91,6 +116,7 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
   }
 
   void _showComments(ReelModel reel) {
+    if (reel.id == null) return;
     final provider = context.read<ReelsProvider>();
     final String? currentUserId = HiveService.userId;
     final bool isOwner = currentUserId != null && reel.user?.id == currentUserId;
@@ -170,10 +196,10 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
 
                             return GestureDetector(
                               behavior: HitTestBehavior.opaque,
-                              onLongPress: (isOwner || isAuthor) ? () {
+                              onLongPress: () {
                                 HapticFeedback.mediumImpact();
-                                _showCommentOptions(context, comment, reel.id!, p);
-                              } : null,
+                                _showCommentOptions(context, comment, reel.id!, p, isOwner: isOwner);
+                              },
                               child: Padding(
                                 padding: const EdgeInsets.only(bottom: 16),
                                 child: Row(
@@ -215,6 +241,14 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
                                             style: text14(color: Colors.white),
                                           ),
                                         ],
+                                      ),
+                                    ),
+                                    GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onTap: () => _showCommentOptions(context, comment, reel.id!, p, isOwner: isOwner),
+                                      child: const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                        child: Icon(Icons.more_vert_rounded, color: Colors.white38, size: 18),
                                       ),
                                     ),
                                   ],
@@ -274,27 +308,187 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
     );
   }
 
-  void _showCommentOptions(BuildContext context, dynamic comment, String reelId, ReelsProvider p) {
+  void _showCommentOptions(BuildContext context, dynamic comment, String reelId, ReelsProvider p, {bool isOwner = false}) {
     final bool isPinned = comment['isPinned'] ?? false;
+    final currentUserId = HiveService.userId;
+    final user = comment['user'];
+    final String? commentAuthorId = user is Map ? user['_id']?.toString() : user?.toString();
+    final bool isAuthor = currentUserId != null && commentAuthorId == currentUserId;
+    final String commentId = comment['_id']?.toString() ?? comment['id']?.toString() ?? '';
+
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1A1A1A),
+      backgroundColor: const Color(0xFF1E1E1E),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) {
+      builder: (modalCtx) {
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              if (isOwner || isAuthor)
+                ListTile(
+                  leading: Icon(isPinned ? Icons.pin_end_rounded : Icons.push_pin_rounded, color: Colors.white),
+                  title: Text(isPinned ? 'Unpin your comment' : 'Pin your comment', style: const TextStyle(color: Colors.white)),
+                  onTap: () {
+                    Navigator.pop(modalCtx);
+                    p.pinComment(comment['_id'], !isPinned, reelId);
+                  },
+                ),
+              if (!isAuthor && commentId.isNotEmpty)
+                ListTile(
+                  leading: const Icon(Icons.flag_outlined, color: Colors.redAccent),
+                  title: const Text('Report Comment', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                  subtitle: const Text('Report abuse, spam, or inappropriate content', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  onTap: () {
+                    Navigator.pop(modalCtx);
+                    showReportBottomSheet(
+                      context,
+                      targetType: 'comment',
+                      targetId: commentId,
+                      targetTitle: 'Report Comment',
+                    );
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showReelOptions(BuildContext context, ReelModel reel) {
+    if (reel.id == null || reel.id!.isEmpty) return;
+    final currentUserId = HiveService.userId;
+    final String? reelAuthorId = reel.user?.id;
+    final bool isMyReel = currentUserId != null && reelAuthorId != null && currentUserId == reelAuthorId;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (modalCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              if (!isMyReel)
+                ListTile(
+                  leading: const Icon(Icons.flag_outlined, color: Colors.redAccent),
+                  title: const Text('Report Reel', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                  subtitle: const Text('Report inappropriate or infringing content', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  onTap: () {
+                    Navigator.pop(modalCtx);
+                    showReportBottomSheet(
+                      context,
+                      targetType: 'reel',
+                      targetId: reel.id!,
+                      targetTitle: 'Report Reel',
+                    );
+                  },
+                ),
+              if (!isMyReel && reelAuthorId != null && reelAuthorId.trim().isNotEmpty)
+                ListTile(
+                  leading: const Icon(Icons.block_rounded, color: Colors.redAccent),
+                  title: const Text('Block User', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    'Block @${reel.user?.username ?? reel.user?.name ?? 'user'} and hide their content',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  onTap: () async {
+                    Navigator.pop(modalCtx);
+                    if (!HiveService.isLogin()) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please login to block users')),
+                      );
+                      return;
+                    }
+
+                    if (reelAuthorId == currentUserId) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('You cannot block your own account')),
+                      );
+                      return;
+                    }
+
+                    String? backendMessage;
+                    final bool? confirmed = await showBlockConfirmationDialog(
+                      context: context,
+                      userId: reelAuthorId,
+                      username: reel.user?.username,
+                      name: reel.user?.name,
+                      onConfirmBlock: () async {
+                        try {
+                          final res = await context.read<BlockProvider>().blockUser(
+                            reelAuthorId,
+                            username: reel.user?.username,
+                            name: reel.user?.name,
+                            profileImage: reel.user?.profileImage,
+                          );
+                          backendMessage = res?.message ?? 'User blocked successfully.';
+                          return res != null && res.success;
+                        } catch (e) {
+                          final msg = e.toString().replaceAll('Exception: ', '');
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(msg), backgroundColor: AppColors.error),
+                            );
+                          }
+                          return false;
+                        }
+                      },
+                    );
+
+                    if (confirmed == true && context.mounted) {
+                      context.read<ReelsProvider>().onUserBlocked(reelAuthorId);
+                      context.read<UserSearchProvider>().onUserBlocked(reelAuthorId);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(backendMessage ?? 'User blocked successfully.'),
+                          backgroundColor: Colors.black87,
+                        ),
+                      );
+                    }
+                  },
+                ),
               ListTile(
-                leading: Icon(isPinned ? Icons.pin_end_rounded : Icons.push_pin_rounded, color: Colors.white),
-                title: Text(isPinned ? 'Unpin your comment' : 'Pin your comment', style: const TextStyle(color: Colors.white)),
+                leading: const Icon(Icons.share_outlined, color: Colors.white),
+                title: const Text('Share Reel', style: TextStyle(color: Colors.white)),
                 onTap: () {
-                  Navigator.pop(context);
-                  p.pinComment(comment['_id'], !isPinned, reelId);
+                  Navigator.pop(modalCtx);
+                  context.read<ReelsProvider>().incrementShares(reel.id!, reel: reel);
+                  ShareHelper.shareContent(
+                    title: 'Catch Watch Reel',
+                    text: 'Check out this Reel: ${reel.caption}',
+                    imageUrl: reel.thumbnail,
+                    contentId: reel.id,
+                    contentType: 'reel',
+                  );
                 },
               ),
+              const SizedBox(height: 8),
             ],
           ),
         );
@@ -348,7 +542,21 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _handleTargetReel());
     }
 
-    if (provider.isLoading && reels.isEmpty) {
+    // Auto-fetch if screen is visible, initialReels is null, feed hasn't been fetched yet, and not currently loading or in error
+    if (widget.isVisible && widget.initialReels == null && !provider.hasFetchedFeed && !provider.isLoading && provider.error == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !provider.hasFetchedFeed && !provider.isLoading && provider.error == null) {
+          provider.fetchReelsFeed();
+        }
+      });
+    }
+
+    final bool isFeedWaiting = widget.initialReels == null &&
+        (!provider.hasFetchedFeed || provider.isLoading) &&
+        reels.isEmpty &&
+        provider.error == null;
+
+    if (isFeedWaiting || (provider.isLoading && reels.isEmpty)) {
       return Scaffold(
         backgroundColor: Colors.black,
         body: Stack(
@@ -404,7 +612,27 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
         backgroundColor: Colors.black,
         body: Stack(
           children: [
-            const Center(child: Text('No reels available', style: TextStyle(color: Colors.white))),
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text('No reels available', style: TextStyle(color: Colors.white, fontSize: 16)),
+                  const SizedBox(height: 16),
+                  if (widget.initialReels == null)
+                    ElevatedButton.icon(
+                      onPressed: () => provider.fetchReelsFeed(forceRefresh: true),
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('Refresh'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                      ),
+                    ),
+                ],
+              ),
+            ),
             if (shouldShowBack) buildBackBtn(),
           ],
         ),
@@ -431,12 +659,17 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
               itemBuilder: (context, index) {
                 final reel = reels[index];
                 return _ShortVideoPage(
-                  key: ValueKey(reel.id),
+                  key: ValueKey(reel.id ?? index.toString()),
                   reel: reel,
                   isActive: widget.isVisible && index == _currentIndex,
-                  onLike: () => provider.toggleLike(reel.id!, reel: reel),
-                  onSave: () => provider.toggleBookmark(reel.id!, reel: reel),
+                  onLike: () {
+                    if (reel.id != null) provider.toggleLike(reel.id!, reel: reel);
+                  },
+                  onSave: () {
+                    if (reel.id != null) provider.toggleBookmark(reel.id!, reel: reel);
+                  },
                   onComment: () => _showComments(reel),
+                  onMore: () => _showReelOptions(context, reel),
                 );
               },
             ),
@@ -454,6 +687,7 @@ class _ShortVideoPage extends StatefulWidget {
   final VoidCallback onLike;
   final VoidCallback onSave;
   final VoidCallback onComment;
+  final VoidCallback onMore;
 
   const _ShortVideoPage({
     super.key,
@@ -462,6 +696,7 @@ class _ShortVideoPage extends StatefulWidget {
     required this.onLike,
     required this.onSave,
     required this.onComment,
+    required this.onMore,
   });
 
   @override
@@ -809,12 +1044,13 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
           if (!isAd)
             Positioned(
               right: 12,
-              bottom: 112 + MediaQuery.paddingOf(context).bottom,
+              bottom: 96 + MediaQuery.paddingOf(context).bottom,
               child: _ShortActions(
                 reel: widget.reel,
                 onLike: widget.onLike,
                 onSave: widget.onSave,
                 onComment: widget.onComment,
+                onMore: widget.onMore,
               ),
             ),
           Positioned(
@@ -959,12 +1195,14 @@ class _ShortActions extends StatelessWidget {
   final VoidCallback onLike;
   final VoidCallback onSave;
   final VoidCallback onComment;
+  final VoidCallback onMore;
 
   const _ShortActions({
     required this.reel,
     required this.onLike,
     required this.onSave,
     required this.onComment,
+    required this.onMore,
   });
 
   bool get _isLiked => reel.userInteraction?.toUpperCase() == 'LIKE';
@@ -981,13 +1219,13 @@ class _ShortActions extends StatelessWidget {
           color: _isLiked ? AppColors.primary : Colors.white,
           onTap: onLike,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         _ActionButton(
           icon: Icons.mode_comment_outlined,
           label: _compactCount(reel.commentsCount ?? 0),
           onTap: onComment,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         _ActionButton(
           icon: reel.isBookmarked == true 
               ? Icons.bookmark_rounded 
@@ -996,7 +1234,7 @@ class _ShortActions extends StatelessWidget {
           color: reel.isBookmarked == true ? Colors.amber : Colors.white,
           onTap: onSave,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         _ActionButton(
           icon: Icons.share_rounded,
           label: 'Share',
@@ -1010,6 +1248,12 @@ class _ShortActions extends StatelessWidget {
               contentType: 'reel',
             );
           },
+        ),
+        const SizedBox(height: 10),
+        _ActionButton(
+          icon: Icons.more_horiz_rounded,
+          label: 'More',
+          onTap: onMore,
         ),
       ],
     );

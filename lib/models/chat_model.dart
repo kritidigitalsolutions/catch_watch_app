@@ -150,6 +150,7 @@ class MessageModel {
   bool? isPinned;
   bool? isEncrypted;
   String? iv;
+  Map<String, dynamic>? encryption;
 
   // E2EE fields
   bool isDecrypted = false;
@@ -179,11 +180,21 @@ class MessageModel {
     this.isPinned,
     this.isEncrypted,
     this.iv,
+    this.encryption,
+    this.isDecrypted = false,
+    this.cipherText,
   });
+
+  String get displayText {
+    if (isEncrypted == true && !isDecrypted) {
+      return '🔒 [Encrypted message]';
+    }
+    return text ?? '';
+  }
 
   MessageModel.fromJson(Map<String, dynamic> json) {
     mediaMeta = json['mediaMeta'] != null ? MediaMeta.fromJson(json['mediaMeta']) : null;
-    sId = json['_id'];
+    sId = json['_id'] ?? json['id'] ?? json['messageId'];
     
     if (json['conversationId'] != null) {
       if (json['conversationId'] is Map) {
@@ -199,6 +210,19 @@ class MessageModel {
       } else {
         sender = Sender(sId: json['sender'].toString(), id: json['sender'].toString());
       }
+    } else if (json['senderId'] != null || json['sender_id'] != null) {
+      final sId = (json['senderId'] ?? json['sender_id']).toString();
+      sender = Sender(
+        sId: sId,
+        id: sId,
+        name: json['senderName'] ?? json['sender_name'],
+        profileImage: json['senderImage'] ?? json['sender_image'],
+      );
+    }
+
+    if (sender != null && sender!.publicKey == null) {
+      sender!.publicKey = json['senderPublicKey'] ?? 
+          (json['encryption'] is Map ? json['encryption']['senderPublicKey'] : null);
     }
     
     if (json['recipient'] != null) {
@@ -211,6 +235,9 @@ class MessageModel {
     
     messageType = json['messageType'];
     text = json['text'];
+    if ((text == null || text!.isEmpty) && json['ciphertext'] != null) {
+      text = json['ciphertext'].toString();
+    }
     mediaUrl = json['mediaUrl'];
     
     if (json['replyTo'] != null) {
@@ -240,8 +267,84 @@ class MessageModel {
     iV = json['__v'];
     readAt = json['readAt'];
     isPinned = json['isPinned'];
-    isEncrypted = json['isEncrypted'];
-    iv = json['iv'];
+
+    if (json['encryption'] is Map) {
+      encryption = Map<String, dynamic>.from(json['encryption']);
+    }
+
+    String? extractedIv = json['iv']?.toString() ?? json['nonce']?.toString();
+    if (extractedIv == null && encryption != null) {
+      extractedIv = encryption!['iv']?.toString();
+      if (extractedIv == null && encryption!['envelopes'] is List && (encryption!['envelopes'] as List).isNotEmpty) {
+        final firstEnvelope = (encryption!['envelopes'] as List).first;
+        if (firstEnvelope is Map) {
+          extractedIv = firstEnvelope['iv']?.toString();
+        }
+      }
+    }
+    iv = extractedIv;
+
+    final rawEncrypted = json['isEncrypted'];
+    final bool explicitEncrypted = rawEncrypted == true ||
+        rawEncrypted == 'true' ||
+        rawEncrypted == 1;
+
+    final bool hasEnvelopes = encryption != null &&
+        encryption!['envelopes'] is List &&
+        (encryption!['envelopes'] as List).isNotEmpty;
+
+    final bool hasCiphertext = json['ciphertext'] != null && json['ciphertext'].toString().trim().isNotEmpty;
+
+    // Call events and system messages are never treated as E2EE encrypted text
+    final bool isCallOrSpecialMessage = messageType == 'call' ||
+        messageType == 'audio_call' ||
+        messageType == 'video_call';
+
+    if (isCallOrSpecialMessage) {
+      isEncrypted = false;
+    } else {
+      isEncrypted = explicitEncrypted || hasEnvelopes || (hasCiphertext && iv != null && iv!.isNotEmpty);
+    }
+
+    if (json['ciphertext'] != null) {
+      cipherText = json['ciphertext']?.toString();
+    } else if (isEncrypted == true) {
+      cipherText = text;
+    }
+  }
+
+  Map<String, dynamic> toJson() {
+    final Map<String, dynamic> data = <String, dynamic>{};
+    if (mediaMeta != null) data['mediaMeta'] = mediaMeta!.toJson();
+    if (sId != null) data['_id'] = sId;
+    if (conversationId != null) data['conversationId'] = conversationId;
+    if (sender != null) data['sender'] = sender!.toJson();
+    if (recipient != null) {
+      data['recipient'] = recipient is Sender ? (recipient as Sender).toJson() : recipient;
+    }
+    if (messageType != null) data['messageType'] = messageType;
+    if (text != null) data['text'] = text;
+    if (mediaUrl != null) data['mediaUrl'] = mediaUrl;
+    if (replyTo != null) data['replyTo'] = replyTo;
+    if (isForwarded != null) data['isForwarded'] = isForwarded;
+    if (status != null) data['status'] = status;
+    if (deliveredAt != null) data['deliveredAt'] = deliveredAt;
+    if (isEdited != null) data['isEdited'] = isEdited;
+    if (isUnsent != null) data['isUnsent'] = isUnsent;
+    if (deletedFor != null) data['deletedFor'] = deletedFor;
+    if (reactions != null) {
+      data['reactions'] = reactions!.map((v) => v.toJson()).toList();
+    }
+    if (createdAt != null) data['createdAt'] = createdAt;
+    if (updatedAt != null) data['updatedAt'] = updatedAt;
+    if (iV != null) data['__v'] = iV;
+    if (readAt != null) data['readAt'] = readAt;
+    if (isPinned != null) data['isPinned'] = isPinned;
+    if (isEncrypted != null) data['isEncrypted'] = isEncrypted;
+    if (iv != null) data['iv'] = iv;
+    if (encryption != null) data['encryption'] = encryption;
+    if (cipherText != null) data['ciphertext'] = cipherText;
+    return data;
   }
 }
 
@@ -258,6 +361,15 @@ class MediaMeta {
     fileSize = json['fileSize'];
     duration = json['duration'];
     mimeType = json['mimeType'];
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'fileName': fileName,
+      'fileSize': fileSize,
+      'duration': duration,
+      'mimeType': mimeType,
+    };
   }
 }
 
@@ -287,6 +399,17 @@ class Sender {
     username = json['username'];
     publicKey = json['publicKey'];
     id = json['id'];
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      '_id': sId,
+      'name': name,
+      'profileImage': profileImage,
+      'username': username,
+      'publicKey': publicKey,
+      'id': id,
+    };
   }
 }
 

@@ -1,6 +1,6 @@
 class AppUrl {
-  static const String serverUrl = 'http://192.168.1.9:5000';
-  // static const String serverUrl = 'https://api.catchandwatch.com';
+  // static const String serverUrl = 'http://192.168.1.9:5000';
+  static const String serverUrl = 'https://api.catchandwatch.com';
   // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
   // static const String baseUrl = "https://api.catchandwatch.com/api";
@@ -16,8 +16,8 @@ class AppUrl {
   /// Account Deletion Endpoint
   /// HTTP Method: DELETE /api/user/delete-account
   /// Required Headers:
-  /// - Authorization: Bearer <USER_ACCESS_TOKEN>
-  /// - Content-Type: application/json
+  /// - `Authorization: Bearer <USER_ACCESS_TOKEN>`
+  /// - `Content-Type: application/json`
   static const String deleteAccount = '$baseUrl/user/delete-account';
   static const String getLegal = '$baseUrl/legal';
   static const String getHelp = '$baseUrl/help';
@@ -64,6 +64,11 @@ class AppUrl {
   static String getFollowStatus(String userId) => '$baseUrl/user/follow-status/$userId';
   static String getFollowers(String userId) => '$baseUrl/user/followers/$userId';
   static String getFollowing(String userId) => '$baseUrl/user/following/$userId';
+  // user block endpoints
+  static String blockUser(String userId) => '$baseUrl/user/block/$userId';
+  static String unblockUser(String userId) => '$baseUrl/user/unblock/$userId';
+  static const String blockedUsers = '$baseUrl/user/blocked-users';
+  static String blockStatus(String userId) => '$baseUrl/user/block-status/$userId';
   static String interactionStats(String contentId) => '$baseUrl/interaction/stats/$contentId';
   static String toggleDislike(String contentId) => '$baseUrl/interaction/toggle/dislike/$contentId';
   static String toggleLike(String contentId) => '$baseUrl/interaction/toggle/like/$contentId';
@@ -74,6 +79,9 @@ class AppUrl {
   static String reelComments(String reelId) => '$baseUrl/comments/$reelId';
   static String deleteComment(String commentId) => '$baseUrl/comments/$commentId';
   static String pinComment(String commentId) => '$baseUrl/comments/pin/$commentId';
+
+  /// UGC Reports
+  static const String reports = '$baseUrl/reports';
   /// fcm
   static const String updateFcmToken = '$baseUrl/user/fcm-token';
   /// notifications

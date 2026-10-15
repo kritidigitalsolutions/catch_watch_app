@@ -51,9 +51,16 @@ class CallModel {
 
     type = json['type'];
     status = json['status'];
-    agoraToken = json['agoraToken'];
-    channelName = json['channelName'];
-    agoraUid = json['agoraUid'];
+    agoraToken = (json['agoraToken'] ?? json['token'])?.toString();
+    channelName = (json['channelName'] ?? json['channel'])?.toString();
+    final dynamic rawUid = json['agoraUid'] ?? json['uid'];
+    if (rawUid != null) {
+      if (rawUid is int) {
+        agoraUid = rawUid;
+      } else {
+        agoraUid = int.tryParse(rawUid.toString());
+      }
+    }
     duration = json['duration'];
     startedAt = json['startedAt'];
     endedAt = json['endedAt'];
@@ -70,6 +77,7 @@ class CallModel {
     data['status'] = status;
     data['agoraToken'] = agoraToken;
     data['channelName'] = channelName;
+    if (agoraUid != null) data['agoraUid'] = agoraUid;
     data['duration'] = duration;
     data['startedAt'] = startedAt;
     data['endedAt'] = endedAt;

@@ -45,4 +45,9 @@ class UserSearchProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
   }
+
+  void onUserBlocked(String userId) {
+    _users.removeWhere((u) => u.id == userId);
+    notifyListeners();
+  }
 }

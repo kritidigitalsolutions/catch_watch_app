@@ -42,6 +42,10 @@ class UserModel {
   String? verificationType;
   String? planId;
 
+  // Block status
+  bool? isBlocked;
+  bool? isBlockedBy;
+
   UserModel({
     this.id,
     this.phone,
@@ -77,6 +81,8 @@ class UserModel {
     this.isPremium,
     this.verificationType,
     this.planId,
+    this.isBlocked,
+    this.isBlockedBy,
   });
 
   UserModel.fromJson(Map<String, dynamic> json) {
@@ -114,9 +120,18 @@ class UserModel {
     followingCount = parseInt(json['followingCount'] ?? json['following']);
     reelsCount = parseInt(json['reelsCount'] ?? json['postsCount'] ?? json['totalReels']);
     isFollowing = json['isFollowing'] ?? false;
-    isVerified = json['isVerified'] ?? json['verification']?['isVerified'] ?? false;
-    blueTick = json['blueTick'] ?? (json['verification']?['badgeType'] == 'BLUE' && json['verification']?['isVerified'] == true) ?? false;
-    orangeTick = json['orangeTick'] ?? (json['verification']?['badgeType'] == 'ORANGE' && json['verification']?['isVerified'] == true) ?? false;
+    final dynamic ver = json['verification'];
+    final bool verIsVerified = ver is Map
+        ? (ver['isVerified'] == true || ver['isVerified']?.toString().toLowerCase() == 'true')
+        : false;
+    final String? verBadge = ver is Map ? ver['badgeType']?.toString().toUpperCase() : null;
+
+    final bool rawOrange = json['orangeTick'] == true || json['orangeTick']?.toString().toLowerCase() == 'true';
+    final bool rawBlue = json['blueTick'] == true || json['blueTick']?.toString().toLowerCase() == 'true';
+
+    orangeTick = rawOrange || (verBadge == 'ORANGE' && verIsVerified);
+    blueTick = rawBlue || (verBadge == 'BLUE' && verIsVerified);
+    isVerified = verIsVerified || (blueTick == true) || (orangeTick == true);
     createdAt = json['createdAt'];
     updatedAt = json['updatedAt'];
 
@@ -136,6 +151,8 @@ class UserModel {
     isPremium = json['isPremium'] ?? false;
     verificationType = json['verificationType'];
     planId = json['planId'];
+    isBlocked = json['isBlocked'] == true || json['isBlocked']?.toString().toLowerCase() == 'true';
+    isBlockedBy = json['isBlockedBy'] == true || json['isBlockedBy']?.toString().toLowerCase() == 'true';
   }
 
   Map<String, dynamic> toJson() {
@@ -176,9 +193,11 @@ class UserModel {
     data['isPremium'] = isPremium;
     data['verificationType'] = verificationType;
     data['planId'] = planId;
+    data['isBlocked'] = isBlocked;
+    data['isBlockedBy'] = isBlockedBy;
     return data;
   }
 
   /// Returns whether the user has a verified creator tick (Orange Tick / Blue Tick)
-  bool get hasVerifiedTick => (isVerified == true) || (blueTick == true) || (orangeTick == true);
+  bool get hasVerifiedTick => (blueTick == true) || (orangeTick == true);
 }

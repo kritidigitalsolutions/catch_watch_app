@@ -17,7 +17,7 @@ class CallRepository {
       
       // Handle the structure: { success, message, call: {...}, agora: { token, ... } }
       Map<String, dynamic> callData = Map<String, dynamic>.from(response['call']);
-      if (response['agora'] != null) {
+      if (response['agora'] != null && response['agora'] is Map) {
         if (response['agora']['token'] != null) {
           callData['agoraToken'] = response['agora']['token'];
         }
@@ -46,7 +46,7 @@ class CallRepository {
         callData = Map<String, dynamic>.from(response);
       }
 
-      if (response['agora'] != null) {
+      if (response['agora'] != null && response['agora'] is Map) {
         if (response['agora']['token'] != null) {
           callData['agoraToken'] = response['agora']['token'];
         }
@@ -104,10 +104,25 @@ class CallRepository {
   Future<String> getCallToken(String callId) async {
     try {
       dynamic response = await _apiService.postApi(AppUrl.getCallToken(callId), {});
-      if (response['agora'] != null) {
-        return response['agora']['token'];
+      if (response is Map) {
+        if (response['agora'] != null &&
+            response['agora'] is Map &&
+            response['agora']['token'] != null) {
+          final token = response['agora']['token']?.toString().trim();
+          if (token != null && token.isNotEmpty) return token;
+        }
+        if (response['data'] != null &&
+            response['data'] is Map &&
+            response['data']['token'] != null) {
+          final token = response['data']['token']?.toString().trim();
+          if (token != null && token.isNotEmpty) return token;
+        }
+        if (response['token'] != null) {
+          final token = response['token']?.toString().trim();
+          if (token != null && token.isNotEmpty) return token;
+        }
       }
-      return response['data']['token'];
+      throw Exception('Invalid or missing Agora token in response');
     } catch (e) {
       rethrow;
     }
@@ -116,7 +131,17 @@ class CallRepository {
   Future<CallModel> getCallDetails(String callId) async {
     try {
       dynamic response = await _apiService.getApi(AppUrl.getCallDetails(callId));
-      return CallModel.fromJson(response['call'] ?? response['data'] ?? response);
+      Map<String, dynamic> callData =
+          Map<String, dynamic>.from(response['call'] ?? response['data'] ?? response);
+      if (response is Map && response['agora'] != null && response['agora'] is Map) {
+        if (response['agora']['token'] != null && callData['agoraToken'] == null) {
+          callData['agoraToken'] = response['agora']['token'];
+        }
+        if (response['agora']['uid'] != null && callData['agoraUid'] == null) {
+          callData['agoraUid'] = response['agora']['uid'];
+        }
+      }
+      return CallModel.fromJson(callData);
     } catch (e) {
       rethrow;
     }

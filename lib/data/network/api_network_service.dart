@@ -32,53 +32,59 @@ class NetworkApiService extends BaseApiService {
             options.headers["Authorization"] = "Bearer $token";
           }
 
-          final timeStr = _formatTimestamp(reqTime);
-          final safeHeaders = _sanitizeHeaders(options.headers);
-          final caller = _formatCaller();
-          final bodyString = _formatRequestBody(options.data);
+          if (kDebugMode) {
+            final timeStr = _formatTimestamp(reqTime);
+            final safeHeaders = _sanitizeHeaders(options.headers);
+            final caller = _formatCaller();
+            final bodyString = _formatRequestBody(options.data);
 
-          debugPrint('[API_DEBUG] ═══════════════════════════════════════');
-          debugPrint('[API_DEBUG][$reqId][$timeStr] ➡️ REQUEST');
-          debugPrint('[API_DEBUG] Method: ${options.method}');
-          debugPrint('[API_DEBUG] URL: ${options.uri}');
-          debugPrint('[API_DEBUG] Headers: $safeHeaders');
-          debugPrint('[API_DEBUG] Caller:\n$caller');
-          debugPrint('[API_DEBUG] Request Body:\n$bodyString');
-          debugPrint('[API_DEBUG] ═══════════════════════════════════════');
+            debugPrint('[API_DEBUG] ═══════════════════════════════════════');
+            debugPrint('[API_DEBUG][$reqId][$timeStr] ➡️ REQUEST');
+            debugPrint('[API_DEBUG] Method: ${options.method}');
+            debugPrint('[API_DEBUG] URL: ${options.uri}');
+            debugPrint('[API_DEBUG] Headers: $safeHeaders');
+            debugPrint('[API_DEBUG] Caller:\n$caller');
+            debugPrint('[API_DEBUG] Request Body:\n$bodyString');
+            debugPrint('[API_DEBUG] ═══════════════════════════════════════');
+          }
 
           return handler.next(options);
         },
         onResponse: (response, handler) {
-          final reqId = response.requestOptions.extra['reqId'] ?? 'REQ-???';
-          final timeStr = _formatTimestamp(DateTime.now());
-          final safeHeaders = _sanitizeHeaders(response.headers.map);
-          final bodyString = _prettyPrintJson(response.data);
+          if (kDebugMode) {
+            final reqId = response.requestOptions.extra['reqId'] ?? 'REQ-???';
+            final timeStr = _formatTimestamp(DateTime.now());
+            final safeHeaders = _sanitizeHeaders(response.headers.map);
+            final bodyString = _prettyPrintJson(response.data);
 
-          debugPrint('[API_DEBUG] ═══════════════════════════════════════');
-          debugPrint('[API_DEBUG][$reqId][$timeStr] ✅ RESPONSE');
-          debugPrint('[API_DEBUG] Method: ${response.requestOptions.method}');
-          debugPrint('[API_DEBUG] URL: ${response.requestOptions.uri}');
-          debugPrint('[API_DEBUG] Status Code: ${response.statusCode}');
-          debugPrint('[API_DEBUG] Response Headers: $safeHeaders');
-          debugPrint('[API_DEBUG] Response Body:\n$bodyString');
-          debugPrint('[API_DEBUG] ═══════════════════════════════════════');
+            debugPrint('[API_DEBUG] ═══════════════════════════════════════');
+            debugPrint('[API_DEBUG][$reqId][$timeStr] ✅ RESPONSE');
+            debugPrint('[API_DEBUG] Method: ${response.requestOptions.method}');
+            debugPrint('[API_DEBUG] URL: ${response.requestOptions.uri}');
+            debugPrint('[API_DEBUG] Status Code: ${response.statusCode}');
+            debugPrint('[API_DEBUG] Response Headers: $safeHeaders');
+            debugPrint('[API_DEBUG] Response Body:\n$bodyString');
+            debugPrint('[API_DEBUG] ═══════════════════════════════════════');
+          }
 
           return handler.next(response);
         },
         onError: (DioException e, handler) {
-          final reqId = e.requestOptions.extra['reqId'] ?? 'REQ-???';
-          final timeStr = _formatTimestamp(DateTime.now());
-          final safeHeaders = e.response != null ? _sanitizeHeaders(e.response!.headers.map) : {};
-          final bodyString = _prettyPrintJson(e.response?.data ?? e.message);
+          if (kDebugMode) {
+            final reqId = e.requestOptions.extra['reqId'] ?? 'REQ-???';
+            final timeStr = _formatTimestamp(DateTime.now());
+            final safeHeaders = e.response != null ? _sanitizeHeaders(e.response!.headers.map) : {};
+            final bodyString = _prettyPrintJson(e.response?.data ?? e.message);
 
-          debugPrint('[API_DEBUG] ═══════════════════════════════════════');
-          debugPrint('[API_DEBUG][$reqId][$timeStr] ❌ ERROR RESPONSE');
-          debugPrint('[API_DEBUG] Method: ${e.requestOptions.method}');
-          debugPrint('[API_DEBUG] URL: ${e.requestOptions.uri}');
-          debugPrint('[API_DEBUG] Status Code: ${e.response?.statusCode ?? 'N/A'}');
-          debugPrint('[API_DEBUG] Response Headers: $safeHeaders');
-          debugPrint('[API_DEBUG] Response Body:\n$bodyString');
-          debugPrint('[API_DEBUG] ═══════════════════════════════════════');
+            debugPrint('[API_DEBUG] ═══════════════════════════════════════');
+            debugPrint('[API_DEBUG][$reqId][$timeStr] ❌ ERROR RESPONSE');
+            debugPrint('[API_DEBUG] Method: ${e.requestOptions.method}');
+            debugPrint('[API_DEBUG] URL: ${e.requestOptions.uri}');
+            debugPrint('[API_DEBUG] Status Code: ${e.response?.statusCode ?? 'N/A'}');
+            debugPrint('[API_DEBUG] Response Headers: $safeHeaders');
+            debugPrint('[API_DEBUG] Response Body:\n$bodyString');
+            debugPrint('[API_DEBUG] ═══════════════════════════════════════');
+          }
 
           return handler.next(e);
         },
@@ -191,13 +197,17 @@ class NetworkApiService extends BaseApiService {
   /// 🔑 Set Authorization Token
   void setToken(String token) {
     _dio.options.headers["Authorization"] = "Bearer $token";
-    debugPrint("🔐 Token Set: Bearer [REDACTED]");
+    if (kDebugMode) {
+      debugPrint("🔐 Token Set: Bearer [REDACTED]");
+    }
   }
 
   /// ❌ Remove Token (Logout)
   void clearToken() {
     _dio.options.headers.remove("Authorization");
-    debugPrint("🔓 Token Cleared");
+    if (kDebugMode) {
+      debugPrint("🔓 Token Cleared");
+    }
   }
 
   @override

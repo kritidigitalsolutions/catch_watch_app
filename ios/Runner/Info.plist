@@ -31,7 +31,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>We need microphone access for audio and video calls.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>We need access to your photo library to upload videos.</string>
+	<string>Catch &amp; Watch needs access to your photo library to select and upload profile pictures, photos, and videos.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Catch &amp; Watch needs access to save photos and videos to your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
@@ -48,7 +48,7 @@
 					<key>UISceneConfigurationName</key>
 					<string>flutter</string>
 					<key>UISceneDelegateClassName</key>
-					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+					<string>FlutterSceneDelegate</string>
 					<key>UISceneStoryboardFile</key>
 					<string>Main</string>
 				</dict>
@@ -59,9 +59,7 @@
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>voip</string>
 		<string>audio</string>
-		<string>fetch</string>
 		<string>remote-notification</string>
 	</array>
 	<key>UILaunchStoryboardName</key>

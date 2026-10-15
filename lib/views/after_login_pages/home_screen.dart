@@ -5,6 +5,7 @@ import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.d
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:catch_watch/utils/custom_button.dart';
 import 'package:catch_watch/utils/empty_state_widget.dart';
+import 'package:catch_watch/utils/error_state_widget.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:catch_watch/views/after_login_pages/content_grid_screen.dart';
 import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
@@ -107,7 +108,19 @@ class _HomeScreenState extends State<HomeScreen> {
     return provider.isLoading
         ? const Center(child: CircularProgressIndicator())
         : provider.error != null
-            ? Center(child: Text(provider.error!))
+            ? RefreshIndicator(
+                onRefresh: provider.fetchAllContent,
+                child: ErrorStateWidget(
+                  title: 'Unable to load content',
+                  message: 'Please check your internet connection and try again.',
+                  isLoading: provider.isLoading,
+                  onRetry: () {
+                    if (!provider.isLoading) {
+                      provider.fetchAllContent();
+                    }
+                  },
+                ),
+              )
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

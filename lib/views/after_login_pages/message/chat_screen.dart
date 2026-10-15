@@ -1168,7 +1168,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                           ),
                                         Flexible(
                                           child: Text(
-                                            message.text!,
+                                            message.displayText,
                                             style: text14(color: isHighlighted ? Colors.black : (isMe ? Colors.white : Colors.black)),
                                           ),
                                         ),

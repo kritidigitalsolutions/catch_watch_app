@@ -124,7 +124,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.18),
+                color: Colors.white.withValues(alpha: 0.18),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(
@@ -378,7 +378,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Widget _buildDeleteAccountButton() {
     return Center(
       child: TextButton.icon(
-        onPressed: () => showDeleteAccountDialog(context),
+        onPressed: () => showDeleteAccountDialog(context, entryPoint: 'edit_profile_screen'),
         icon: const Icon(
           Icons.delete_outline_rounded,
           color: AppColors.error,

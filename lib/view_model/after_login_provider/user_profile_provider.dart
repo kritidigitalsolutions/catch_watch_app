@@ -6,6 +6,9 @@ import 'package:catch_watch/repository/interaction_repository.dart';
 import 'package:catch_watch/res/appUrl.dart';
 import 'package:catch_watch/data/network/api_network_service.dart';
 import 'package:catch_watch/data/network/base_api_service.dart';
+import 'package:catch_watch/repository/block_repository.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 class UserProfileProvider extends ChangeNotifier {
@@ -16,17 +19,23 @@ class UserProfileProvider extends ChangeNotifier {
   List<ReelModel> _userReels = [];
   bool _isLoading = false;
   String? _error;
+  bool _isBlocked = false;
+  bool _isBlockedBy = false;
 
   UserModel? get user => _user;
   List<ReelModel> get userReels => _userReels;
   bool get isLoading => _isLoading;
   String? get error => _error;
+  bool get isBlocked => _isBlocked;
+  bool get isBlockedBy => _isBlockedBy;
 
   Future<void> fetchUserProfile(String username) async {
     // Reset state if we are fetching a different user or if user is null
     if (_user == null || _user!.username != username) {
       _user = null;
       _userReels = [];
+      _isBlocked = false;
+      _isBlockedBy = false;
     }
     
     _isLoading = true;
@@ -36,11 +45,15 @@ class UserProfileProvider extends ChangeNotifier {
     try {
       // 1. Fetch profile details by username
       final profileUrl = AppUrl.getOtherProfileDetails(username);
-      debugPrint('--- Fetching Profile Details ---');
-      debugPrint('URL: $profileUrl');
+      if (kDebugMode) {
+        debugPrint('--- Fetching Profile Details ---');
+        debugPrint('URL: $profileUrl');
+      }
       
       final profileResponse = await _apiService.getApi(profileUrl);
-      debugPrint('Profile Details Response: $profileResponse');
+      if (kDebugMode) {
+        debugPrint('Profile Details Response: $profileResponse');
+      }
 
       if (profileResponse['success'] == true) {
         final newUser = UserModel.fromJson(profileResponse['user']);
@@ -49,6 +62,14 @@ class UserProfileProvider extends ChangeNotifier {
         newUser.followingCount = profileResponse['followingCount'] ?? profileResponse['following'] ?? newUser.followingCount;
         newUser.reelsCount = profileResponse['postsCount'] ?? profileResponse['reelsCount'] ?? profileResponse['totalReels'] ?? newUser.reelsCount;
         
+        // Block status from profile-details response if present
+        _isBlocked = profileResponse['isBlocked'] == true ||
+            newUser.isBlocked == true ||
+            profileResponse['user']?['isBlocked'] == true;
+        _isBlockedBy = profileResponse['isBlockedBy'] == true ||
+            newUser.isBlockedBy == true ||
+            profileResponse['user']?['isBlockedBy'] == true;
+
         // Use isFollowing from response, or keep existing if same user
         if (profileResponse['isFollowing'] != null) {
           newUser.isFollowing = profileResponse['isFollowing'];
@@ -74,11 +95,15 @@ class UserProfileProvider extends ChangeNotifier {
           }
 
           final statsUrl = AppUrl.getOtherProfileStats(_user!.id!);
-          debugPrint('--- Fetching Profile Stats ---');
-          debugPrint('URL: $statsUrl');
+          if (kDebugMode) {
+            debugPrint('--- Fetching Profile Stats ---');
+            debugPrint('URL: $statsUrl');
+          }
           
           final statsResponse = await _apiService.getApi(statsUrl);
-          debugPrint('Profile Stats Response: $statsResponse');
+          if (kDebugMode) {
+            debugPrint('Profile Stats Response: $statsResponse');
+          }
 
           if (statsResponse['success'] == true) {
             _user!.followersCount = statsResponse['followersCount'] ?? statsResponse['followers'];
@@ -91,15 +116,38 @@ class UserProfileProvider extends ChangeNotifier {
         }
       }
 
-      // 3. Fetch reels by userId if we have it
-      if (_user?.id != null) {
+      // Check block status if not already known and user is logged in
+      if (_user?.id != null && HiveService.isLogin() && _user!.id != HiveService.userId) {
+        try {
+          final blockStatusResp = await BlockRepository().getBlockStatus(_user!.id!);
+          if (blockStatusResp.success) {
+            _isBlocked = blockStatusResp.isBlocked;
+            _isBlockedBy = blockStatusResp.isBlockedBy;
+            _user!.isBlocked = _isBlocked;
+            _user!.isBlockedBy = _isBlockedBy;
+          }
+        } catch (e) {
+          debugPrint('Block status check failed: $e');
+        }
+      }
+
+      // If either user has blocked the other, hide posts and follow state
+      if (_isBlocked || _isBlockedBy) {
+        _userReels = [];
+        _user?.isFollowing = false;
+      } else if (_user?.id != null) {
+        // 3. Fetch reels by userId only if not blocked
         try {
           final reelsUrl = AppUrl.getUserReels(_user!.id!);
-          debugPrint('--- Fetching User Reels ---');
-          debugPrint('URL: $reelsUrl');
+          if (kDebugMode) {
+            debugPrint('--- Fetching User Reels ---');
+            debugPrint('URL: $reelsUrl');
+          }
 
           final reelsResponse = await _apiService.getApi(reelsUrl);
-          debugPrint('User Reels Response: $reelsResponse');
+          if (kDebugMode) {
+            debugPrint('User Reels Response: $reelsResponse');
+          }
 
           if (reelsResponse['success'] == true) {
             _userReels = (reelsResponse['reels'] as List)
@@ -160,5 +208,31 @@ class UserProfileProvider extends ChangeNotifier {
       _user!.isFollowing = isFollowing;
       notifyListeners();
     }
+  }
+
+  void setBlockedByMe(bool blocked) {
+    _isBlocked = blocked;
+    if (_user != null) {
+      _user!.isBlocked = blocked;
+      if (blocked) {
+        _user!.isFollowing = false;
+        _userReels = [];
+      }
+    }
+    notifyListeners();
+  }
+
+  void setBlockedStatus({required bool isBlocked, bool? isBlockedBy}) {
+    _isBlocked = isBlocked;
+    if (isBlockedBy != null) _isBlockedBy = isBlockedBy;
+    if (_user != null) {
+      _user!.isBlocked = isBlocked;
+      if (isBlockedBy != null) _user!.isBlockedBy = isBlockedBy;
+      if (_isBlocked || _isBlockedBy) {
+        _user!.isFollowing = false;
+        _userReels = [];
+      }
+    }
+    notifyListeners();
   }
 }

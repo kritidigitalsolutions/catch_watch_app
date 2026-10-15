@@ -101,6 +101,9 @@ class ChatRepository {
       };
       if (isEncrypted == true) {
         data['ciphertext'] = text;
+        if (encryption != null && encryption['senderPublicKey'] != null) {
+          data['senderPublicKey'] = encryption['senderPublicKey'];
+        }
       }
       if (encryption != null) data['encryption'] = encryption;
       

@@ -48,6 +48,7 @@ class _SearchScreenState extends State<SearchScreen> {
       context.read<ReelsProvider>().searchReels(query);
       context.read<UserSearchProvider>().searchUsers(query);
     } else {
+      context.read<ReelsProvider>().clearSearch();
       context.read<UserSearchProvider>().clearSearch();
     }
   }
@@ -170,12 +171,12 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  if (reelsProvider.isLoading)
+                  if (reelsProvider.isSearchLoading)
                     const Center(child: Padding(
                       padding: EdgeInsets.all(20.0),
                       child: CircularProgressIndicator(color: AppColors.primary),
                     ))
-                  else if (reelsProvider.reels.isEmpty)
+                  else if (reelsProvider.searchResults.isEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Text("No reels found", style: text14(color: AppColors.textSecondary)),
@@ -186,17 +187,17 @@ class _SearchScreenState extends State<SearchScreen> {
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
                         padding: const EdgeInsets.only(left: 16),
-                        itemCount: reelsProvider.reels.length,
+                        itemCount: reelsProvider.searchResults.length,
                         itemBuilder: (context, index) {
-                          final reel = reelsProvider.reels[index];
+                          final reel = reelsProvider.searchResults[index];
                           return _buildReelCard(reel);
                         },
                       ),
                     ),
                   const SizedBox(height: 20),
                 ],
-  
-                if (_isSearching && displayList.isEmpty && reelsProvider.reels.isEmpty && userSearchProvider.users.isEmpty)
+   
+                if (_isSearching && displayList.isEmpty && reelsProvider.searchResults.isEmpty && userSearchProvider.users.isEmpty)
                   Center(
                     child: Padding(
                       padding: const EdgeInsets.all(40.0),

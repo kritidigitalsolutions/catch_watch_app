@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/models/user_model.dart';
 import 'package:catch_watch/models/watchlist_model.dart';
@@ -8,16 +6,17 @@ import 'package:catch_watch/repository/reels_repository.dart';
 import 'package:catch_watch/repository/watchlist_repository.dart';
 import 'package:catch_watch/repository/interaction_repository.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
-import 'package:catch_watch/utils/hive_service/userdetail.dart';
-import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:catch_watch/data/network/socket_service.dart';
 import 'package:catch_watch/data/exception/app_exception.dart';
 import 'package:dio/dio.dart' as dio;
 import 'package:flutter/material.dart';
-import 'dart:math';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:catch_watch/view_model/before_login_provider/auth_providers.dart';
+import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
+import 'package:catch_watch/data/network/notification_service.dart';
+import 'package:catch_watch/services/iap_service.dart';
 
 enum ProfileTab { videos, cuts, saved, liked }
 
@@ -397,14 +396,20 @@ class ProfileProvider extends ChangeNotifier {
   }
 
   Future<void> logout(BuildContext context) async {
-    // Reset AuthProvider state (clearing phone, OTP, terms)
+    // Reset AuthProvider and ChatProvider state
     if (context.mounted) {
       try {
         Provider.of<AuthProvider>(context, listen: false).resetAuthState(clearPhone: true);
       } catch (e) {
         debugPrint('Error resetting AuthProvider during logout: $e');
       }
+      try {
+        Provider.of<ChatProvider>(context, listen: false).clearSession();
+      } catch (e) {
+        debugPrint('Error clearing ChatProvider during logout: $e');
+      }
     }
+    await NotificationService.clearTokenOnLogout();
     await HiveService.logout();
     _resetUserData();
     SocketService().disconnect();
@@ -437,7 +442,7 @@ class ProfileProvider extends ChangeNotifier {
   /// Contract Compliance:
   /// The confirmed backend specification defines:
   /// - Method: DELETE /api/user/delete-account
-  /// - Headers: Authorization: Bearer <USER_ACCESS_TOKEN>, Content-Type: application/json
+  /// - Headers: `Authorization: Bearer <USER_ACCESS_TOKEN>`, Content-Type: application/json
   /// Because no request body is documented in the confirmed backend contract, the request
   /// is called without a body (data: null). If the backend team confirms request body support,
   /// the payload can be passed directly to `_authRepository.deleteAccount(data: payload)`.
@@ -486,15 +491,35 @@ class ProfileProvider extends ChangeNotifier {
       }
 
       if (isSuccess) {
-        // 4. Success handling: Clear auth tokens, session data, user state, and sockets
-        await HiveService.logout();
+        // 4. Success handling: Permanently delete private keys, clear push tokens, auth tokens, session data, user state, IAP state, and sockets
+        try {
+          await NotificationService.clearTokenOnLogout();
+        } catch (e) {
+          debugPrint('Error clearing NotificationService token during deleteAccount: $e');
+        }
+        await HiveService.deleteAccountPermanent();
         _resetUserData();
         SocketService().disconnect();
+        try {
+          IapService.instance.dispose();
+        } catch (e) {
+          debugPrint('Error disposing IapService during deleteAccount: $e');
+        }
         if (context != null && context.mounted) {
           try {
             Provider.of<AuthProvider>(context, listen: false).resetAuthState(clearPhone: true);
           } catch (e) {
             debugPrint('Error resetting AuthProvider during deleteAccount: $e');
+          }
+          try {
+            Provider.of<ChatProvider>(context, listen: false).clearSession();
+          } catch (e) {
+            debugPrint('Error clearing ChatProvider during deleteAccount: $e');
+          }
+          try {
+            Provider.of<SubscriptionProvider>(context, listen: false).clearSubscriptionState();
+          } catch (e) {
+            debugPrint('Error clearing SubscriptionProvider during deleteAccount: $e');
           }
         }
         return true;

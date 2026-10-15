@@ -81,6 +81,7 @@ class IapService {
   bool isRestoring = false;
   bool isPurchasingOrangeTick = false;
   bool get hasInFlightTransaction => _inFlightTransactionIds.isNotEmpty;
+  String? lastVerificationErrorMessage;
 
   /// Begins a fresh Orange Tick purchase attempt.
   /// Captures all currently known transaction IDs so any pre-existing queue events
@@ -370,10 +371,12 @@ class IapService {
     if (data != null) {
       final exp = data['expiresDate'] ?? data['expires_date'];
       if (exp is int) {
-        return DateTime.fromMillisecondsSinceEpoch(exp);
+        return DateTime.fromMillisecondsSinceEpoch(exp, isUtc: true);
       } else if (exp is String) {
         final parsed = int.tryParse(exp);
-        if (parsed != null) return DateTime.fromMillisecondsSinceEpoch(parsed);
+        if (parsed != null) {
+          return DateTime.fromMillisecondsSinceEpoch(parsed, isUtc: true);
+        }
       }
     }
     return null;
@@ -383,9 +386,30 @@ class IapService {
   bool isTransactionExpired(PurchaseDetails purchaseDetails) {
     final expDate = extractExpirationDate(purchaseDetails);
     if (expDate != null) {
-      return expDate.isBefore(DateTime.now());
+      final now = expDate.isUtc ? DateTime.now().toUtc() : DateTime.now();
+      return expDate.isBefore(now);
     }
     return false;
+  }
+
+  /// Extracts the transaction environment ('Sandbox' vs 'Production') if available from JWS payload or StoreKit receipt
+  String? extractEnvironment(PurchaseDetails purchaseDetails) {
+    final data = decodeJwsPayload(
+      purchaseDetails.verificationData.serverVerificationData,
+    );
+    if (data != null) {
+      final env = data['environment'];
+      if (env != null && env.toString().isNotEmpty) {
+        return env.toString();
+      }
+    }
+    if (purchaseDetails is AppStorePurchaseDetails) {
+      final receipt = purchaseDetails.verificationData.localVerificationData;
+      if (receipt.contains('sandbox') || receipt.contains('Sandbox')) {
+        return 'Sandbox';
+      }
+    }
+    return null;
   }
 
   /// Internal handler for purchaseStream events
@@ -393,8 +417,9 @@ class IapService {
     List<PurchaseDetails> purchaseDetailsList,
   ) async {
     for (final purchaseDetails in purchaseDetailsList) {
+      final env = extractEnvironment(purchaseDetails) ?? 'Unknown';
       debugPrint(
-        '[IAP] Processing purchase: ${purchaseDetails.productID}, status: ${purchaseDetails.status}, id: ${purchaseDetails.purchaseID}',
+        '[IAP] Processing purchase: ${purchaseDetails.productID}, status: ${purchaseDetails.status}, id: ${purchaseDetails.purchaseID}, env: $env',
       );
 
       switch (purchaseDetails.status) {
@@ -568,6 +593,22 @@ class IapService {
         );
       }
     } else {
+      // Non-Orange Tick (OTT Subscription): complete expired transactions to clear pending queue
+      if (isTransactionExpired(purchaseDetails)) {
+        debugPrint(
+          '[IAP] OTT transaction $txId is expired locally (expiresDate: ${extractExpirationDate(purchaseDetails)}). Completing in StoreKit to clear pending queue.',
+        );
+        if (purchaseDetails.pendingCompletePurchase) {
+          await completePurchase(purchaseDetails);
+        }
+        if (txId != null && txId.isNotEmpty) {
+          _inFlightTransactionIds.remove(txId);
+          _terminalTransactionIds.add(txId);
+          _terminalTransactionReasons[txId] = 'expired';
+        }
+        return;
+      }
+
       // Non-Orange Tick (OTT Subscription): distinguish normal purchase vs restore flow
       if (purchaseDetails.status == PurchaseStatus.restored && !isRestoring) {
         debugPrint(
@@ -651,9 +692,10 @@ class IapService {
           }
           if (purchaseDetails.status == PurchaseStatus.purchased ||
               purchaseDetails.status == PurchaseStatus.restored) {
-            onError?.call(
-              'Subscription verification failed. Please contact support if amount was deducted.',
-            );
+            final errorMsg = lastVerificationErrorMessage ??
+                'Subscription verification failed. Please contact support if amount was deducted.';
+            lastVerificationErrorMessage = null;
+            onError?.call(errorMsg);
           }
         }
       }
