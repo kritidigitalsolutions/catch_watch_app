@@ -57,6 +57,7 @@ class _ChatScreenState extends State<ChatScreen> {
       chatProvider.fetchPinnedMessages(widget.conversationId);
       chatProvider.fetchUserStatus(widget.partnerId);
       chatProvider.fetchBlockedUsers();
+      _checkLostImageAttachment();
     });
   }
 
@@ -92,58 +93,165 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _pickAndSendImage(ImageSource source) async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? pickedFile = await picker.pickImage(source: source, imageQuality: 70);
-    
-    if (pickedFile != null && mounted) {
-      final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(
-            children: [
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-              ),
-              SizedBox(width: 12),
-              Text('Uploading photo...'),
-            ],
-          ),
-          duration: Duration(seconds: 15),
-        ),
-      );
+  Future<void> _processAndSendFile(File file) async {
+    if (!mounted) return;
+    if (!await file.exists()) {
+      debugPrint("Picked file does not exist on disk: ${file.path}");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Selected image file could not be read. Please try again.')),
+        );
+      }
+      return;
+    }
 
-      final mediaUrl = await chatProvider.uploadAttachment(File(pickedFile.path));
-      
+    if (!mounted) return;
+
+    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            ),
+            SizedBox(width: 12),
+            Text('Uploading photo...'),
+          ],
+        ),
+        duration: Duration(seconds: 20),
+      ),
+    );
+
+    final mediaUrl = await chatProvider.uploadAttachment(file);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    }
+
+    if (mediaUrl != null && mounted) {
+      final success = await chatProvider.sendMessage(
+        conversationId: widget.conversationId,
+        messageType: 'image',
+        mediaUrl: mediaUrl,
+      );
+      if (success) {
+        _scrollToBottom();
+      } else if (mounted && chatProvider.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(chatProvider.error!)),
+        );
+      }
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to upload photo. Please try again.')),
+      );
+    }
+  }
+
+  void _checkLostImageAttachment() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final ImagePicker picker = ImagePicker();
+      final LostDataResponse response = await picker.retrieveLostData();
+      if (!response.isEmpty && response.file != null) {
+        debugPrint("Recovered lost image from previous lifecycle: ${response.file!.path}");
+        await _processAndSendFile(File(response.file!.path));
+      }
+    } catch (e) {
+      debugPrint("Error in _checkLostImageAttachment: $e");
+    }
+  }
+
+  void _pickAndSendImage(ImageSource source) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    FocusScope.of(context).unfocus();
+    await Future.delayed(const Duration(milliseconds: 200));
+
+    if (!mounted) return;
+
+    final callProvider = Provider.of<CallProvider>(context, listen: false);
+    callProvider.setPickerActive(true);
+    try {
+      final ImagePicker picker = ImagePicker();
+      debugPrint("Launching ImagePicker for source: $source");
+
+      XFile? pickedFile;
+      try {
+        pickedFile = await picker.pickImage(
+          source: source,
+          maxWidth: 1920,
+          maxHeight: 1920,
+          imageQuality: 70,
+        );
+      } catch (e) {
+        debugPrint("Error in pickImage ($source): $e");
+      }
+
+      // Check for lost data if pickedFile is null (Android activity recreation recovery)
+      if (pickedFile == null && Platform.isAndroid) {
+        debugPrint("pickImage returned null, checking retrieveLostData()...");
+        try {
+          final LostDataResponse response = await picker.retrieveLostData();
+          if (response.file != null) {
+            pickedFile = response.file;
+            debugPrint("Successfully recovered lost file from retrieveLostData: ${pickedFile?.path}");
+          }
+        } catch (e) {
+          debugPrint("Error in retrieveLostData: $e");
+        }
+      }
+
+      // Fallback for gallery if pickImage returned null
+      if (pickedFile == null && source == ImageSource.gallery) {
+        debugPrint("pickImage returned null, attempting fallback pickMedia()...");
+        try {
+          pickedFile = await picker.pickMedia(
+            maxWidth: 1920,
+            maxHeight: 1920,
+            imageQuality: 70,
+          );
+        } catch (e) {
+          debugPrint("Error in fallback pickMedia: $e");
+        }
+        if (pickedFile == null && Platform.isAndroid) {
+          try {
+            final LostDataResponse response = await picker.retrieveLostData();
+            if (response.file != null) {
+              pickedFile = response.file;
+              debugPrint("Recovered lost file from pickMedia retrieveLostData: ${pickedFile?.path}");
+            }
+          } catch (_) {}
+        }
+      }
+
+      debugPrint("Picked image final result from $source: ${pickedFile?.path}");
+
+      if (pickedFile == null) {
+        debugPrint("Image picker returned null (user cancelled or no image chosen).");
+        return;
+      }
+
+      await _processAndSendFile(File(pickedFile.path));
+    } catch (e) {
+      debugPrint("Error picking/sending image: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      }
-
-      if (mediaUrl != null && mounted) {
-        final success = await chatProvider.sendMessage(
-          conversationId: widget.conversationId,
-          messageType: 'image',
-          mediaUrl: mediaUrl,
-        );
-        if (success) {
-          _scrollToBottom();
-        } else if (mounted && chatProvider.error != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(chatProvider.error!)),
-          );
-        }
-      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to upload photo. Please try again.')),
+          SnackBar(content: Text('Failed to pick photo: $e')),
         );
       }
+    } finally {
+      callProvider.setPickerActive(false);
     }
   }
 
   void _showMediaPicker() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    FocusScope.of(context).unfocus();
     showModalBottomSheet(
       context: context,
       builder: (context) => SafeArea(
@@ -1116,7 +1224,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                         }
                                       ),
                                     ),
-                                  if ((message.messageType == 'image' || message.messageType == 'gif') && 
+                                  if ((message.messageType?.toLowerCase() == 'image' || message.messageType?.toLowerCase() == 'gif' || message.messageType?.toLowerCase() == 'photo' || message.messageType?.toLowerCase() == 'img' || (message.mediaUrl != null && message.mediaUrl!.isNotEmpty && message.messageType != 'text' && message.messageType != 'video' && message.messageType != 'audio')) &&
                                       message.mediaUrl != null && message.mediaUrl!.isNotEmpty)
                                     Padding(
                                       padding: const EdgeInsets.only(bottom: 6.0),

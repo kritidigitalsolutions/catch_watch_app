@@ -150,6 +150,9 @@ class MessageModel {
   bool? isPinned;
   bool? isEncrypted;
   String? iv;
+  String? senderPublicKey;
+  String? recipientPublicKey;
+  Map<String, dynamic>? encryptionMeta;
 
   // E2EE fields
   bool isDecrypted = false;
@@ -179,6 +182,9 @@ class MessageModel {
     this.isPinned,
     this.isEncrypted,
     this.iv,
+    this.senderPublicKey,
+    this.recipientPublicKey,
+    this.encryptionMeta,
   });
 
   MessageModel.fromJson(Map<String, dynamic> json) {
@@ -209,8 +215,10 @@ class MessageModel {
       }
     }
     
-    messageType = json['messageType'];
-    text = json['text'];
+    messageType = json['messageType']?.toString().toLowerCase();
+    if (messageType == 'photo' || messageType == 'img' || messageType == 'picture') {
+      messageType = 'image';
+    }
 
     String? fixMediaUrl(String? url) {
       if (url == null || url.isEmpty || url == 'null') return null;
@@ -223,7 +231,23 @@ class MessageModel {
       return '${AppUrl.serverUrl}/$url';
     }
 
-    mediaUrl = fixMediaUrl(json['mediaUrl'] ?? json['attachment'] ?? json['file'] ?? json['url']);
+    mediaUrl = fixMediaUrl(json['mediaUrl'] ?? json['attachment'] ?? json['file'] ?? json['url'] ?? json['media']);
+
+    if ((messageType == null || messageType!.isEmpty) && mediaUrl != null && mediaUrl!.isNotEmpty) {
+      messageType = 'image';
+    }
+
+    text = json['text'] ?? json['ciphertext'];
+    if ((text == null || text!.isEmpty) && json['encryption'] is Map) {
+      final enc = json['encryption'] as Map;
+      text = enc['ciphertext'];
+      if ((text == null || text!.isEmpty) && enc['envelopes'] is List && enc['envelopes'].isNotEmpty) {
+        final env = enc['envelopes'][0];
+        if (env is Map) {
+          text = env['ciphertext'];
+        }
+      }
+    }
     
     if (json['replyTo'] != null) {
       if (json['replyTo'] is Map) {
@@ -252,8 +276,56 @@ class MessageModel {
     iV = json['__v'];
     readAt = json['readAt'];
     isPinned = json['isPinned'];
-    isEncrypted = json['isEncrypted'];
+    isEncrypted = json['isEncrypted'] == true || json['isEncrypted'] == 'true' || json['isEncrypted'] == 1;
     iv = json['iv'];
+    if ((iv == null || iv!.isEmpty) && json['encryption'] != null && json['encryption'] is Map) {
+      final enc = json['encryption'] as Map<String, dynamic>;
+      iv = enc['iv'];
+      if ((iv == null || iv!.isEmpty) && enc['envelopes'] is List && (enc['envelopes'] as List).isNotEmpty) {
+        final env = enc['envelopes'][0];
+        if (env is Map) {
+          iv = env['iv'];
+        }
+      }
+    }
+    
+    senderPublicKey = json['senderPublicKey'];
+    if (senderPublicKey == null && json['sender'] != null && json['sender'] is Map) {
+      final senderMap = json['sender'] as Map<String, dynamic>;
+      senderPublicKey = senderMap['publicKey'];
+    }
+    if (senderPublicKey == null && json['encryption'] != null && json['encryption'] is Map) {
+      final enc = json['encryption'] as Map<String, dynamic>;
+      senderPublicKey = enc['senderPublicKey'];
+      if (senderPublicKey == null && enc['envelopes'] is List && (enc['envelopes'] as List).isNotEmpty) {
+        final env = enc['envelopes'][0];
+        if (env is Map) {
+          senderPublicKey = env['senderPublicKey'];
+        }
+      }
+    }
+
+    recipientPublicKey = json['recipientPublicKey'];
+    encryptionMeta = json['encryption'] is Map ? Map<String, dynamic>.from(json['encryption']) : null;
+    if (encryptionMeta != null) {
+      recipientPublicKey ??= encryptionMeta!['recipientPublicKey'];
+      if (recipientPublicKey == null && encryptionMeta!['envelopes'] is List && (encryptionMeta!['envelopes'] as List).isNotEmpty) {
+        final env = encryptionMeta!['envelopes'][0];
+        if (env is Map) {
+          recipientPublicKey = env['recipientPublicKey'];
+        }
+      }
+      if (senderPublicKey == null) {
+        senderPublicKey = encryptionMeta!['senderPublicKey'];
+      }
+    }
+    if (recipientPublicKey == null && recipient != null) {
+      if (recipient is Sender && (recipient as Sender).publicKey != null) {
+        recipientPublicKey = (recipient as Sender).publicKey.toString();
+      } else if (recipient is Map && recipient['publicKey'] != null) {
+        recipientPublicKey = recipient['publicKey'].toString();
+      }
+    }
   }
 }
 

@@ -10,6 +10,7 @@ import 'package:catch_watch/repository/interaction_repository.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/utils/hive_service/userdetail.dart';
 import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
 import 'package:dio/dio.dart' as dio;
 import 'package:flutter/material.dart';
 import 'dart:math';
@@ -362,6 +363,10 @@ class ProfileProvider extends ChangeNotifier {
 
   Future<void> logout(BuildContext context) async {
     await HiveService.logout();
+    try {
+      final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+      chatProvider.reset();
+    } catch (_) {}
     // Navigate to onboarding
     Navigator.of(context).pushNamedAndRemoveUntil('/onboarding', (route) => false);
   }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
@@ -92,8 +93,8 @@ class EncryptionHelper {
       if (crv == 'P-256') {
         if (x == null || y == null) throw ArgumentError('Missing coordinates for P-256');
         
-        final xBytes = _normalizeBytes(base64Url.decode(_padBase64(x)), 32);
-        final yBytes = _normalizeBytes(base64Url.decode(_padBase64(y)), 32);
+        final xBytes = _normalizeBytes(base64Url.decode(padBase64(x)), 32);
+        final yBytes = _normalizeBytes(base64Url.decode(padBase64(y)), 32);
         
         debugPrint('EncryptionHelper: P-256 coordinates normalized (32 bytes each)');
         debugPrint('EncryptionHelper: Partner X-prefix: ${xBytes.sublist(0, 4)}');
@@ -132,7 +133,7 @@ class EncryptionHelper {
     return padded;
   }
 
-  static String _padBase64(String input) {
+  static String padBase64(String input) {
     int length = input.length;
     int mod = length % 4;
     if (mod == 0) return input;
@@ -172,35 +173,60 @@ class EncryptionHelper {
 
       debugPrint('EncryptionHelper: Deriving P-256 secret...');
       
-      // CRITICAL: Apply the "positive byte" tweak to avoid Android's BigInteger negative number crash.
-      // This happens when the MSB of a coordinate is 1 (>= 128).
-      final tweakedPartnerKey = EcPublicKey(
-        x: _ensurePositive(partnerPublicKey.x),
-        y: _ensurePositive(partnerPublicKey.y),
-        type: KeyPairType.p256,
-      );
+      try {
+        final cleanPartnerKey = EcPublicKey(
+          x: _normalizeBytes(partnerPublicKey.x, 32),
+          y: _normalizeBytes(partnerPublicKey.y, 32),
+          type: KeyPairType.p256,
+        );
 
-      final tweakedMyKey = EcKeyPairData(
-        d: _ensurePositive(keyPairData.d),
-        x: _ensurePositive(keyPairData.x),
-        y: _ensurePositive(keyPairData.y),
-        type: KeyPairType.p256,
-      );
+        final cleanMyKey = EcKeyPairData(
+          d: _normalizeBytes(keyPairData.d, 32),
+          x: _normalizeBytes(keyPairData.x, 32),
+          y: _normalizeBytes(keyPairData.y, 32),
+          type: KeyPairType.p256,
+        );
 
-      final secretKey = await _p256.sharedSecretKey(
-        keyPair: tweakedMyKey,
-        remotePublicKey: tweakedPartnerKey,
-      );
+        final secretKey = await _p256.sharedSecretKey(
+          keyPair: cleanMyKey,
+          remotePublicKey: cleanPartnerKey,
+        );
 
-      // CRITICAL: Normalize the shared secret to exactly 32 bytes.
-      // Some ECDH implementations strip leading zeros, but AES-256 requires 256 bits.
-      final secretData = await secretKey.extractBytes();
-      final normalizedSecret = _normalizeBytes(secretData, 32);
-      
-      final fingerprint = base64.encode(normalizedSecret.sublist(0, 8));
-      debugPrint('EncryptionHelper: Secret derived. Length: ${normalizedSecret.length}, Fingerprint: $fingerprint');
+        final secretData = await secretKey.extractBytes();
+        final normalizedSecret = _normalizeBytes(secretData, 32);
+        
+        final fingerprint = base64.encode(normalizedSecret.sublist(0, 8));
+        debugPrint('EncryptionHelper: Standard Secret derived. Length: ${normalizedSecret.length}, Fingerprint: $fingerprint');
+        return SecretKey(normalizedSecret);
+      } catch (standardErr) {
+        debugPrint('EncryptionHelper: Standard derivation failed ($standardErr), trying tweaked positive byte fallback...');
+        
+        final tweakedPartnerKey = EcPublicKey(
+          x: _ensurePositive(partnerPublicKey.x),
+          y: _ensurePositive(partnerPublicKey.y),
+          type: KeyPairType.p256,
+        );
 
-      return SecretKey(normalizedSecret);
+        final tweakedMyKey = EcKeyPairData(
+          d: _ensurePositive(keyPairData.d),
+          x: _ensurePositive(keyPairData.x),
+          y: _ensurePositive(keyPairData.y),
+          type: KeyPairType.p256,
+        );
+
+        final secretKey = await _p256.sharedSecretKey(
+          keyPair: tweakedMyKey,
+          remotePublicKey: tweakedPartnerKey,
+        );
+
+        final secretData = await secretKey.extractBytes();
+        final normalizedSecret = _normalizeBytes(secretData, 32);
+        
+        final fingerprint = base64.encode(normalizedSecret.sublist(0, 8));
+        debugPrint('EncryptionHelper: Tweaked Secret derived. Length: ${normalizedSecret.length}, Fingerprint: $fingerprint');
+
+        return SecretKey(normalizedSecret);
+      }
     } catch (e) {
       debugPrint('EncryptionHelper: Shared secret derivation failed: $e');
       rethrow;
@@ -274,43 +300,50 @@ class EncryptionHelper {
     }
   }
 
+  static Uint8List? _decodeBase64OrUrl(String input) {
+    final clean = input.trim().replaceAll(RegExp(r'\s+'), '');
+    if (clean.isEmpty) return null;
+    final padded = padBase64(clean);
+    try {
+      return Uint8List.fromList(base64.decode(padded));
+    } catch (_) {
+      try {
+        return Uint8List.fromList(base64Url.decode(padded));
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
   // Decrypt message
   static Future<String> decrypt(String encryptedBase64, SecretKey sharedSecret, {String? iv}) async {
     if (encryptedBase64.isEmpty) return encryptedBase64;
     
     try {
-      // Clean up base64 string (sometimes received with spaces or wrong padding from different sources)
-      final cleanBase64 = encryptedBase64.trim().replaceAll(RegExp(r'\s+'), '');
-      
-      if (!_isBase64(cleanBase64)) {
+      final data = _decodeBase64OrUrl(encryptedBase64);
+      if (data == null) {
         debugPrint('EncryptionHelper: Not a valid Base64 string, returning as-is');
-        return cleanBase64;
+        return encryptedBase64;
       }
       
-      final data = base64.decode(_padBase64(cleanBase64));
       debugPrint('EncryptionHelper: Decrypting ${data.length} bytes total');
       
       SecretBox secretBox;
       if (iv != null && iv.isNotEmpty) {
-        final cleanIv = iv.trim().replaceAll(RegExp(r'\s+'), '');
-        if (!_isBase64(cleanIv)) {
+        final nonce = _decodeBase64OrUrl(iv);
+        if (nonce == null) {
           debugPrint('EncryptionHelper: Provided IV is not valid Base64');
-          return cleanBase64;
+          return encryptedBase64;
         }
         
-        final nonce = base64.decode(_padBase64(cleanIv));
         if (data.length < 16) {
            debugPrint('EncryptionHelper: Encrypted data too short (needs at least 16 bytes for MAC)');
-           return cleanBase64;
+           return encryptedBase64;
         }
         
         final mac = data.sublist(data.length - 16);
         final cipherText = data.sublist(0, data.length - 16);
         
-        debugPrint('EncryptionHelper: IV (len ${nonce.length}): ${base64.encode(nonce)}');
-        debugPrint('EncryptionHelper: MAC (len ${mac.length}): ${base64.encode(mac)}');
-        debugPrint('EncryptionHelper: CipherText len: ${cipherText.length}');
-
         secretBox = SecretBox(
           cipherText,
           nonce: nonce,
@@ -320,7 +353,7 @@ class EncryptionHelper {
         // Fallback: Check if IV is prepended (standard for some libraries)
         if (data.length < 12 + 16) {
           debugPrint('EncryptionHelper: Encrypted data too short for prepended IV format');
-          return cleanBase64;
+          return encryptedBase64;
         }
 
         final nonce = data.sublist(0, 12);
@@ -376,11 +409,69 @@ class EncryptionHelper {
   }
 
   static bool _isBase64(String str) {
+    return _decodeBase64OrUrl(str) != null;
+  }
+
+  /// Derive PBKDF2 backup key using user ID and salt
+  static Future<SecretKey> deriveBackupKey(String userId, String saltBase64, int iterations) async {
+    final salt = base64.decode(saltBase64);
+    final passphrase = 'cw_e2ee_account_recovery_$userId';
+    final pbkdf2 = Pbkdf2(
+      macAlgorithm: Hmac.sha256(),
+      iterations: iterations,
+      bits: 256,
+    );
+    return await pbkdf2.deriveKeyFromPassword(
+      password: passphrase,
+      nonce: salt,
+    );
+  }
+
+  /// Decrypt private key backup from server (API 1)
+  static Future<String?> decryptBackup({
+    required String ciphertext,
+    required String iv,
+    required String salt,
+    required int iterations,
+    required String userId,
+  }) async {
     try {
-      base64.decode(str);
-      return str.length % 4 == 0 && RegExp(r'^[a-zA-Z0-9+/]*={0,2}$').hasMatch(str);
-    } catch (_) {
-      return false;
+      final key = await deriveBackupKey(userId, salt, iterations);
+      final cipherBytes = base64.decode(ciphertext);
+      final nonce = base64.decode(iv);
+      
+      if (cipherBytes.length < 16) return null;
+      final mac = cipherBytes.sublist(cipherBytes.length - 16);
+      final content = cipherBytes.sublist(0, cipherBytes.length - 16);
+
+      final secretBox = SecretBox(content, nonce: nonce, mac: Mac(mac));
+      final decrypted = await _aesGcm.decrypt(secretBox, secretKey: key);
+      return utf8.decode(decrypted);
+    } catch (e) {
+      debugPrint('EncryptionHelper: Decrypt backup failed: $e');
+      return null;
     }
+  }
+
+  /// Encrypt private key backup for registration (API 2)
+  static Future<Map<String, dynamic>> encryptBackup(String privateKeyJwk, String userId) async {
+    final random = Random.secure();
+    final salt = List<int>.generate(16, (_) => random.nextInt(256));
+    final saltBase64 = base64.encode(salt);
+    const iterations = 100000;
+    
+    final key = await deriveBackupKey(userId, saltBase64, iterations);
+    final secretBox = await _aesGcm.encrypt(
+      utf8.encode(privateKeyJwk),
+      secretKey: key,
+    );
+
+    return {
+      'ciphertext': base64.encode(secretBox.cipherText + secretBox.mac.bytes),
+      'iv': base64.encode(secretBox.nonce),
+      'salt': saltBase64,
+      'iterations': iterations,
+      'version': 1,
+    };
   }
 }

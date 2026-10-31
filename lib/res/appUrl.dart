@@ -1,6 +1,6 @@
 class AppUrl {
-  // static const String serverUrl = 'http://192.168.1.19:5000';
-  static const String serverUrl = 'https://api.catchandwatch.com';
+  static const String serverUrl = 'http://192.168.1.13:5000';
+  // static const String serverUrl = 'https://api.catchandwatch.com';
   // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
 
@@ -109,6 +109,8 @@ class AppUrl {
   // E2EE Keys
   static const String savePublicKey = '$baseUrl/chat/keys';
   static String getUserPublicKey(String userId) => '$baseUrl/chat/keys/$userId';
+  static const String getE2EEBackup = '$baseUrl/chat/keys/backup';
+  static const String registerE2EEIdentity = '$baseUrl/chat/keys/identity';
 
 
   /// calls

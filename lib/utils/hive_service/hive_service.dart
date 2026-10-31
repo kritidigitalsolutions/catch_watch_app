@@ -84,7 +84,7 @@ class HiveService {
     await _historyBox.clear();
     await _likesBox.clear();
     await _statsBox.clear();
-    await _keysBox.clear();
+    // Note: E2EE keys in _keysBox are kept user-scoped to preserve encrypted history on re-login
   }
 
 
@@ -104,20 +104,39 @@ class HiveService {
   }
 
   // --- E2EE Keys ---
-  static Future<void> savePrivateKey(List<int> bytes) async {
+  static Future<void> savePrivateKey(List<int> bytes, {String? userId}) async {
+    final uid = userId ?? HiveService.userId;
+    if (uid != null && uid.isNotEmpty) {
+      await _keysBox.put('privateKey_$uid', bytes);
+    }
     await _keysBox.put('privateKey', bytes);
   }
 
-  static List<int>? getPrivateKey() {
-    return _keysBox.get('privateKey');
+  static List<int>? getPrivateKey({String? userId}) {
+    final uid = userId ?? HiveService.userId;
+    if (uid != null && uid.isNotEmpty) {
+      final bytes = _keysBox.get('privateKey_$uid');
+      if (bytes != null) return List<int>.from(bytes);
+    }
+    final fallback = _keysBox.get('privateKey');
+    return fallback != null ? List<int>.from(fallback) : null;
   }
 
-  static Future<void> savePublicKey(String jwk) async {
+  static Future<void> savePublicKey(String jwk, {String? userId}) async {
+    final uid = userId ?? HiveService.userId;
+    if (uid != null && uid.isNotEmpty) {
+      await _keysBox.put('publicKey_$uid', jwk);
+    }
     await _keysBox.put('publicKey', jwk);
   }
 
-  static String? getPublicKey() {
-    return _keysBox.get('publicKey');
+  static String? getPublicKey({String? userId}) {
+    final uid = userId ?? HiveService.userId;
+    if (uid != null && uid.isNotEmpty) {
+      final jwk = _keysBox.get('publicKey_$uid');
+      if (jwk != null) return jwk as String;
+    }
+    return _keysBox.get('publicKey') as String?;
   }
 
   static Future<void> saveDeviceId(String deviceId) async {
@@ -125,18 +144,31 @@ class HiveService {
   }
 
   static String? getDeviceId() {
-    return _keysBox.get('deviceId');
+    return _keysBox.get('deviceId') as String?;
   }
 
-  static Future<void> savePartnerPublicKey(String partnerId, String jwk) async {
+  static Future<void> savePartnerPublicKey(String partnerId, String jwk, {String? myUserId}) async {
+    final uid = myUserId ?? HiveService.userId;
+    if (uid != null && uid.isNotEmpty) {
+      await _keysBox.put('partner_jwk_${uid}_$partnerId', jwk);
+    }
     await _keysBox.put('partner_jwk_$partnerId', jwk);
   }
 
-  static String? getPartnerPublicKey(String partnerId) {
-    return _keysBox.get('partner_jwk_$partnerId');
+  static String? getPartnerPublicKey(String partnerId, {String? myUserId}) {
+    final uid = myUserId ?? HiveService.userId;
+    if (uid != null && uid.isNotEmpty) {
+      final jwk = _keysBox.get('partner_jwk_${uid}_$partnerId');
+      if (jwk != null) return jwk as String;
+    }
+    return _keysBox.get('partner_jwk_$partnerId') as String?;
   }
 
-  static Future<void> deletePartnerPublicKey(String partnerId) async {
+  static Future<void> deletePartnerPublicKey(String partnerId, {String? myUserId}) async {
+    final uid = myUserId ?? HiveService.userId;
+    if (uid != null && uid.isNotEmpty) {
+      await _keysBox.delete('partner_jwk_${uid}_$partnerId');
+    }
     await _keysBox.delete('partner_jwk_$partnerId');
   }
 

@@ -257,6 +257,33 @@ class ChatRepository {
     }
   }
 
+  Future<dynamic> getE2EEBackup() async {
+    try {
+      dynamic response = await _apiService.getApi(AppUrl.getE2EEBackup);
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> registerE2EEIdentity(Map<String, dynamic> data) async {
+    try {
+      dynamic response = await _apiService.postApi(AppUrl.registerE2EEIdentity, data);
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<dynamic> getOtherProfileStats(String userId) async {
+    try {
+      dynamic response = await _apiService.getApi(AppUrl.getOtherProfileStats(userId));
+      return response;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<dynamic> getMyProfile() async {
     try {
       dynamic response = await _apiService.getApi(AppUrl.getProfile);

@@ -147,6 +147,12 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   // ============================================================
   // CONSTRUCTOR
+  bool isPickerActive = false;
+
+  void setPickerActive(bool active) {
+    isPickerActive = active;
+  }
+
   // ============================================================
 
   CallProvider() {
@@ -160,6 +166,10 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      if (isPickerActive) {
+        debugPrint('📱 App resumed during image picking, skipping active call check.');
+        return;
+      }
       debugPrint('📱 App resumed, checking for active calls...');
       _checkActiveCalls();
     }
