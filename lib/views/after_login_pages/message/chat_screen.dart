@@ -1306,7 +1306,9 @@ class _ChatScreenState extends State<ChatScreen> {
                                           ),
                                         Flexible(
                                           child: Text(
-                                            message.text!,
+                                            (message.isEncrypted == true && !message.isDecrypted)
+                                                ? "Message unavailable on this device"
+                                                : message.text!,
                                             style: text14(color: isHighlighted ? Colors.black : (isMe ? Colors.white : Colors.black)),
                                           ),
                                         ),

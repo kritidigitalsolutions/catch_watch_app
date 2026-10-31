@@ -211,6 +211,10 @@ class ChatProvider extends ChangeNotifier {
     _legacySharedSecrets.clear();
     
     final userId = HiveService.userId;
+    if (userId == null || userId.isEmpty) {
+      debugPrint('E2EE: User not logged in, cannot initialize E2EE');
+      return;
+    }
     
     // Ensure Device ID exists
     if (HiveService.getDeviceId() == null) {
@@ -220,165 +224,133 @@ class ChatProvider extends ChangeNotifier {
     }
 
     try {
-      final privateKeyBytes = HiveService.getPrivateKey(userId: userId);
-      final savedJwk = HiveService.getPublicKey(userId: userId);
-      
-      if (privateKeyBytes != null && savedJwk != null) {
-        debugPrint('E2EE: Found saved keys for user $userId. Loading...');
-        
-        _myKeyPair = await EncryptionHelper.loadKeyPair(privateKeyBytes, savedJwk);
-        final myPublicKey = await _myKeyPair!.extractPublicKey();
-        debugPrint('E2EE: Loaded key type: ${myPublicKey.type.name}');
+      bool restoredFromBackup = false;
 
-        // MIGRATION CHECK: Ensure we are on P-256
-        if (myPublicKey.type != KeyPairType.p256 || savedJwk.contains('"X25519"') || savedJwk.contains('"OKP"')) {
-          debugPrint('E2EE: Non P-256 keys detected. Migrating to P-256...');
-          _myKeyPair = await EncryptionHelper.generateKeyPair();
-          final keyPairData = await _myKeyPair!.extract();
-          if (keyPairData is SimpleKeyPairData) {
-            await HiveService.savePrivateKey(keyPairData.bytes, userId: userId);
-          } else if (keyPairData is EcKeyPairData) {
-            await HiveService.savePrivateKey(keyPairData.d, userId: userId);
+      // STEP 1: Always check server for account backup first to ensure parity with Web & other devices
+      try {
+        final backupResponse = await _chatRepository.getE2EEBackup();
+        debugPrint('E2EE: Backup API Response: $backupResponse');
+
+        Map<String, dynamic>? backupData;
+        if (backupResponse is Map) {
+          if (backupResponse['data'] is Map) {
+            backupData = Map<String, dynamic>.from(backupResponse['data']);
+          } else if (backupResponse['encryptedPrivateKeyBackup'] != null || backupResponse['backup'] != null) {
+            backupData = Map<String, dynamic>.from(backupResponse);
           }
-          final jwk = await EncryptionHelper.exportPublicKey(_myKeyPair!);
-          await HiveService.savePublicKey(jwk, userId: userId);
-          
-          await syncPublicKey();
         }
-        debugPrint('E2EE: KeyPair loaded/migrated successfully');
-      } else {
-        debugPrint('E2EE: No saved keys found for user $userId. Checking for server backup (API 1)...');
-        bool restored = false;
 
-        if (userId != null && userId.isNotEmpty) {
-          try {
-            final backupResponse = await _chatRepository.getE2EEBackup();
-            debugPrint('E2EE: Backup API Response: $backupResponse');
+        if (backupData != null) {
+          final backup = backupData['encryptedPrivateKeyBackup'] ?? backupData['backup'];
+          if (backup != null && backup is Map) {
+            final ciphertext = backup['ciphertext'] ?? backup['encryptedKey'];
+            final iv = backup['iv'] ?? backup['nonce'];
+            final salt = backup['salt'];
+            final iterations = backup['iterations'] ?? 100000;
 
-            Map<String, dynamic>? backupData;
-            if (backupResponse is Map) {
-              if (backupResponse['data'] is Map) {
-                backupData = Map<String, dynamic>.from(backupResponse['data']);
-              } else if (backupResponse['encryptedPrivateKeyBackup'] != null || backupResponse['backup'] != null) {
-                backupData = Map<String, dynamic>.from(backupResponse);
-              }
-            }
+            if (ciphertext != null && iv != null && salt != null) {
+              debugPrint('E2EE: Decrypting account private key backup from server...');
+              final decryptedPrivateKeyJwk = await EncryptionHelper.decryptBackup(
+                ciphertext: ciphertext.toString(),
+                iv: iv.toString(),
+                salt: salt.toString(),
+                iterations: iterations is int ? iterations : int.tryParse(iterations.toString()) ?? 100000,
+                userId: userId,
+              );
 
-            if (backupData != null) {
-              final backup = backupData['encryptedPrivateKeyBackup'] ?? backupData['backup'];
-              final publicKeyJwk = backupData['publicKey'] ?? backupData['publicKeyJwk'];
-
-              if (backup != null && backup is Map) {
-                debugPrint('E2EE: Backup found on server. Restoring private key...');
-                final ciphertext = backup['ciphertext'] ?? backup['encryptedKey'];
-                final iv = backup['iv'] ?? backup['nonce'];
-                final salt = backup['salt'];
-                final iterations = backup['iterations'] ?? 100000;
-
-                if (ciphertext != null && iv != null && salt != null) {
-                  final decryptedPrivateKeyJwk = await EncryptionHelper.decryptBackup(
-                    ciphertext: ciphertext.toString(),
-                    iv: iv.toString(),
-                    salt: salt.toString(),
-                    iterations: iterations is int ? iterations : int.tryParse(iterations.toString()) ?? 100000,
-                    userId: userId,
-                  );
-
-                  if (decryptedPrivateKeyJwk != null && decryptedPrivateKeyJwk.isNotEmpty) {
-                    List<int> privBytes;
-                    try {
-                      final jwkMap = jsonDecode(decryptedPrivateKeyJwk);
-                      final dynamic dVal = jwkMap['d'];
-                      if (dVal != null) {
-                        final String dStr = dVal is String ? dVal : base64Url.encode(List<int>.from(dVal));
-                        privBytes = base64Url.decode(EncryptionHelper.padBase64(dStr));
-                      } else {
-                        privBytes = utf8.encode(decryptedPrivateKeyJwk);
-                      }
-                    } catch (_) {
-                      privBytes = utf8.encode(decryptedPrivateKeyJwk);
-                    }
-
-                    final jwkStr = publicKeyJwk != null ? (publicKeyJwk is String ? publicKeyJwk : jsonEncode(publicKeyJwk)) : null;
-
-                    await HiveService.savePrivateKey(privBytes, userId: userId);
-                    if (jwkStr != null) {
-                      await HiveService.savePublicKey(jwkStr, userId: userId);
-                      _myKeyPair = await EncryptionHelper.loadKeyPair(privBytes, jwkStr);
-                    } else {
-                      final savedPub = HiveService.getPublicKey(userId: userId);
-                      if (savedPub != null) {
-                        _myKeyPair = await EncryptionHelper.loadKeyPair(privBytes, savedPub);
-                      }
-                    }
-
-                    if (_myKeyPair != null) {
-                      restored = true;
-                      debugPrint('E2EE: Successfully restored key pair from server backup!');
-                    }
-                  }
+              if (decryptedPrivateKeyJwk != null && decryptedPrivateKeyJwk.isNotEmpty) {
+                _myKeyPair = await EncryptionHelper.loadKeyPairFromPrivateJwk(decryptedPrivateKeyJwk);
+                final derivedPublicJwk = EncryptionHelper.derivePublicKeyJwk(decryptedPrivateKeyJwk);
+                final keyPairData = await _myKeyPair!.extract();
+                
+                if (keyPairData is EcKeyPairData && derivedPublicJwk != null) {
+                  await HiveService.savePrivateKey(keyPairData.d, userId: userId);
+                  await HiveService.savePublicKey(derivedPublicJwk, userId: userId);
+                  _publicKeySavedOnServer = true;
+                  restoredFromBackup = true;
+                  debugPrint('✅ E2EE: KeyPair restored from server backup successfully! Identity synchronized with Website.');
                 }
               }
             }
-          } catch (e) {
-            debugPrint('E2EE: Failed to fetch/restore backup from server: $e');
           }
         }
+      } catch (backupErr) {
+        debugPrint('E2EE: Failed to fetch/restore backup from server: $backupErr');
+      }
 
-        if (!restored) {
-          debugPrint('E2EE: Generating new KeyPair & registering identity (API 2)...');
-          _myKeyPair = await EncryptionHelper.generateKeyPair();
-          
-          final keyPairData = await _myKeyPair!.extract();
-          List<int> privBytes = [];
-          if (keyPairData is SimpleKeyPairData) {
-             privBytes = keyPairData.bytes;
-          } else if (keyPairData is EcKeyPairData) {
-             privBytes = keyPairData.d;
-          }
-          await HiveService.savePrivateKey(privBytes, userId: userId);
-          
-          final jwk = await EncryptionHelper.exportPublicKey(_myKeyPair!);
-          await HiveService.savePublicKey(jwk, userId: userId);
+      // STEP 2: If no server backup restored, try loading existing local key from Hive
+      if (!restoredFromBackup) {
+        final privateKeyBytes = HiveService.getPrivateKey(userId: userId);
+        final savedJwk = HiveService.getPublicKey(userId: userId);
 
-          // Register identity and backup to server (API 2)
+        if (privateKeyBytes != null && savedJwk != null) {
+          debugPrint('E2EE: Loading local keys for user $userId...');
           try {
-            final keyId = 'p256_${DateTime.now().millisecondsSinceEpoch}';
-            final deviceId = HiveService.getDeviceId() ?? 'mobile_device_1';
+            _myKeyPair = await EncryptionHelper.loadKeyPair(privateKeyBytes, savedJwk);
+            final myPublicKey = await _myKeyPair!.extractPublicKey();
             
-            String privJwkStr = jwk;
-            if (keyPairData is EcKeyPairData) {
-              privJwkStr = jsonEncode({
-                'crv': 'P-256',
-                'd': base64Url.encode(keyPairData.d).replaceAll('=', ''),
-                'kty': 'EC',
-                'x': base64Url.encode(keyPairData.x).replaceAll('=', ''),
-                'y': base64Url.encode(keyPairData.y).replaceAll('=', ''),
-              });
+            // Migration check: ensure P-256
+            if (myPublicKey.type != KeyPairType.p256 || savedJwk.contains('"X25519"') || savedJwk.contains('"OKP"')) {
+              _myKeyPair = null;
+            } else {
+              debugPrint('E2EE: Local KeyPair loaded successfully');
             }
-
-            final backupPayload = await EncryptionHelper.encryptBackup(privJwkStr, userId ?? 'unknown');
-
-            await _chatRepository.registerE2EEIdentity({
-              'publicKey': jwk,
-              'keyId': keyId,
-              'deviceId': deviceId,
-              'encryptedPrivateKeyBackup': backupPayload,
-            });
-            debugPrint('E2EE: Identity & backup registered on server successfully');
-          } catch (e) {
-            debugPrint('E2EE: Failed to register identity & backup on server: $e');
+          } catch (loadErr) {
+            debugPrint('E2EE: Failed to load local keypair: $loadErr');
+            _myKeyPair = null;
           }
         }
       }
 
-      // Always re-export and save to ensure latest JWK format
-      if (_myKeyPair != null) {
-        final currentJwk = await EncryptionHelper.exportPublicKey(_myKeyPair!);
-        await HiveService.savePublicKey(currentJwk, userId: userId);
-        debugPrint('🔑 CURRENT PUBLIC KEY: $currentJwk');
+      // STEP 3: If still no key pair, generate new P-256 key pair and register identity with backup on server
+      if (_myKeyPair == null) {
+        debugPrint('E2EE: Generating new P-256 KeyPair & registering identity with backup...');
+        _myKeyPair = await EncryptionHelper.generateKeyPair();
+        final keyPairData = await _myKeyPair!.extract();
+        
+        List<int> privBytes = [];
+        if (keyPairData is EcKeyPairData) {
+          privBytes = keyPairData.d;
+        } else if (keyPairData is SimpleKeyPairData) {
+          privBytes = keyPairData.bytes;
+        }
+        await HiveService.savePrivateKey(privBytes, userId: userId);
 
-        // Now send to server
+        final jwk = await EncryptionHelper.exportPublicKey(_myKeyPair!);
+        await HiveService.savePublicKey(jwk, userId: userId);
+
+        try {
+          final keyId = 'p256_${DateTime.now().millisecondsSinceEpoch}';
+          final deviceId = HiveService.getDeviceId() ?? 'mobile_device_1';
+
+          String privJwkStr = jwk;
+          if (keyPairData is EcKeyPairData) {
+            privJwkStr = jsonEncode({
+              'crv': 'P-256',
+              'd': base64Url.encode(keyPairData.d).replaceAll('=', ''),
+              'kty': 'EC',
+              'x': base64Url.encode(keyPairData.x).replaceAll('=', ''),
+              'y': base64Url.encode(keyPairData.y).replaceAll('=', ''),
+            });
+          }
+
+          final backupPayload = await EncryptionHelper.encryptBackup(privJwkStr, userId);
+
+          await _chatRepository.registerE2EEIdentity({
+            'publicKey': jwk,
+            'keyId': keyId,
+            'deviceId': deviceId,
+            'encryptedPrivateKeyBackup': backupPayload,
+          });
+          _publicKeySavedOnServer = true;
+          debugPrint('E2EE: Identity & backup registered on server successfully');
+        } catch (regErr) {
+          debugPrint('E2EE: Failed to register identity & backup on server: $regErr');
+        }
+      }
+
+      // STEP 4: Ensure public key is active on server
+      if (_myKeyPair != null && !_publicKeySavedOnServer) {
         await syncPublicKey();
       }
     } catch (e) {
@@ -403,12 +375,39 @@ class ChatProvider extends ChangeNotifier {
     _isPublicKeySyncing = true;
     try {
       final jwkString = await EncryptionHelper.exportPublicKey(_myKeyPair!);
+      final keyPairData = await _myKeyPair!.extract();
       
-      debugPrint('📡 API CALL: POST /api/chat/keys');
-      debugPrint('📡 Request Body: {"publicKey": "$jwkString"}');
+      final userId = HiveService.userId ?? '';
+      final deviceId = HiveService.getDeviceId() ?? 'mobile_device_1';
+      final keyId = 'p256_${DateTime.now().millisecondsSinceEpoch}';
 
+      // Always include zero-knowledge encrypted backup with identity registration
+      if (keyPairData is EcKeyPairData && userId.isNotEmpty) {
+        final privJwkStr = jsonEncode({
+          'crv': 'P-256',
+          'd': base64Url.encode(keyPairData.d).replaceAll('=', ''),
+          'kty': 'EC',
+          'x': base64Url.encode(keyPairData.x).replaceAll('=', ''),
+          'y': base64Url.encode(keyPairData.y).replaceAll('=', ''),
+        });
+        final backupPayload = await EncryptionHelper.encryptBackup(privJwkStr, userId);
+
+        final response = await _chatRepository.registerE2EEIdentity({
+          'publicKey': jwkString,
+          'keyId': keyId,
+          'deviceId': deviceId,
+          'encryptedPrivateKeyBackup': backupPayload,
+        });
+
+        if (response['success'] == true) {
+          _publicKeySavedOnServer = true;
+          debugPrint('✅ SUCCESS: Identity and backup registered on server');
+          return;
+        }
+      }
+
+      // Fallback
       final response = await _chatRepository.savePublicKey(jwkString);
-      
       if (response['success'] == true) {
         _publicKeySavedOnServer = true;
         debugPrint('✅ SUCCESS: Public key sent to server successfully');
@@ -1250,12 +1249,30 @@ class ChatProvider extends ChangeNotifier {
       final List<MessageModel> newMessages = (response.data ?? []).reversed.toList();
       
       // Decrypt messages
-      final partnerId = _activePartnerId ?? _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel()).partner?.sId;
+      String? partnerId = _activePartnerId ?? _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel()).partner?.sId;
+      if (partnerId == null && newMessages.isNotEmpty) {
+        final myUserId = HiveService.userId;
+        for (var m in newMessages) {
+          final sId = m.sender?.sId ?? m.sender?.id;
+          if (sId != null && sId != myUserId) {
+            partnerId = sId;
+            break;
+          }
+          final rId = m.recipient is Sender
+              ? (m.recipient as Sender).sId
+              : (m.recipient is Map ? m.recipient['_id']?.toString() : m.recipient?.toString());
+          if (rId != null && rId != myUserId) {
+            partnerId = rId;
+            break;
+          }
+        }
+      }
+
       if (partnerId != null) {
         // Ensure partner public key is fetched/refreshed first before decryption
         await _getSharedSecret(partnerId, forceFetch: true);
-        await _decryptMessagesList(newMessages, partnerId);
       }
+      await _decryptMessagesList(newMessages, partnerId);
 
       if (page == 1) {
         _messages = newMessages;
@@ -1271,8 +1288,8 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> _decryptMessagesList(List<MessageModel> messages, String partnerId) async {
-    debugPrint('E2EE: Decrypting ${messages.length} messages for partner $partnerId using candidate keys...');
+  Future<void> _decryptMessagesList(List<MessageModel> messages, [String? fallbackPartnerId]) async {
+    debugPrint('E2EE: Decrypting ${messages.length} messages using candidate keys...');
     
     if (_myKeyPair == null) {
       await initE2EE();
@@ -1285,35 +1302,76 @@ class ChatProvider extends ChangeNotifier {
 
     final myUserId = HiveService.userId;
 
+    // Collect historical public keys from across the message batch
+    final Set<String> historicalCandidateJwks = {};
+    for (var m in messages) {
+      if (m.senderPublicKey != null && m.senderPublicKey!.isNotEmpty) {
+        historicalCandidateJwks.add(m.senderPublicKey!);
+      }
+      if (m.recipientPublicKey != null && m.recipientPublicKey!.isNotEmpty) {
+        historicalCandidateJwks.add(m.recipientPublicKey!);
+      }
+      if (m.encryptionMeta != null) {
+        final spk = m.encryptionMeta!['senderPublicKey'];
+        if (spk != null && spk is String && spk.isNotEmpty) historicalCandidateJwks.add(spk);
+        final rpk = m.encryptionMeta!['recipientPublicKey'];
+        if (rpk != null && rpk is String && rpk.isNotEmpty) historicalCandidateJwks.add(rpk);
+        if (m.encryptionMeta!['envelopes'] is List) {
+          for (var env in m.encryptionMeta!['envelopes']) {
+            if (env is Map) {
+              if (env['senderPublicKey'] != null) historicalCandidateJwks.add(env['senderPublicKey'].toString());
+              if (env['recipientPublicKey'] != null) historicalCandidateJwks.add(env['recipientPublicKey'].toString());
+            }
+          }
+        }
+      }
+      if (m.sender?.publicKey != null) {
+        final spk = m.sender!.publicKey is String ? m.sender!.publicKey : jsonEncode(m.sender!.publicKey);
+        historicalCandidateJwks.add(spk);
+      }
+      if (m.sender?.deviceKeys != null) {
+        for (var dk in m.sender!.deviceKeys!) {
+          final pk = dk is Map ? (dk['publicKey'] ?? dk['key']) : dk;
+          if (pk != null) historicalCandidateJwks.add(pk is String ? pk : jsonEncode(pk));
+        }
+      }
+      if (m.recipient is Sender && (m.recipient as Sender).publicKey != null) {
+        final rpk = (m.recipient as Sender).publicKey;
+        historicalCandidateJwks.add(rpk is String ? rpk : jsonEncode(rpk));
+      }
+      if (m.recipient is Sender && (m.recipient as Sender).deviceKeys != null) {
+        for (var dk in (m.recipient as Sender).deviceKeys!) {
+          final pk = dk is Map ? (dk['publicKey'] ?? dk['key']) : dk;
+          if (pk != null) historicalCandidateJwks.add(pk is String ? pk : jsonEncode(pk));
+        }
+      }
+    }
+
     for (var msg in messages) {
       if (msg.messageType == 'text' && msg.text != null && msg.text!.isNotEmpty) {
         if (msg.isDecrypted) continue;
+
+        // If message is not encrypted (plain text), keep as-is and mark decrypted
+        if (msg.isEncrypted != true && (msg.iv == null || msg.iv!.isEmpty)) {
+          msg.isDecrypted = true;
+          continue;
+        }
 
         msg.cipherText = msg.text;
 
         final senderId = msg.sender?.sId ?? msg.sender?.id;
         final bool isSender = myUserId != null && (senderId == myUserId);
+        final recipientId = msg.recipient is Sender
+            ? (msg.recipient as Sender).sId
+            : (msg.recipient is Map ? msg.recipient['_id']?.toString() : msg.recipient?.toString());
+        final partnerId = isSender ? recipientId : senderId;
+        final effectivePartnerId = partnerId ?? fallbackPartnerId ?? _activePartnerId;
 
-        List<dynamic> candidateKeyInputs = [];
+        final List<dynamic> candidateKeyInputs = [];
 
-        if (isSender) {
-          if (msg.recipientPublicKey != null) {
-            candidateKeyInputs.add(msg.recipientPublicKey!);
-          }
-          if (msg.encryptionMeta != null && msg.encryptionMeta!['recipientPublicKey'] != null) {
-            candidateKeyInputs.add(msg.encryptionMeta!['recipientPublicKey']);
-          }
-          if (msg.recipient != null) {
-            if (msg.recipient is Sender && (msg.recipient as Sender).publicKey != null) {
-              candidateKeyInputs.add((msg.recipient as Sender).publicKey);
-            } else if (msg.recipient is Map && (msg.recipient as Map)['publicKey'] != null) {
-              candidateKeyInputs.add((msg.recipient as Map)['publicKey']);
-            }
-          }
-          final partnerJwk = HiveService.getPartnerPublicKey(partnerId);
-          if (partnerJwk != null) candidateKeyInputs.add(partnerJwk);
-        } else {
-          if (msg.senderPublicKey != null) {
+        // 1. Primary sender / recipient keys from message
+        if (!isSender) {
+          if (msg.senderPublicKey != null && msg.senderPublicKey!.isNotEmpty) {
             candidateKeyInputs.add(msg.senderPublicKey!);
           }
           if (msg.encryptionMeta != null && msg.encryptionMeta!['senderPublicKey'] != null) {
@@ -1322,15 +1380,60 @@ class ChatProvider extends ChangeNotifier {
           if (msg.sender != null && msg.sender!.publicKey != null) {
             candidateKeyInputs.add(msg.sender!.publicKey);
           }
-          final partnerJwk = HiveService.getPartnerPublicKey(partnerId) ?? (senderId != null ? HiveService.getPartnerPublicKey(senderId) : null);
-          if (partnerJwk != null) candidateKeyInputs.add(partnerJwk);
-          if (_partnerPublicKeys.containsKey(partnerId)) {
-            candidateKeyInputs.add(_partnerPublicKeys[partnerId]);
+          if (msg.sender != null && msg.sender!.deviceKeys != null) {
+            for (var dk in msg.sender!.deviceKeys!) {
+              final pk = dk is Map ? (dk['publicKey'] ?? dk['key']) : dk;
+              if (pk != null) candidateKeyInputs.add(pk);
+            }
           }
-          if (senderId != null && _partnerPublicKeys.containsKey(senderId)) {
-            candidateKeyInputs.add(_partnerPublicKeys[senderId]);
+          if (msg.recipientPublicKey != null && msg.recipientPublicKey!.isNotEmpty) {
+            candidateKeyInputs.add(msg.recipientPublicKey!);
+          }
+        } else {
+          if (msg.recipientPublicKey != null && msg.recipientPublicKey!.isNotEmpty) {
+            candidateKeyInputs.add(msg.recipientPublicKey!);
+          }
+          if (msg.encryptionMeta != null && msg.encryptionMeta!['recipientPublicKey'] != null) {
+            candidateKeyInputs.add(msg.encryptionMeta!['recipientPublicKey']);
+          }
+          if (msg.recipient is Sender && (msg.recipient as Sender).publicKey != null) {
+            candidateKeyInputs.add((msg.recipient as Sender).publicKey);
+          }
+          if (msg.recipient is Sender && (msg.recipient as Sender).deviceKeys != null) {
+            for (var dk in (msg.recipient as Sender).deviceKeys!) {
+              final pk = dk is Map ? (dk['publicKey'] ?? dk['key']) : dk;
+              if (pk != null) candidateKeyInputs.add(pk);
+            }
+          }
+          if (msg.senderPublicKey != null && msg.senderPublicKey!.isNotEmpty) {
+            candidateKeyInputs.add(msg.senderPublicKey!);
           }
         }
+
+        // 2. Partner keys from Hive & memory cache
+        if (effectivePartnerId != null) {
+          final partnerJwk = HiveService.getPartnerPublicKey(effectivePartnerId);
+          if (partnerJwk != null) candidateKeyInputs.add(partnerJwk);
+          if (_partnerPublicKeys.containsKey(effectivePartnerId)) {
+            candidateKeyInputs.add(_partnerPublicKeys[effectivePartnerId]);
+          }
+        }
+
+        // 3. Conversation metadata partner keys
+        for (var conv in _conversations) {
+          if (conv.sId == msg.conversationId || (effectivePartnerId != null && (conv.partner?.sId == effectivePartnerId || conv.partner?.id == effectivePartnerId))) {
+            if (conv.partner?.publicKey != null) candidateKeyInputs.add(conv.partner!.publicKey);
+            if (conv.partner?.deviceKeys != null) {
+              for (var dk in conv.partner!.deviceKeys!) {
+                final pk = dk is Map ? (dk['publicKey'] ?? dk['key']) : dk;
+                if (pk != null) candidateKeyInputs.add(pk);
+              }
+            }
+          }
+        }
+
+        // 4. Historical candidate keys from other messages in the batch
+        candidateKeyInputs.addAll(historicalCandidateJwks);
 
         bool decryptedSuccessfully = false;
 
@@ -1351,39 +1454,59 @@ class ChatProvider extends ChangeNotifier {
               msg.isDecrypted = true;
               decryptedSuccessfully = true;
 
-              // Cache working partner key
-              final jwkStr = candidate is String ? candidate : jsonEncode(candidate);
-              await HiveService.savePartnerPublicKey(partnerId, jwkStr);
-              _partnerPublicKeys[partnerId] = pubKey;
-              if (senderId != null && senderId != myUserId) {
-                await HiveService.savePartnerPublicKey(senderId, jwkStr);
-                _partnerPublicKeys[senderId] = pubKey;
+              if (effectivePartnerId != null) {
+                final jwkStr = candidate is String ? candidate : jsonEncode(candidate);
+                await HiveService.savePartnerPublicKey(effectivePartnerId, jwkStr);
+                _partnerPublicKeys[effectivePartnerId] = pubKey;
               }
               break;
             }
           } catch (_) {}
         }
 
-        // Fallback to _getSharedSecret if candidates failed
-        if (!decryptedSuccessfully) {
+        // Fallback: If still not decrypted and effectivePartnerId is available, fetch latest public key & deviceKeys from API
+        if (!decryptedSuccessfully && effectivePartnerId != null) {
           try {
-            final providedKey = isSender ? msg.recipientPublicKey : msg.senderPublicKey;
-            final secret = await _getSharedSecret(partnerId, providedPublicKeyJwk: providedKey, forceFetch: true);
-            if (secret != null) {
-              final decrypted = await EncryptionHelper.decrypt(msg.text!, secret, iv: msg.iv);
-              if (decrypted != msg.text && decrypted != msg.cipherText) {
-                msg.text = decrypted;
-                msg.isDecrypted = true;
-                decryptedSuccessfully = true;
+            final response = await _chatRepository.getUserPublicKey(effectivePartnerId);
+            if (response['success'] == true) {
+              final data = response['data'] ?? response['user'] ?? response;
+              final apiPubKey = data is Map ? (data['publicKey'] ?? data['key']) : null;
+              final apiDeviceKeys = data is Map ? data['deviceKeys'] : null;
+
+              final List<dynamic> apiCandidates = [];
+              if (apiPubKey != null) apiCandidates.add(apiPubKey);
+              if (apiDeviceKeys is List) {
+                for (var dk in apiDeviceKeys) {
+                  final pk = dk is Map ? (dk['publicKey'] ?? dk['key']) : dk;
+                  if (pk != null) apiCandidates.add(pk);
+                }
+              }
+
+              for (var candidate in apiCandidates) {
+                try {
+                  final pubKey = await EncryptionHelper.importPublicKey(candidate);
+                  final secret = await EncryptionHelper.deriveSharedSecret(_myKeyPair!, pubKey);
+                  final decrypted = await EncryptionHelper.decrypt(msg.text!, secret, iv: msg.iv);
+                  if (decrypted != msg.text && decrypted != msg.cipherText) {
+                    msg.text = decrypted;
+                    msg.isDecrypted = true;
+                    decryptedSuccessfully = true;
+
+                    final jwkStr = candidate is String ? candidate : jsonEncode(candidate);
+                    await HiveService.savePartnerPublicKey(effectivePartnerId, jwkStr);
+                    _partnerPublicKeys[effectivePartnerId] = pubKey;
+                    break;
+                  }
+                } catch (_) {}
               }
             }
           } catch (_) {}
         }
 
-        // Fallback to legacy secrets
-        if (!decryptedSuccessfully) {
+        // Fallback: Legacy shared secret
+        if (!decryptedSuccessfully && effectivePartnerId != null) {
           try {
-            final legacySecret = await _getLegacySharedSecret(partnerId);
+            final legacySecret = await _getLegacySharedSecret(effectivePartnerId);
             if (legacySecret != null) {
               final decrypted = await EncryptionHelper.decrypt(msg.text!, legacySecret, iv: msg.iv);
               if (decrypted != msg.text && decrypted != msg.cipherText) {
@@ -1395,12 +1518,12 @@ class ChatProvider extends ChangeNotifier {
           } catch (_) {}
         }
 
-        // Fallback to hashed secret
-        if (!decryptedSuccessfully) {
+        // Fallback: Hashed secret
+        if (!decryptedSuccessfully && effectivePartnerId != null) {
           try {
-            PublicKey? pubKey = _partnerPublicKeys[partnerId];
+            PublicKey? pubKey = _partnerPublicKeys[effectivePartnerId];
             if (pubKey == null) {
-              final partnerJwk = HiveService.getPartnerPublicKey(partnerId);
+              final partnerJwk = HiveService.getPartnerPublicKey(effectivePartnerId);
               if (partnerJwk != null) {
                 pubKey = await EncryptionHelper.importPublicKey(partnerJwk);
               }
@@ -1418,7 +1541,7 @@ class ChatProvider extends ChangeNotifier {
         }
 
         if (!decryptedSuccessfully) {
-          debugPrint('E2EE WARNING: All candidate decryption attempts failed for message ${msg.sId}');
+          debugPrint('E2EE WARNING: All decryption attempts failed for message ${msg.sId}');
         }
       }
     }
@@ -1499,9 +1622,11 @@ class ChatProvider extends ChangeNotifier {
 
       final actualReplyTo = replyTo ?? _replyingToMessage?.sId;
 
-      final myPublicKeyJwk = HiveService.getPublicKey();
-      final myDeviceId = HiveService.getDeviceId() ?? 'unknown_device';
       final myUserId = HiveService.userId ?? 'unknown_user';
+      final myPublicKeyJwk = _myKeyPair != null
+          ? await EncryptionHelper.exportPublicKey(_myKeyPair!)
+          : HiveService.getPublicKey(userId: myUserId);
+      final myDeviceId = HiveService.getDeviceId() ?? 'unknown_device';
       final partnerPublicKeyJwk = partnerId != null ? HiveService.getPartnerPublicKey(partnerId) : null;
 
       final Map<String, dynamic> data = {

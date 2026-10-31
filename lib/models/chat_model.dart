@@ -68,6 +68,8 @@ class PartnerModel {
   bool? isOnline;
   String? lastSeen;
   dynamic publicKey;
+  List<dynamic>? deviceKeys;
+  Map<String, dynamic>? e2eeIdentity;
   String? id;
 
   PartnerModel({
@@ -82,6 +84,8 @@ class PartnerModel {
     this.isOnline,
     this.lastSeen,
     this.publicKey,
+    this.deviceKeys,
+    this.e2eeIdentity,
     this.id,
   });
 
@@ -106,6 +110,13 @@ class PartnerModel {
     isOnline = json['isOnline'];
     lastSeen = json['lastSeen'];
     publicKey = json['publicKey'];
+    if (json['e2eeIdentity'] != null && json['e2eeIdentity'] is Map) {
+      e2eeIdentity = Map<String, dynamic>.from(json['e2eeIdentity']);
+      publicKey ??= e2eeIdentity!['publicKey'];
+    }
+    if (json['deviceKeys'] != null && json['deviceKeys'] is List) {
+      deviceKeys = List<dynamic>.from(json['deviceKeys']);
+    }
     id = json['id'];
   }
 }
@@ -351,9 +362,20 @@ class Sender {
   String? profileImage;
   String? username;
   dynamic publicKey;
+  List<dynamic>? deviceKeys;
+  Map<String, dynamic>? e2eeIdentity;
   String? id;
 
-  Sender({this.sId, this.name, this.profileImage, this.username, this.id});
+  Sender({
+    this.sId,
+    this.name,
+    this.profileImage,
+    this.username,
+    this.publicKey,
+    this.deviceKeys,
+    this.e2eeIdentity,
+    this.id,
+  });
 
   Sender.fromJson(Map<String, dynamic> json) {
     sId = json['_id'];
@@ -370,6 +392,13 @@ class Sender {
     profileImage = fixUrl(json['profileImage']);
     username = json['username'];
     publicKey = json['publicKey'];
+    if (json['e2eeIdentity'] != null && json['e2eeIdentity'] is Map) {
+      e2eeIdentity = Map<String, dynamic>.from(json['e2eeIdentity']);
+      publicKey ??= e2eeIdentity!['publicKey'];
+    }
+    if (json['deviceKeys'] != null && json['deviceKeys'] is List) {
+      deviceKeys = List<dynamic>.from(json['deviceKeys']);
+    }
     id = json['id'];
   }
 }

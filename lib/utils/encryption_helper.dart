@@ -408,6 +408,59 @@ class EncryptionHelper {
     );
   }
 
+  /// Derive matching public key JWK string directly from a private key JWK string or map
+  static String? derivePublicKeyJwk(dynamic privateKeyJwk) {
+    try {
+      Map<String, dynamic> jwk;
+      if (privateKeyJwk is String) {
+        jwk = jsonDecode(privateKeyJwk);
+      } else if (privateKeyJwk is Map) {
+        jwk = Map<String, dynamic>.from(privateKeyJwk);
+      } else {
+        return null;
+      }
+
+      final x = jwk['x'];
+      final y = jwk['y'];
+      if (x == null || y == null) return null;
+
+      return jsonEncode({
+        'crv': jwk['crv'] ?? 'P-256',
+        'ext': true,
+        'key_ops': [],
+        'kty': jwk['kty'] ?? 'EC',
+        'x': x,
+        'y': y,
+      });
+    } catch (e) {
+      debugPrint('EncryptionHelper: Error deriving public key from private JWK: $e');
+      return null;
+    }
+  }
+
+  /// Load KeyPair directly from decrypted private key JWK
+  static Future<KeyPair> loadKeyPairFromPrivateJwk(String privateKeyJwk) async {
+    final Map<String, dynamic> jwk = jsonDecode(privateKeyJwk);
+    final String? dStr = jwk['d'];
+    final String? xStr = jwk['x'];
+    final String? yStr = jwk['y'];
+
+    if (dStr == null || xStr == null || yStr == null) {
+      throw ArgumentError('Invalid P-256 private key JWK: missing d, x, or y coordinates');
+    }
+
+    final dBytes = _normalizeBytes(base64Url.decode(padBase64(dStr)), 32);
+    final xBytes = _normalizeBytes(base64Url.decode(padBase64(xStr)), 32);
+    final yBytes = _normalizeBytes(base64Url.decode(padBase64(yStr)), 32);
+
+    return EcKeyPairData(
+      d: dBytes,
+      x: xBytes,
+      y: yBytes,
+      type: KeyPairType.p256,
+    );
+  }
+
   static bool _isBase64(String str) {
     return _decodeBase64OrUrl(str) != null;
   }

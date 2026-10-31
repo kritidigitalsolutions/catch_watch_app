@@ -84,7 +84,9 @@ class HiveService {
     await _historyBox.clear();
     await _likesBox.clear();
     await _statsBox.clear();
-    // Note: E2EE keys in _keysBox are kept user-scoped to preserve encrypted history on re-login
+    await _keysBox.delete('privateKey');
+    await _keysBox.delete('publicKey');
+    // Note: E2EE keys in _keysBox are kept user-scoped ('privateKey_$uid') to preserve encrypted history on re-login
   }
 
 
@@ -117,6 +119,7 @@ class HiveService {
     if (uid != null && uid.isNotEmpty) {
       final bytes = _keysBox.get('privateKey_$uid');
       if (bytes != null) return List<int>.from(bytes);
+      return null;
     }
     final fallback = _keysBox.get('privateKey');
     return fallback != null ? List<int>.from(fallback) : null;
@@ -135,6 +138,7 @@ class HiveService {
     if (uid != null && uid.isNotEmpty) {
       final jwk = _keysBox.get('publicKey_$uid');
       if (jwk != null) return jwk as String;
+      return null;
     }
     return _keysBox.get('publicKey') as String?;
   }
