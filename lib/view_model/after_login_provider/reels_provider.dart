@@ -424,6 +424,12 @@ class ReelsProvider extends ChangeNotifier {
   }
 
   Future<void> toggleFollow(String userId, {ReelModel? reel}) async {
+    final currentUserId = HiveService.userId ?? HiveService.getUser()?.sId;
+    if (currentUserId != null && currentUserId == userId) {
+      debugPrint('Cannot follow yourself!');
+      return;
+    }
+
     final bool wasFollowing = _followingIds.contains(userId);
 
     _updateLocalFollowState(userId, !wasFollowing, reel: reel);

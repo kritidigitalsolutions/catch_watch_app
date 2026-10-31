@@ -4,8 +4,9 @@ import 'package:catch_watch/models/user_model.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/user_search_provider.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
+import 'package:catch_watch/utils/profile_navigation_helper.dart' as utils;
 import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
-import 'package:catch_watch/views/after_login_pages/profile_page/user_profile_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../res/app_colors.dart';
@@ -252,16 +253,7 @@ class _SearchScreenState extends State<SearchScreen> {
         style: text13(color: AppColors.textSecondary),
       ),
       trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: AppColors.grey400),
-      onTap: () {
-        if (user.username != null) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => UserProfileScreen(username: user.username!.replaceAll('@', '')),
-            ),
-          );
-        }
-      },
+      onTap: () => utils.navigateToProfile(context, userId: user.id, username: user.username),
     );
   }
 

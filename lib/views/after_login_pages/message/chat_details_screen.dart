@@ -2,6 +2,7 @@ import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
 import 'package:catch_watch/views/after_login_pages/message/media_preview_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:catch_watch/utils/profile_navigation_helper.dart' as utils;
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/text_style.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/user_profile_screen.dart';
@@ -35,12 +36,7 @@ class ChatDetailsScreen extends StatelessWidget {
             icon: const Icon(Icons.more_vert),
             onSelected: (value) {
               if (value == 'profile') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => UserProfileScreen(username: username),
-                  ),
-                );
+                utils.navigateToProfile(context, userId: partnerId, username: username);
               }
             },
             itemBuilder: (context) => [
@@ -60,14 +56,7 @@ class ChatDetailsScreen extends StatelessWidget {
             // Profile Image in Center
             Center(
               child: GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => UserProfileScreen(username: username),
-                    ),
-                  );
-                },
+                onTap: () => utils.navigateToProfile(context, userId: partnerId, username: username),
                 child: Column(
                   children: [
                     CircleAvatar(

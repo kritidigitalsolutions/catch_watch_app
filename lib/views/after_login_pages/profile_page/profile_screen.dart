@@ -125,10 +125,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
           AnimatedPositioned(
             duration: const Duration(milliseconds: 250),
             curve: Curves.easeInOut,
-            top: _isCollapsed ? 0 : -80, // slide in from top
+            top: _isCollapsed ? 0 : -100, // slide in from top
             left: 0,
             right: 0,
-            child: _CollapsedBar(provider: provider),
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 200),
+              opacity: _isCollapsed ? 1.0 : 0.0,
+              child: IgnorePointer(
+                ignoring: !_isCollapsed,
+                child: _CollapsedBar(provider: provider),
+              ),
+            ),
           ),
         ],
       ),
@@ -372,6 +379,15 @@ class _ExpandedHeader extends StatelessWidget {
               ],
             ),
           ),
+          if (Navigator.canPop(context))
+            Positioned(
+              top: topPadding + 8,
+              left: 14,
+              child: _glassIconButton(
+                Icons.arrow_back_rounded,
+                () => Navigator.pop(context),
+              ),
+            ),
           Positioned(
             top: topPadding + 8,
             right: 14,
@@ -471,6 +487,13 @@ class _CollapsedBar extends StatelessWidget {
       ),
       child: Row(
         children: [
+          if (Navigator.canPop(context)) ...[
+            GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
+            ),
+            const SizedBox(width: 10),
+          ],
           // Small avatar
           Container(
             decoration: BoxDecoration(

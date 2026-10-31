@@ -289,6 +289,12 @@ class ProfileProvider extends ChangeNotifier {
   }
 
   Future<void> toggleFollow(String userId) async {
+    final currentUserId = HiveService.userId ?? HiveService.getUser()?.sId;
+    if (currentUserId != null && currentUserId == userId) {
+      debugPrint('Cannot follow yourself!');
+      return;
+    }
+
     final bool wasFollowing = _followingIds.contains(userId);
     
     // Update locally first

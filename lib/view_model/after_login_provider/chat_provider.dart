@@ -5,6 +5,7 @@ import 'package:catch_watch/data/network/notification_service.dart';
 import 'package:catch_watch/data/network/socket_service.dart';
 import 'package:catch_watch/models/chat_model.dart';
 import 'package:catch_watch/repository/chat_repository.dart';
+import 'package:catch_watch/res/appUrl.dart';
 import 'package:catch_watch/utils/encryption_helper.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:cryptography/cryptography.dart';
@@ -1271,6 +1272,10 @@ class ChatProvider extends ChangeNotifier {
         'text': encryptedText ?? text ?? '', 
       };
 
+      if (mediaUrl != null && mediaUrl.isNotEmpty) {
+        data['mediaUrl'] = mediaUrl;
+      }
+
       if (isEncrypted && encryptedText != null && iv != null) {
         data['encryption'] = {
           'version': 2,
@@ -1304,6 +1309,10 @@ class ChatProvider extends ChangeNotifier {
         // This prevents the "blink" caused by fetchMessages(conversationId)
         final sentMessage = MessageModel.fromJson(response['data']);
         
+        if (sentMessage.mediaUrl == null || sentMessage.mediaUrl!.isEmpty) {
+          sentMessage.mediaUrl = mediaUrl;
+        }
+
         // Decrypt for local display (it should be the plain text anyway, but good to be consistent)
         if (sentMessage.messageType == 'text') {
            sentMessage.text = text;
@@ -1575,23 +1584,51 @@ class ChatProvider extends ChangeNotifier {
   }
 
   Future<String?> uploadAttachment(File file) async {
-    try {
-      final formData = dio.FormData.fromMap({
-        'attachment': await dio.MultipartFile.fromFile(
-          file.path,
-          filename: file.path.split('/').last,
-        ),
-      });
+    final filename = file.path.split('/').last;
+    final candidateFields = ['attachment', 'file', 'media', 'image'];
 
-      final response = await _chatRepository.uploadAttachment(formData);
-      if (response['success'] == true) {
-        return response['mediaUrl'] ?? response['url'] ?? response['data']?['mediaUrl'] ?? response['data']?['url'];
+    String fixUrl(String rawUrl) {
+      if (rawUrl.startsWith('http')) {
+        return rawUrl.replaceAll('http://localhost:5000', AppUrl.serverUrl);
       }
-      return null;
-    } catch (e) {
-      debugPrint('Error uploading attachment: $e');
-      return null;
+      if (rawUrl.startsWith('/')) {
+        return '${AppUrl.serverUrl}$rawUrl';
+      }
+      return '${AppUrl.serverUrl}/$rawUrl';
     }
+
+    for (final fieldName in candidateFields) {
+      try {
+        final formData = dio.FormData.fromMap({
+          fieldName: await dio.MultipartFile.fromFile(file.path, filename: filename),
+        });
+
+        debugPrint('Attempting attachment upload with field name: $fieldName');
+        final response = await _chatRepository.uploadAttachment(formData);
+        debugPrint('Upload attachment response ($fieldName): $response');
+
+        if (response != null) {
+          if (response is Map) {
+            final url = response['mediaUrl'] ??
+                response['url'] ??
+                response['fileUrl'] ??
+                response['data']?['mediaUrl'] ??
+                response['data']?['url'] ??
+                response['data']?['fileUrl'] ??
+                response['data']?['path'] ??
+                response['path'];
+            if (url != null && url.toString().isNotEmpty) {
+              return fixUrl(url.toString());
+            }
+          } else if (response is String && response.isNotEmpty) {
+            return fixUrl(response);
+          }
+        }
+      } catch (e) {
+        debugPrint('Error uploading attachment with field $fieldName: $e');
+      }
+    }
+    return null;
   }
 
   Future<void> fetchUserStatus(String userId) async {

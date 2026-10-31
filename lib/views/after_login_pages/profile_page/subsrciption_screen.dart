@@ -291,7 +291,12 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          Text(planName, style: text18(fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
+          Text(
+            planName,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: text18(fontWeight: FontWeight.w900, color: AppColors.textPrimary),
+          ),
           const SizedBox(height: 4),
           Text('Expires in ${provider.remainingDays ?? 0} days',
               style: text13(color: AppColors.textSecondary)),
@@ -358,29 +363,44 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 child: Row(
                   children: [
-                    Text(plan.name ?? '',
-                        style: text16(
-                          color: AppColors.textPrimary,
-                          fontWeight: FontWeight.w800,
-                        )),
-                    if (plan.isRecommended == true) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text('RECOMMENDED',
-                            style: text10(color: Colors.white, fontWeight: FontWeight.w800)),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            plan.name ?? '',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: text16(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          if (plan.isRecommended == true) ...[
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                'RECOMMENDED',
+                                style: text10(color: Colors.white, fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
-                    ],
-                    const Spacer(),
-                    Text('₹ ${plan.price}',
-                        style: text16(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w900,
-                        )),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '₹ ${plan.price}',
+                      style: text16(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     AnimatedRotation(
                       turns: isOpen ? 0.5 : 0,

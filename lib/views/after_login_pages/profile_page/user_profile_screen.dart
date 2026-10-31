@@ -7,6 +7,8 @@ import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
 import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/followers_following_screen.dart';
 import 'package:catch_watch/views/after_login_pages/message/chat_screen.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/edit_profile_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -230,6 +232,8 @@ class _ExpandedHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final topPadding = MediaQuery.of(context).padding.top;
     final user = provider.user!;
+    final currentUserId = HiveService.userId ?? HiveService.getUser()?.sId;
+    final bool isSelf = currentUserId != null && (user.id == currentUserId);
 
     return Container(
       padding: EdgeInsets.only(top: topPadding + 12, bottom: 28),
@@ -272,28 +276,28 @@ class _ExpandedHeader extends StatelessWidget {
             ),
           ),
 
-          // // ── Back button top-left ──
-          // Positioned(
-          //   top: 0,
-          //   left: 16,
-          //   child: Container(
-          //     decoration: BoxDecoration(
-          //       color: Colors.white.withOpacity(0.15),
-          //       borderRadius: BorderRadius.circular(12),
-          //     ),
-          //     child: IconButton(
-          //       icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-          //       onPressed: () => Navigator.pop(context),
-          //     ),
-          //   ),
-          // ),
+          if (Navigator.canPop(context))
+            Positioned(
+              top: 0,
+              left: 16,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
+            ),
 
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 10),
+                SizedBox(height: Navigator.canPop(context) ? 44 : 10),
                 Row(
                   children: [
                     Container(
@@ -346,66 +350,84 @@ class _ExpandedHeader extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Selector<ProfileProvider, bool>(
-                        selector: (_, p) => p.isUserFollowed(user.id!),
-                        builder: (context, isFollowing, _) {
-                          return _actionButton(
+                if (isSelf)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _actionButton(
+                          context,
+                          'Edit Profile',
+                          Colors.white.withOpacity(0.2),
+                          Colors.white,
+                          () => Navigator.push(
                             context,
-                            isFollowing ? 'Following' : 'Follow',
-                            isFollowing ? Colors.white.withOpacity(0.2) : Colors.white,
-                            isFollowing ? Colors.white : const Color(0xFFFF5F00),
-                            () {
-                              provider.toggleFollow(
-                                user.id!,
-                                onSuccess: () {
-                                  final actualFollowing = provider.user?.isFollowing ?? false;
-                                  context.read<ReelsProvider>().updateFollowStatus(
-                                    user.id!,
-                                    actualFollowing,
-                                  );
-                                  context.read<ProfileProvider>().syncFollowStatus(
-                                    user.id!,
-                                    actualFollowing,
-                                  );
-                                },
-                              );
-                            },
-                          );
-                        },
+                            MaterialPageRoute(builder: (_) => const EditProfileScreen()),
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _actionButton(
-                        context,
-                        'Message',
-                        Colors.white.withOpacity(0.15),
-                        Colors.white,
-                        () async {
-                          final chatProvider = context.read<ChatProvider>();
-                          final convId = await chatProvider.createConversation(user.id!);
-                          if (convId != null && context.mounted) {
-                            Navigator.push(
+                    ],
+                  )
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Selector<ProfileProvider, bool>(
+                          selector: (_, p) => p.isUserFollowed(user.id!),
+                          builder: (context, isFollowing, _) {
+                            return _actionButton(
                               context,
-                              MaterialPageRoute(
-                                builder: (context) => ChatScreen(
-                                  conversationId: convId,
-                                  partnerId: user.id!,
-                                  name: user.name ?? '',
-                                  username: user.username ?? '',
-                                  image: user.profileImage ?? '',
-                                ),
-                              ),
+                              isFollowing ? 'Following' : 'Follow',
+                              isFollowing ? Colors.white.withOpacity(0.2) : Colors.white,
+                              isFollowing ? Colors.white : const Color(0xFFFF5F00),
+                              () {
+                                provider.toggleFollow(
+                                  user.id!,
+                                  onSuccess: () {
+                                    final actualFollowing = provider.user?.isFollowing ?? false;
+                                    context.read<ReelsProvider>().updateFollowStatus(
+                                      user.id!,
+                                      actualFollowing,
+                                    );
+                                    context.read<ProfileProvider>().syncFollowStatus(
+                                      user.id!,
+                                      actualFollowing,
+                                    );
+                                  },
+                                );
+                              },
                             );
-                          }
-                        }, // Message action
+                          },
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _actionButton(
+                          context,
+                          'Message',
+                          Colors.white.withOpacity(0.15),
+                          Colors.white,
+                          () async {
+                            final chatProvider = context.read<ChatProvider>();
+                            final convId = await chatProvider.createConversation(user.id!);
+                            if (convId != null && context.mounted) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ChatScreen(
+                                    conversationId: convId,
+                                    partnerId: user.id!,
+                                    name: user.name ?? '',
+                                    username: user.username ?? '',
+                                    image: user.profileImage ?? '',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
                 const SizedBox(height: 28),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -500,6 +522,8 @@ class _CollapsedBar extends StatelessWidget {
     if (provider.user == null) return const SizedBox.shrink();
     
     final user = provider.user!;
+    final currentUserId = HiveService.userId ?? HiveService.getUser()?.sId;
+    final bool isSelf = currentUserId != null && (user.id == currentUserId);
 
     return Container(
       padding: EdgeInsets.only(top: topPadding + 8, bottom: 10, left: 16, right: 16),
@@ -514,10 +538,13 @@ class _CollapsedBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // IconButton(
-          //   icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-          //   onPressed: () => Navigator.pop(context),
-          // ),
+          if (Navigator.canPop(context)) ...[
+            IconButton(
+              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+              onPressed: () => Navigator.pop(context),
+            ),
+            const SizedBox(width: 4),
+          ],
           Container(
             decoration: BoxDecoration(
               shape: BoxShape.circle,
@@ -560,47 +587,48 @@ class _CollapsedBar extends StatelessWidget {
               ],
             ),
           ),
-          Selector<ProfileProvider, bool>(
-            selector: (_, p) => p.isUserFollowed(user.id!),
-            builder: (context, isFollowing, _) {
-              return Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white.withOpacity(0.2)),
-                ),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () {
-                      provider.toggleFollow(
-                        user.id!,
-                        onSuccess: () {
-                          final actualFollowing = provider.user?.isFollowing ?? false;
-                          context.read<ReelsProvider>().updateFollowStatus(
-                            user.id!,
-                            actualFollowing,
-                          );
-                          context.read<ProfileProvider>().syncFollowStatus(
-                            user.id!,
-                            actualFollowing,
-                          );
-                        },
-                      );
-                    },
+          if (!isSelf)
+            Selector<ProfileProvider, bool>(
+              selector: (_, p) => p.isUserFollowed(user.id!),
+              builder: (context, isFollowing, _) {
+                return Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(20),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      child: Text(
-                        isFollowing ? 'Following' : 'Follow',
-                        style: text11(color: Colors.white, fontWeight: FontWeight.w700),
+                    border: Border.all(color: Colors.white.withOpacity(0.2)),
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () {
+                        provider.toggleFollow(
+                          user.id!,
+                          onSuccess: () {
+                            final actualFollowing = provider.user?.isFollowing ?? false;
+                            context.read<ReelsProvider>().updateFollowStatus(
+                              user.id!,
+                              actualFollowing,
+                            );
+                            context.read<ProfileProvider>().syncFollowStatus(
+                              user.id!,
+                              actualFollowing,
+                            );
+                          },
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(20),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        child: Text(
+                          isFollowing ? 'Following' : 'Follow',
+                          style: text11(color: Colors.white, fontWeight: FontWeight.w700),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              );
-            },
-          ),
+                );
+              },
+            ),
         ],
       ),
     );

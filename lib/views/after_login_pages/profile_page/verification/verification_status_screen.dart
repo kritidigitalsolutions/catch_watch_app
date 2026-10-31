@@ -158,7 +158,16 @@ class VerificationStatusScreen extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: text14(color: AppColors.grey600)),
-          Text(value, style: text14(fontWeight: FontWeight.bold)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: text14(fontWeight: FontWeight.bold),
+            ),
+          ),
         ],
       ),
     );

@@ -3,6 +3,7 @@ import 'package:catch_watch/models/user_model.dart';
 import 'package:catch_watch/repository/auth_repository.dart';
 import 'package:catch_watch/repository/reels_repository.dart';
 import 'package:catch_watch/repository/interaction_repository.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/res/appUrl.dart';
 import 'package:catch_watch/data/network/api_network_service.dart';
 import 'package:catch_watch/data/network/base_api_service.dart';
@@ -120,6 +121,12 @@ class UserProfileProvider extends ChangeNotifier {
   }
 
   Future<void> toggleFollow(String userId, {VoidCallback? onSuccess}) async {
+    final currentUserId = HiveService.userId ?? HiveService.getUser()?.sId;
+    if (currentUserId != null && currentUserId == userId) {
+      debugPrint('Cannot follow yourself!');
+      return;
+    }
+
     final bool wasFollowing = _user?.isFollowing ?? false;
     
     // Optimistic update

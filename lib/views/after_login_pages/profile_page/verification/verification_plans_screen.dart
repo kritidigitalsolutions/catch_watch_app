@@ -250,6 +250,8 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
               children: [
                 Text(
                   plan.name?.toUpperCase() ?? 'VERIFIED USER',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: text12(color: AppColors.primary, fontWeight: FontWeight.w900),
                 ),
                 const SizedBox(height: 12),

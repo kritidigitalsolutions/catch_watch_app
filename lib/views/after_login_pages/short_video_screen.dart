@@ -4,6 +4,7 @@ import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/share_helper.dart';
 import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/profile_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/user_profile_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
 import '../../utils/hive_service/hive_service.dart';
+import '../../utils/profile_navigation_helper.dart' as utils;
 import '../../res/appUrl.dart' show AppUrl;
 import '../../utils/text_style.dart';
 import '../../view_model/after_login_provider/profile_provider.dart';
@@ -166,6 +168,9 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
                             final bool isAuthor = currentUserId != null && commentAuthorId == currentUserId;
                             final bool isPinned = comment['isPinned'] ?? false;
 
+                            final String? commentUsername = user is Map ? user['username']?.toString() : null;
+                            final String? commentName = user is Map ? user['name']?.toString() : null;
+
                             return GestureDetector(
                               behavior: HitTestBehavior.opaque,
                               onLongPress: (isOwner || isAuthor) ? () {
@@ -177,16 +182,19 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    CircleAvatar(
-                                      radius: 16,
-                                      backgroundImage: user?['profileImage'] != null && user['profileImage'].toString().isNotEmpty
-                                          ? NetworkImage(user['profileImage'].toString().startsWith('http') 
-                                              ? user['profileImage'] 
-                                              : '${AppUrl.serverUrl}/${user['profileImage']}')
-                                          : null,
-                                      child: user?['profileImage'] == null || user!['profileImage'].toString().isEmpty
-                                          ? Text(user?['name']?[0] ?? '?')
-                                          : null,
+                                    GestureDetector(
+                                      onTap: () => utils.navigateToProfile(context, userId: commentAuthorId, username: commentUsername, name: commentName),
+                                      child: CircleAvatar(
+                                        radius: 16,
+                                        backgroundImage: user?['profileImage'] != null && user['profileImage'].toString().isNotEmpty
+                                            ? NetworkImage(user['profileImage'].toString().startsWith('http') 
+                                                ? user['profileImage'] 
+                                                : '${AppUrl.serverUrl}/${user['profileImage']}')
+                                            : null,
+                                        child: user?['profileImage'] == null || user!['profileImage'].toString().isEmpty
+                                            ? Text(user?['name']?[0] ?? '?')
+                                            : null,
+                                      ),
                                     ),
                                     const SizedBox(width: 12),
                                     Expanded(
@@ -195,9 +203,12 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
                                         children: [
                                           Row(
                                             children: [
-                                              Text(
-                                                user?['username'] ?? 'User',
-                                                style: text12(color: Colors.white70, fontWeight: FontWeight.bold),
+                                              GestureDetector(
+                                                onTap: () => utils.navigateToProfile(context, userId: commentAuthorId, username: commentUsername, name: commentName),
+                                                child: Text(
+                                                  user?['username'] ?? 'User',
+                                                  style: text12(color: Colors.white70, fontWeight: FontWeight.bold),
+                                                ),
                                               ),
                                               if (isPinned) ...[
                                                 const SizedBox(width: 8),
@@ -1011,9 +1022,27 @@ class _ShortInfo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final reelsProvider = context.read<ReelsProvider>();
-    final currentUser = HiveService.getUser();
     final bool isAd = reel.isAd == true;
-    final bool isSelf = !isAd && currentUser?.sId == reel.user?.id;
+    final bool isSelf = !isAd && utils.isSelfUser(
+      userId: reel.user?.id,
+      username: reel.user?.username,
+      name: reel.user?.name,
+    );
+
+    void navigateToProfile() {
+      utils.navigateToProfile(
+        context,
+        userId: reel.user?.id,
+        username: reel.user?.username,
+        name: reel.user?.name,
+      );
+    }
+
+    final String displayUsername = (reel.user?.username != null && reel.user!.username!.isNotEmpty)
+        ? (reel.user!.username!.startsWith('@') ? reel.user!.username! : '@${reel.user!.username}')
+        : (reel.user?.name != null && reel.user!.name!.isNotEmpty
+            ? reel.user!.name!
+            : '@unknown');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1043,16 +1072,7 @@ class _ShortInfo extends StatelessWidget {
           Row(
             children: [
               GestureDetector(
-                onTap: () {
-                  if (reel.user?.username != null) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => UserProfileScreen(username: reel.user!.username!),
-                      ),
-                    );
-                  }
-                },
+                onTap: navigateToProfile,
                 child: CircleAvatar(
                   radius: 20,
                   backgroundImage: reel.user?.profileImage != null && reel.user!.profileImage!.isNotEmpty
@@ -1070,18 +1090,9 @@ class _ShortInfo extends StatelessWidget {
               const SizedBox(width: 8),
               Flexible(
                 child: GestureDetector(
-                  onTap: () {
-                    if (reel.user?.username != null) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => UserProfileScreen(username: reel.user!.username!),
-                        ),
-                      );
-                    }
-                  },
+                  onTap: navigateToProfile,
                   child: Text(
-                    reel.user?.username ?? '@unknown',
+                    displayUsername,
                     overflow: TextOverflow.ellipsis,
                     style: text14(color: Colors.white, fontWeight: FontWeight.w800),
                   ),

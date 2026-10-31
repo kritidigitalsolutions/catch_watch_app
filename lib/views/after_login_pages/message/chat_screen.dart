@@ -99,16 +99,46 @@ class _ChatScreenState extends State<ChatScreen> {
     if (pickedFile != null && mounted) {
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
       
-      // Show simple loading overlay or toast if needed
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+              SizedBox(width: 12),
+              Text('Uploading photo...'),
+            ],
+          ),
+          duration: Duration(seconds: 15),
+        ),
+      );
+
       final mediaUrl = await chatProvider.uploadAttachment(File(pickedFile.path));
       
-      if (mediaUrl != null) {
-        await chatProvider.sendMessage(
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      }
+
+      if (mediaUrl != null && mounted) {
+        final success = await chatProvider.sendMessage(
           conversationId: widget.conversationId,
           messageType: 'image',
           mediaUrl: mediaUrl,
         );
-        _scrollToBottom();
+        if (success) {
+          _scrollToBottom();
+        } else if (mounted && chatProvider.error != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(chatProvider.error!)),
+          );
+        }
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to upload photo. Please try again.')),
+        );
       }
     }
   }

@@ -211,7 +211,19 @@ class MessageModel {
     
     messageType = json['messageType'];
     text = json['text'];
-    mediaUrl = json['mediaUrl'];
+
+    String? fixMediaUrl(String? url) {
+      if (url == null || url.isEmpty || url == 'null') return null;
+      if (url.startsWith('http')) {
+        return url.replaceAll('http://localhost:5000', AppUrl.serverUrl);
+      }
+      if (url.startsWith('/')) {
+        return '${AppUrl.serverUrl}$url';
+      }
+      return '${AppUrl.serverUrl}/$url';
+    }
+
+    mediaUrl = fixMediaUrl(json['mediaUrl'] ?? json['attachment'] ?? json['file'] ?? json['url']);
     
     if (json['replyTo'] != null) {
       if (json['replyTo'] is Map) {
