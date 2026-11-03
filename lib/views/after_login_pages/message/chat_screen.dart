@@ -189,11 +189,23 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       } catch (e) {
         debugPrint("Error in pickImage ($source): $e");
+        if (source == ImageSource.gallery) {
+          debugPrint("Attempting fallback pickMedia()...");
+          try {
+            pickedFile = await picker.pickMedia(
+              maxWidth: 1920,
+              maxHeight: 1920,
+              imageQuality: 70,
+            );
+          } catch (e2) {
+            debugPrint("Error in fallback pickMedia: $e2");
+          }
+        }
       }
 
       // Check for lost data if pickedFile is null (Android activity recreation recovery)
       if (pickedFile == null && Platform.isAndroid) {
-        debugPrint("pickImage returned null, checking retrieveLostData()...");
+        debugPrint("Checking retrieveLostData()...");
         try {
           final LostDataResponse response = await picker.retrieveLostData();
           if (response.file != null) {
@@ -202,29 +214,6 @@ class _ChatScreenState extends State<ChatScreen> {
           }
         } catch (e) {
           debugPrint("Error in retrieveLostData: $e");
-        }
-      }
-
-      // Fallback for gallery if pickImage returned null
-      if (pickedFile == null && source == ImageSource.gallery) {
-        debugPrint("pickImage returned null, attempting fallback pickMedia()...");
-        try {
-          pickedFile = await picker.pickMedia(
-            maxWidth: 1920,
-            maxHeight: 1920,
-            imageQuality: 70,
-          );
-        } catch (e) {
-          debugPrint("Error in fallback pickMedia: $e");
-        }
-        if (pickedFile == null && Platform.isAndroid) {
-          try {
-            final LostDataResponse response = await picker.retrieveLostData();
-            if (response.file != null) {
-              pickedFile = response.file;
-              debugPrint("Recovered lost file from pickMedia retrieveLostData: ${pickedFile?.path}");
-            }
-          } catch (_) {}
         }
       }
 
@@ -285,7 +274,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _handleCall(bool isVideo) {
     final callProvider = Provider.of<CallProvider>(context, listen: false);
     callProvider.startCall(
-      widget.partnerId, 
+      widget.partnerId,
       isVideo ? 'video' : 'audio',
       partnerName: widget.name,
       partnerImage: widget.image,
@@ -308,18 +297,18 @@ class _ChatScreenState extends State<ChatScreen> {
   void _scrollToOriginalMessage(String replyToId) {
     final chatProvider = Provider.of<ChatProvider>(context, listen: false);
     final index = chatProvider.messages.indexWhere((m) => m.sId == replyToId);
-    
+
     if (index != -1 && _itemScrollController.isAttached) {
       _itemScrollController.scrollTo(
         index: index,
         duration: const Duration(milliseconds: 500),
         curve: Curves.easeInOut,
       );
-      
+
       setState(() {
         _highlightedMessageId = replyToId;
       });
-      
+
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
           setState(() {
@@ -336,25 +325,25 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _scrollToSearchMessage(int index) {
     if (index < 0 || index >= _searchResults.length) return;
-    
+
     final messageId = _searchResults[index].sId;
     final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-    
+
     // Find index in current messages list
     final listIndex = chatProvider.messages.indexWhere((m) => m.sId == messageId);
-    
+
     if (listIndex != -1 && _itemScrollController.isAttached) {
       _itemScrollController.scrollTo(
         index: listIndex,
         duration: const Duration(milliseconds: 500),
         curve: Curves.easeInOut,
       );
-      
+
       setState(() {
         _searchIndex = index;
         _highlightedMessageId = messageId;
       });
-      
+
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
           setState(() {

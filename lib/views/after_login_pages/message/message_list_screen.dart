@@ -1,5 +1,6 @@
 import 'package:catch_watch/models/chat_model.dart';
 import 'package:catch_watch/models/user_model.dart';
+import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
 import 'package:catch_watch/views/after_login_pages/message/call_history_screen.dart';
 import 'package:catch_watch/view_model/after_login_provider/profile_provider.dart';
@@ -17,15 +18,46 @@ class MessageListScreen extends StatefulWidget {
   State<MessageListScreen> createState() => _MessageListScreenState();
 }
 
-class _MessageListScreenState extends State<MessageListScreen> {
+class _MessageListScreenState extends State<MessageListScreen> with WidgetsBindingObserver {
   final TextEditingController _inboxSearchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<ChatProvider>(context, listen: false).fetchConversations();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _inboxSearchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+      chatProvider.initSocket();
+      chatProvider.fetchConversationsSilently();
+    }
+  }
+
+  int _getUnreadCount(ConversationModel chat) {
+    final count = chat.unreadCount ?? 0;
+    if (count > 0) return count;
+
+    final myUserId = HiveService.userId;
+    final lastSenderId = chat.lastMessage?.sender?.sId ?? chat.lastMessage?.sender?.id;
+    final isFromMe = (lastSenderId != null && myUserId != null && lastSenderId == myUserId);
+
+    if (!isFromMe && chat.lastMessage != null && chat.lastMessage!.status != 'READ') {
+      return 1;
+    }
+    return 0;
   }
 
   String _formatTime(String? timeStr) {
@@ -365,7 +397,7 @@ class _MessageListScreenState extends State<MessageListScreen> {
                       itemCount: conversations.length,
                       itemBuilder: (context, index) {
                         final chat = conversations[index];
-                        final unreadCount = chat.unreadCount ?? 0;
+                        final unreadCount = _getUnreadCount(chat);
                         return ListTile(
                           onTap: () {
                             if (unreadCount > 0) {

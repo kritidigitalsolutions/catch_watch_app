@@ -837,6 +837,51 @@ class ChatProvider extends ChangeNotifier {
         // Vibrate for new message in background (slightly longer or pattern)
         Vibration.vibrate(duration: 100);
       }
+
+      // Real-time update for conversation inbox list (_conversations)
+      final myUserId = HiveService.userId;
+      
+      String? senderId = newMessage.sender?.sId ?? newMessage.sender?.id;
+      if (senderId == null && payload is Map) {
+        final rawSender = payload['sender'];
+        if (rawSender is Map) {
+          senderId = rawSender['_id'] ?? rawSender['id'];
+        } else if (rawSender is String) {
+          senderId = rawSender;
+        } else {
+          senderId = payload['senderId'] ?? payload['sender_id'];
+        }
+      }
+
+      if (newMessage.sender == null || (newMessage.sender?.sId == null && newMessage.sender?.id == null)) {
+        if (senderId != null) {
+          newMessage.sender = Sender(sId: senderId, id: senderId);
+        }
+      }
+
+      final bool isFromMe = (senderId != null && myUserId != null && senderId == myUserId);
+
+      final convIndex = _conversations.indexWhere((c) => 
+        c.sId == conversationId || 
+        c.partner?.sId == conversationId || 
+        c.partner?.id == conversationId ||
+        (senderId != null && (c.partner?.sId == senderId || c.partner?.id == senderId))
+      );
+      
+      if (convIndex != -1) {
+        _conversations[convIndex].lastMessage = newMessage;
+        _conversations[convIndex].lastMessageAt = newMessage.createdAt ?? DateTime.now().toIso8601String();
+        
+        if (conversationId != _activeConversationId && !isFromMe) {
+          final currentUnread = _conversations[convIndex].unreadCount ?? 0;
+          _conversations[convIndex].unreadCount = (currentUnread > 0 ? currentUnread : 0) + 1;
+        }
+        _sortConversations();
+      } else {
+        // Conversation does not exist in local list -> fetch from server silently so it appears automatically
+        fetchConversationsSilently();
+      }
+
       notifyListeners();
     } catch (e) {
       debugPrint('Error handling new message socket event: $e');
@@ -1066,6 +1111,50 @@ class ChatProvider extends ChangeNotifier {
     NotificationService.activeChatId = id;
     if (id != null) {
       markAsRead(id);
+    } else {
+      fetchConversationsSilently();
+    }
+  }
+
+  Future<void> fetchConversationsSilently() async {
+    try {
+      final response = await _chatRepository.fetchConversations();
+      _conversations = response;
+
+      for (var conv in _conversations) {
+        final partnerId = conv.partner?.sId ?? conv.partner?.id;
+        if (partnerId != null) {
+          if (conv.partner?.publicKey != null) {
+            try {
+              final newJwk = conv.partner!.publicKey is String ? conv.partner!.publicKey : jsonEncode(conv.partner!.publicKey);
+              final oldJwk = HiveService.getPartnerPublicKey(partnerId);
+              
+              if (newJwk != oldJwk) {
+                await HiveService.savePartnerPublicKey(partnerId, newJwk);
+                _partnerPublicKeys.remove(partnerId);
+                _sharedSecrets.remove(partnerId);
+                _legacySharedSecrets.remove(partnerId);
+              }
+
+              if (!_partnerPublicKeys.containsKey(partnerId)) {
+                final partnerPublicKey = await EncryptionHelper.importPublicKey(conv.partner!.publicKey);
+                _partnerPublicKeys[partnerId] = partnerPublicKey;
+              }
+            } catch (e) {
+              debugPrint('E2EE Error caching key for $partnerId: $e');
+            }
+          }
+
+          if (conv.lastMessage != null) {
+            await _decryptMessagesList([conv.lastMessage!], partnerId);
+          }
+        }
+      }
+
+      _sortConversations();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error silently fetching conversations: $e');
     }
   }
 
@@ -1171,12 +1260,19 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> markAsRead(String conversationId) async {
     try {
-      await _chatRepository.markAsRead(conversationId);
-      final index = _conversations.indexWhere((c) => c.sId == conversationId);
+      final index = _conversations.indexWhere((c) => 
+        c.sId == conversationId || 
+        c.partner?.sId == conversationId || 
+        c.partner?.id == conversationId
+      );
       if (index != -1) {
         _conversations[index].unreadCount = 0;
+        if (_conversations[index].lastMessage != null) {
+          _conversations[index].lastMessage!.status = 'READ';
+        }
         notifyListeners();
       }
+      await _chatRepository.markAsRead(conversationId);
     } catch (e) {
       debugPrint('Error marking as read: $e');
     }
@@ -1703,6 +1799,8 @@ class ChatProvider extends ChangeNotifier {
           _conversations[convIndex].lastMessage = sentMessage;
           _conversations[convIndex].lastMessageAt = sentMessage.createdAt;
           _sortConversations();
+        } else {
+          fetchConversationsSilently();
         }
 
         notifyListeners();

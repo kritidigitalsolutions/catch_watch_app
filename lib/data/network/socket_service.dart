@@ -64,6 +64,7 @@ class SocketService {
         'message_delivered', 'delivered_receipt', 'DELIVERED_RECEIPT',
         'user_blocked',
         'message_reaction', 'new_reaction', 'reaction',
+        'message_edited', 'edit_message',
         'incoming_call', 'call_accepted', 'call_rejected', 'call_ended', 
         'call_cancelled', 'call_busy', 'call_missed'
       ];
