@@ -31,9 +31,13 @@ class SocketService {
 
     try {
       _socket = io.io(serverUrl, io.OptionBuilder()
-        .setTransports(['websocket']) // Use WebSocket transport
-        .disableAutoConnect()         // Disable auto-connection
-        .setQuery({'token': token})    // Pass token as query parameter
+        .setTransports(['websocket', 'polling'])
+        .enableAutoConnect()
+        .enableReconnection()
+        .setReconnectionDelay(1000)
+        .setReconnectionDelayMax(5000)
+        .setReconnectionAttempts(99999)
+        .setQuery({'token': token})
         .build());
 
       _socket!.connect();

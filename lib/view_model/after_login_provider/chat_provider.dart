@@ -302,8 +302,12 @@ class ChatProvider extends ChangeNotifier {
         }
       }
 
-      // STEP 3: If still no key pair, generate new P-256 key pair and register identity with backup on server
+      // STEP 3: If still no key pair, generate new P-256 key pair and register identity ONLY IF no server backup exists
       if (_myKeyPair == null) {
+        final bool serverHasBackup = backupData != null && (backupData['hasBackup'] == true || backupData['hasBackup'] == 'true');
+        if (serverHasBackup) {
+          debugPrint('E2EE WARNING: Server has backup but local restoration did not complete. Refraining from clobbering server backup.');
+        } else {
         debugPrint('E2EE: Generating new P-256 KeyPair & registering identity with backup...');
         _myKeyPair = await EncryptionHelper.generateKeyPair();
         final keyPairData = await _myKeyPair!.extract();
@@ -346,6 +350,7 @@ class ChatProvider extends ChangeNotifier {
           debugPrint('E2EE: Identity & backup registered on server successfully');
         } catch (regErr) {
           debugPrint('E2EE: Failed to register identity & backup on server: $regErr');
+        }
         }
       }
 
@@ -1690,7 +1695,7 @@ class ChatProvider extends ChangeNotifier {
           }
         }
 
-        final secret = await _getSharedSecret(partnerId, providedPublicKeyJwk: partnerKeyFromMeta);
+        final secret = await _getSharedSecret(partnerId, providedPublicKeyJwk: partnerKeyFromMeta, forceFetch: true);
 
         if (secret != null) {
           debugPrint('E2EE: Shared secret obtained. Calling EncryptionHelper.encrypt...');

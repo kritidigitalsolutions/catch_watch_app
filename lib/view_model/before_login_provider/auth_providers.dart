@@ -298,6 +298,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
       final data = {
         'phone': _phoneNumber,
         'otp': code,
+        'platform': 'mobile',
       };
       final response = await _authRepository.verifyOtp(data);
 
@@ -492,6 +493,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
         'phone': _phoneNumber,
         'genres': _selectedGenres.toList(),
         'bio': '',
+        'platform': 'mobile',
       });
 
       if (_avatarPath != null) {

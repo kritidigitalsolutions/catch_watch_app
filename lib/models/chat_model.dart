@@ -300,41 +300,57 @@ class MessageModel {
       }
     }
     
-    senderPublicKey = json['senderPublicKey'];
+    String? serializeKey(dynamic k) {
+      if (k == null) return null;
+      if (k is String) {
+        final trimmed = k.trim();
+        return trimmed.isEmpty ? null : trimmed;
+      }
+      if (k is Map) {
+        try {
+          return jsonEncode(k);
+        } catch (_) {
+          return null;
+        }
+      }
+      return null;
+    }
+
+    senderPublicKey = serializeKey(json['senderPublicKey']);
     if (senderPublicKey == null && json['sender'] != null && json['sender'] is Map) {
       final senderMap = json['sender'] as Map<String, dynamic>;
-      senderPublicKey = senderMap['publicKey'];
+      senderPublicKey = serializeKey(senderMap['publicKey']);
     }
     if (senderPublicKey == null && json['encryption'] != null && json['encryption'] is Map) {
       final enc = json['encryption'] as Map<String, dynamic>;
-      senderPublicKey = enc['senderPublicKey'];
+      senderPublicKey = serializeKey(enc['senderPublicKey']);
       if (senderPublicKey == null && enc['envelopes'] is List && (enc['envelopes'] as List).isNotEmpty) {
         final env = enc['envelopes'][0];
         if (env is Map) {
-          senderPublicKey = env['senderPublicKey'];
+          senderPublicKey = serializeKey(env['senderPublicKey']);
         }
       }
     }
 
-    recipientPublicKey = json['recipientPublicKey'];
+    recipientPublicKey = serializeKey(json['recipientPublicKey']);
     encryptionMeta = json['encryption'] is Map ? Map<String, dynamic>.from(json['encryption']) : null;
     if (encryptionMeta != null) {
-      recipientPublicKey ??= encryptionMeta!['recipientPublicKey'];
+      recipientPublicKey ??= serializeKey(encryptionMeta!['recipientPublicKey']);
       if (recipientPublicKey == null && encryptionMeta!['envelopes'] is List && (encryptionMeta!['envelopes'] as List).isNotEmpty) {
         final env = encryptionMeta!['envelopes'][0];
         if (env is Map) {
-          recipientPublicKey = env['recipientPublicKey'];
+          recipientPublicKey = serializeKey(env['recipientPublicKey']);
         }
       }
       if (senderPublicKey == null) {
-        senderPublicKey = encryptionMeta!['senderPublicKey'];
+        senderPublicKey = serializeKey(encryptionMeta!['senderPublicKey']);
       }
     }
     if (recipientPublicKey == null && recipient != null) {
       if (recipient is Sender && (recipient as Sender).publicKey != null) {
-        recipientPublicKey = (recipient as Sender).publicKey.toString();
+        recipientPublicKey = serializeKey((recipient as Sender).publicKey);
       } else if (recipient is Map && recipient['publicKey'] != null) {
-        recipientPublicKey = recipient['publicKey'].toString();
+        recipientPublicKey = serializeKey(recipient['publicKey']);
       }
     }
   }

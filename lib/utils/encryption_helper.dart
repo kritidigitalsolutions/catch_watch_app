@@ -85,21 +85,24 @@ class EncryptionHelper {
       }
       
       final String? crv = jwk['crv'];
-      final String? x = jwk['x'];
-      final String? y = jwk['y'];
+      final dynamic xVal = jwk['x'];
+      final dynamic yVal = jwk['y'];
 
-      debugPrint('EncryptionHelper: JWK details - crv: $crv, hasX: ${x != null}, hasY: ${y != null}');
+      debugPrint('EncryptionHelper: JWK details - crv: $crv, hasX: ${xVal != null}, hasY: ${yVal != null}');
 
       if (crv == 'P-256') {
-        if (x == null || y == null) throw ArgumentError('Missing coordinates for P-256');
+        if (xVal == null || yVal == null) throw ArgumentError('Missing coordinates for P-256');
         
-        final xBytes = _normalizeBytes(base64Url.decode(padBase64(x)), 32);
-        final yBytes = _normalizeBytes(base64Url.decode(padBase64(y)), 32);
+        final xDecoded = _decodeBase64OrUrl(xVal.toString());
+        final yDecoded = _decodeBase64OrUrl(yVal.toString());
+        if (xDecoded == null || yDecoded == null) {
+          throw ArgumentError('Failed to decode coordinates for P-256');
+        }
+
+        final xBytes = _normalizeBytes(xDecoded, 32);
+        final yBytes = _normalizeBytes(yDecoded, 32);
         
         debugPrint('EncryptionHelper: P-256 coordinates normalized (32 bytes each)');
-        debugPrint('EncryptionHelper: Partner X-prefix: ${xBytes.sublist(0, 4)}');
-        
-        // Use EcPublicKey for P-256 compatibility with sharedSecretKey
         return EcPublicKey(x: xBytes, y: yBytes, type: KeyPairType.p256);
       }
       
@@ -449,9 +452,17 @@ class EncryptionHelper {
       throw ArgumentError('Invalid P-256 private key JWK: missing d, x, or y coordinates');
     }
 
-    final dBytes = _normalizeBytes(base64Url.decode(padBase64(dStr)), 32);
-    final xBytes = _normalizeBytes(base64Url.decode(padBase64(xStr)), 32);
-    final yBytes = _normalizeBytes(base64Url.decode(padBase64(yStr)), 32);
+    final dDecoded = _decodeBase64OrUrl(dStr);
+    final xDecoded = _decodeBase64OrUrl(xStr);
+    final yDecoded = _decodeBase64OrUrl(yStr);
+
+    if (dDecoded == null || xDecoded == null || yDecoded == null) {
+      throw ArgumentError('Failed to decode private key coordinates');
+    }
+
+    final dBytes = _normalizeBytes(dDecoded, 32);
+    final xBytes = _normalizeBytes(xDecoded, 32);
+    final yBytes = _normalizeBytes(yDecoded, 32);
 
     return EcKeyPairData(
       d: dBytes,
@@ -467,7 +478,8 @@ class EncryptionHelper {
 
   /// Derive PBKDF2 backup key using user ID and salt
   static Future<SecretKey> deriveBackupKey(String userId, String saltBase64, int iterations) async {
-    final salt = base64.decode(saltBase64);
+    final salt = _decodeBase64OrUrl(saltBase64);
+    if (salt == null) throw ArgumentError('Invalid salt base64');
     final passphrase = 'cw_e2ee_account_recovery_$userId';
     final pbkdf2 = Pbkdf2(
       macAlgorithm: Hmac.sha256(),
@@ -490,10 +502,10 @@ class EncryptionHelper {
   }) async {
     try {
       final key = await deriveBackupKey(userId, salt, iterations);
-      final cipherBytes = base64.decode(ciphertext);
-      final nonce = base64.decode(iv);
+      final cipherBytes = _decodeBase64OrUrl(ciphertext);
+      final nonce = _decodeBase64OrUrl(iv);
+      if (cipherBytes == null || nonce == null || cipherBytes.length < 16) return null;
       
-      if (cipherBytes.length < 16) return null;
       final mac = cipherBytes.sublist(cipherBytes.length - 16);
       final content = cipherBytes.sublist(0, cipherBytes.length - 16);
 
