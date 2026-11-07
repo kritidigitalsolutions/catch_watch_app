@@ -4,7 +4,7 @@ import 'package:gal/gal.dart';
 import 'package:video_player/video_player.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
+import '../../../utils/share_helper.dart';
 
 class MediaPreviewScreen extends StatefulWidget {
   final String url;
@@ -19,18 +19,50 @@ class MediaPreviewScreen extends StatefulWidget {
 class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
   VideoPlayerController? _videoController;
   bool _isDownloading = false;
+  bool _isInitializing = false;
+  bool _hasError = false;
 
   @override
   void initState() {
     super.initState();
     if (widget.type == 'video') {
-      _videoController = VideoPlayerController.networkUrl(Uri.parse(widget.url))
-        ..initialize().then((_) {
-          setState(() {});
-          _videoController?.play();
-          _videoController?.setLooping(true);
-        });
+      _isInitializing = true;
+      _initVideo();
     }
+  }
+
+  Future<void> _initVideo() async {
+    final previous = _videoController;
+    _videoController = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    try {
+      await _videoController!.initialize();
+      await previous?.dispose();
+      await _videoController!.setLooping(true);
+      await _videoController!.play();
+      if (!mounted) return;
+      setState(() {
+        _isInitializing = false;
+        _hasError = false;
+      });
+    } catch (e) {
+      debugPrint('Error initializing media preview: $e');
+      await _videoController?.dispose();
+      _videoController = null;
+      if (!mounted) return;
+      setState(() {
+        _isInitializing = false;
+        _hasError = true;
+      });
+    }
+  }
+
+  Future<void> _retryVideo() async {
+    if (_isInitializing) return;
+    setState(() {
+      _isInitializing = true;
+      _hasError = false;
+    });
+    await _initVideo();
   }
 
   @override
@@ -118,17 +150,85 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
   }
 
   Future<void> _shareMedia() async {
-      try {
-          final dio = Dio();
-          final tempDir = await getTemporaryDirectory();
-          final extension = widget.type == 'video' ? 'mp4' : 'jpg';
-          final path = "${tempDir.path}/share_media.$extension";
-          
-          await dio.download(widget.url, path);
-          await Share.shareXFiles([XFile(path)]);
-      } catch (e) {
-          debugPrint("Error sharing: $e");
-      }
+    try {
+      final dio = Dio();
+      final tempDir = await getTemporaryDirectory();
+      final extension = widget.type == 'video' ? 'mp4' : 'jpg';
+      final path = "${tempDir.path}/share_media.$extension";
+
+      await dio.download(widget.url, path);
+      if (!mounted) return;
+      await ShareHelper.shareFile(
+        path: path,
+        context: context,
+      );
+    } catch (e) {
+      debugPrint("Error sharing: $e");
+    }
+  }
+
+  Widget _buildVideoBody() {
+    if (_hasError) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white70, size: 56),
+            const SizedBox(height: 12),
+            const Text(
+              "Unable to play this video. Please try again.",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            GestureDetector(
+              onTap: _retryVideo,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(Icons.refresh, color: Colors.white, size: 20),
+                  SizedBox(width: 6),
+                  Text(
+                    "Retry",
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final ctrl = _videoController;
+    if (_isInitializing || ctrl == null || !ctrl.value.isInitialized) {
+      return const CircularProgressIndicator();
+    }
+
+    return AspectRatio(
+      aspectRatio: ctrl.value.aspectRatio,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          VideoPlayer(ctrl),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                ctrl.value.isPlaying ? ctrl.pause() : ctrl.play();
+              });
+            },
+            child: Icon(
+              ctrl.value.isPlaying
+                  ? Icons.pause_circle_outline
+                  : Icons.play_circle_outline,
+              size: 60,
+              color: Colors.white.withOpacity(0.7),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -164,33 +264,7 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
       ),
       body: Center(
         child: widget.type == 'video'
-            ? (_videoController != null && _videoController!.value.isInitialized
-                ? AspectRatio(
-                    aspectRatio: _videoController!.value.aspectRatio,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        VideoPlayer(_videoController!),
-                        GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _videoController!.value.isPlaying
-                                  ? _videoController!.pause()
-                                  : _videoController!.play();
-                            });
-                          },
-                          child: Icon(
-                            _videoController!.value.isPlaying
-                                ? Icons.pause_circle_outline
-                                : Icons.play_circle_outline,
-                            size: 60,
-                            color: Colors.white.withOpacity(0.7),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : const CircularProgressIndicator())
+            ? _buildVideoBody()
             : InteractiveViewer(
                 child: Image.network(
                   widget.url,

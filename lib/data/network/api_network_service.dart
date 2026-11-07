@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import '../../res/appUrl.dart';
 import '../../utils/hive_service/hive_service.dart';
 import '../exception/app_exception.dart';
 import 'base_api_service.dart';
@@ -31,6 +32,7 @@ class NetworkApiService extends BaseApiService {
           if (token != null && token.isNotEmpty) {
             options.headers["Authorization"] = "Bearer $token";
           }
+          options.headers['x-platform'] ??= AppUrl.platformHeaderValue();
 
           if (kDebugMode) {
             final timeStr = _formatTimestamp(reqTime);
@@ -146,7 +148,12 @@ class NetworkApiService extends BaseApiService {
         String val = field.value;
         if (lowerKey.contains('idnumber') || lowerKey.contains('governmentid')) {
           val = val.length > 4 ? '********${val.substring(val.length - 4)}' : '****';
-        } else if (lowerKey.contains('password') || lowerKey.contains('token') || lowerKey.contains('secret')) {
+        } else if (lowerKey.contains('password') ||
+            lowerKey.contains('token') ||
+            lowerKey.contains('secret') ||
+            lowerKey == 'otp') {
+          val = '[REDACTED]';
+        } else if (_isPayoutKey(lowerKey)) {
           val = '[REDACTED]';
         }
         lines.add('[API_DEBUG]   - ${field.key}: $val');
@@ -159,6 +166,30 @@ class NetworkApiService extends BaseApiService {
     return _prettyPrintJson(data);
   }
 
+  /// Key fragments identifying payout/financial PII. Their values must never
+  /// appear in debug logs (account numbers, UPI IDs/VPA, IFSC/IBAN, card data).
+  static const List<String> _payoutKeyFragments = [
+    'accountnumber',
+    'account_number',
+    'accountno',
+    'bankaccount',
+    'upiid',
+    'upi_id',
+    'vpa',
+    'ifsc',
+    'iban',
+    'cardnumber',
+    'card_number',
+    'cvv',
+    'cvc',
+  ];
+
+  static bool _isPayoutKey(String lowerKey) =>
+      _payoutKeyFragments.any((fragment) => lowerKey.contains(fragment));
+
+  @visibleForTesting
+  static dynamic sanitizeDataForLogs(dynamic obj) => _sanitizeData(obj);
+
   static dynamic _sanitizeData(dynamic obj) {
     if (obj is Map) {
       final sanitized = <String, dynamic>{};
@@ -167,7 +198,10 @@ class NetworkApiService extends BaseApiService {
         if (keyLower.contains('password') ||
             keyLower.contains('token') ||
             keyLower.contains('secret') ||
-            keyLower.contains('refreshtoken')) {
+            keyLower.contains('refreshtoken') ||
+            keyLower == 'otp') {
+          sanitized[k.toString()] = '[REDACTED]';
+        } else if (_isPayoutKey(keyLower)) {
           sanitized[k.toString()] = '[REDACTED]';
         } else if (keyLower.contains('governmentid') || keyLower.contains('idnumber')) {
           final str = v.toString();
@@ -230,7 +264,12 @@ class NetworkApiService extends BaseApiService {
     }
   }
 
-  Future<dynamic> postApiWithProgress(String url, dynamic data, {Function(int, int)? onSendProgress}) async {
+  Future<dynamic> postApiWithProgress(
+    String url,
+    dynamic data, {
+    Function(int, int)? onSendProgress,
+    CancelToken? cancelToken,
+  }) async {
     try {
       final options = Options(
         sendTimeout: const Duration(minutes: 20), // 20 minutes for video
@@ -242,6 +281,7 @@ class NetworkApiService extends BaseApiService {
         data: data,
         onSendProgress: onSendProgress,
         options: options,
+        cancelToken: cancelToken,
       );
       return returnResponse(response);
     } on DioException catch (e) {

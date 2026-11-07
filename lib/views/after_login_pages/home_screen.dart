@@ -1,85 +1,34 @@
-import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/view_model/after_login_provider/notification_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:catch_watch/utils/custom_button.dart';
 import 'package:catch_watch/utils/empty_state_widget.dart';
+import 'package:catch_watch/utils/entitlement_helper.dart';
 import 'package:catch_watch/utils/error_state_widget.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:catch_watch/views/after_login_pages/content_grid_screen.dart';
-import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/notification_screen.dart';
-import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
 import 'package:catch_watch/views/after_login_pages/search_screen.dart';
-import 'package:catch_watch/views/after_login_pages/short_video_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import '../../models/content_model.dart';
 import '../../res/app_colors.dart';
 import '../../utils/text_style.dart';
 
-void _openShortFilm(BuildContext context, Content content) {
-  // Check if premium and needs subscription
-  final subProvider = context.read<SubscriptionProvider>();
-  bool canWatch = content.isPremium != true || subProvider.currentSubscription != null;
-
-  if (!canWatch) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
-    );
-    return;
-  }
-
-  Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => ShortVideoPlayerScreen(
-        isVisible: true,
-        initialReels: [ReelModel.fromContent(content)],
-        showBackButton: true,
-      ),
-    ),
-  );
+Future<void> _openShortFilm(BuildContext context, Content content) async {
+  await EntitlementHelper.openContent(context, content);
 }
 
-Future<void> _openMovie(BuildContext context, Content content) async {
+Future<void> _openMovie(
+  BuildContext context,
+  Content content, {
+  Duration? resumeFrom,
+}) async {
   if (content.type == 'shortFilm' || content.type == 'short' || content.type == 'shortfilm') {
-    _openShortFilm(context, content);
-    return;
+    return _openShortFilm(context, content);
   }
-
-  final subProvider = context.read<SubscriptionProvider>();
-
-  // Check if content is free or user has an active subscription
-  bool canWatch =
-      content.isPremium != true || subProvider.currentSubscription != null;
-
-  if (canWatch) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MovieDetailScreen(content: content),
-      ),
-    );
-  } else {
-    // If premium and no subscription, go to plans
-    final subscribed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
-    );
-
-    if (context.mounted && subscribed == true) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => MovieDetailScreen(content: content),
-        ),
-      );
-    }
-  }
+  await EntitlementHelper.openContent(context, content, resumePosition: resumeFrom);
 }
 
 class HomeScreen extends StatefulWidget {
@@ -566,7 +515,10 @@ class _ContinueCard extends StatelessWidget {
     return GestureDetector(
       onTap: () {
         if (item.content != null) {
-          _openMovie(context, item.content!);
+          final resumePosition = (item.positionMs != null && item.positionMs! > 0)
+              ? Duration(milliseconds: item.positionMs!)
+              : null;
+          _openMovie(context, item.content!, resumeFrom: resumePosition);
         }
       },
       child: ClipRRect(

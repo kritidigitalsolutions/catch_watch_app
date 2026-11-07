@@ -1,6 +1,6 @@
+import 'package:catch_watch/utils/entitlement_helper.dart';
 import 'package:catch_watch/utils/error_state_widget.dart';
 import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
-import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../res/app_colors.dart';
@@ -176,12 +176,7 @@ class _WishListScreenState extends State<WishListScreen> {
 
     return GestureDetector(
       onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => MovieDetailScreen(content: item),
-          ),
-        );
+        EntitlementHelper.openContent(context, item);
       },
       child: Container(
         decoration: BoxDecoration(
@@ -270,12 +265,7 @@ class _WishListScreenState extends State<WishListScreen> {
                 children: [
                   GestureDetector(
                     onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => MovieDetailScreen(content: item),
-                        ),
-                      );
+                      EntitlementHelper.openContent(context, item);
                     },
                     child: Container(
                       width: 36,

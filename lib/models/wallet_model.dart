@@ -1,3 +1,38 @@
+int? _asInt(dynamic value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is double) return value.toInt();
+  if (value is String) return int.tryParse(value.trim());
+  return null;
+}
+
+double? _asDouble(dynamic value) {
+  if (value == null) return null;
+  if (value is double) return value;
+  if (value is int) return value.toDouble();
+  if (value is String) return double.tryParse(value.trim());
+  return null;
+}
+
+bool? _asBool(dynamic value) {
+  if (value == null) return null;
+  if (value is bool) return value;
+  if (value is String) {
+    final v = value.trim().toLowerCase();
+    if (v == 'true') return true;
+    if (v == 'false') return false;
+  }
+  return null;
+}
+
+DateTime? _asDate(dynamic value) {
+  if (value == null) return null;
+  if (value is DateTime) return value;
+  if (value is String) return DateTime.tryParse(value);
+  if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+  return null;
+}
+
 class WalletSummary {
   final bool? success;
   final int? totalPoints;
@@ -13,10 +48,10 @@ class WalletSummary {
 
   factory WalletSummary.fromJson(Map<String, dynamic> json) {
     return WalletSummary(
-      success: json['success'],
-      totalPoints: json['totalPoints'],
-      redeemedPoints: json['redeemedPoints'],
-      availablePoints: json['availablePoints'],
+      success: _asBool(json['success']),
+      totalPoints: _asInt(json['totalPoints']),
+      redeemedPoints: _asInt(json['redeemedPoints']),
+      availablePoints: _asInt(json['availablePoints']),
     );
   }
 }
@@ -38,11 +73,11 @@ class PointsSummary {
 
   factory PointsSummary.fromJson(Map<String, dynamic> json) {
     return PointsSummary(
-      success: json['success'],
-      todayPoints: json['todayPoints'],
-      weeklyPoints: json['weeklyPoints'],
-      monthlyPoints: json['monthlyPoints'],
-      totalPoints: json['totalPoints'],
+      success: _asBool(json['success']),
+      todayPoints: _asInt(json['todayPoints']),
+      weeklyPoints: _asInt(json['weeklyPoints']),
+      monthlyPoints: _asInt(json['monthlyPoints']),
+      totalPoints: _asInt(json['totalPoints']),
     );
   }
 }
@@ -59,12 +94,12 @@ class PointHistoryLog {
 
   factory PointHistoryLog.fromJson(Map<String, dynamic> json) {
     return PointHistoryLog(
-      id: json['_id'],
-      action: json['action'],
-      points: json['points'],
-      createdAt: json['createdAt'] != null ? DateTime.parse(json['createdAt']) : null,
-      user: json['user'] != null ? HistoryUser.fromJson(json['user']) : null,
-      reel: json['reel'] != null ? HistoryReel.fromJson(json['reel']) : null,
+      id: json['_id']?.toString(),
+      action: json['action']?.toString(),
+      points: _asInt(json['points']),
+      createdAt: _asDate(json['createdAt']),
+      user: json['user'] is Map ? HistoryUser.fromJson(json['user']) : null,
+      reel: json['reel'] is Map ? HistoryReel.fromJson(json['reel']) : null,
     );
   }
 }
@@ -79,10 +114,10 @@ class HistoryUser {
 
   factory HistoryUser.fromJson(Map<String, dynamic> json) {
     return HistoryUser(
-      id: json['_id'],
-      name: json['name'],
-      profileImage: json['profileImage'],
-      username: json['username'],
+      id: json['_id']?.toString(),
+      name: json['name']?.toString(),
+      profileImage: json['profileImage']?.toString(),
+      username: json['username']?.toString(),
     );
   }
 }
@@ -100,13 +135,13 @@ class HistoryReel {
 
   factory HistoryReel.fromJson(Map<String, dynamic> json) {
     return HistoryReel(
-      id: json['_id'],
-      thumbnailUrl: json['thumbnailUrl'],
-      thumbnail: json['thumbnail'],
-      caption: json['caption'],
-      viewsCount: json['viewsCount'],
-      commentsCount: json['commentsCount'],
-      sharesCount: json['sharesCount'],
+      id: json['_id']?.toString(),
+      thumbnailUrl: json['thumbnailUrl']?.toString(),
+      thumbnail: json['thumbnail']?.toString(),
+      caption: json['caption']?.toString(),
+      viewsCount: _asInt(json['viewsCount']),
+      commentsCount: _asInt(json['commentsCount']),
+      sharesCount: _asInt(json['sharesCount']),
     );
   }
 }
@@ -136,15 +171,17 @@ class RedeemHistory {
 
   factory RedeemHistory.fromJson(Map<String, dynamic> json) {
     return RedeemHistory(
-      id: json['_id'],
-      points: json['points'],
-      amount: (json['amount'] ?? 0).toDouble(),
-      status: json['status'],
-      createdAt: json['createdAt'] != null ? DateTime.parse(json['createdAt']) : null,
-      paymentDetails: json['paymentDetails'] != null ? PaymentDetails.fromJson(json['paymentDetails']) : null,
-      rejectionReason: json['rejectionReason'],
-      transactionId: json['transactionId'],
-      adminRemark: json['adminRemark'],
+      id: json['_id']?.toString(),
+      points: _asInt(json['points']),
+      amount: _asDouble(json['amount']) ?? 0,
+      status: json['status']?.toString(),
+      createdAt: _asDate(json['createdAt']),
+      paymentDetails: json['paymentDetails'] is Map
+          ? PaymentDetails.fromJson(json['paymentDetails'])
+          : null,
+      rejectionReason: json['rejectionReason']?.toString(),
+      transactionId: json['transactionId']?.toString(),
+      adminRemark: json['adminRemark']?.toString(),
     );
   }
 }
@@ -168,12 +205,12 @@ class PaymentDetails {
 
   factory PaymentDetails.fromJson(Map<String, dynamic> json) {
     return PaymentDetails(
-      paymentMethod: json['paymentMethod'],
-      upiId: json['upiId'],
-      accountHolderName: json['accountHolderName'],
-      accountNumber: json['accountNumber'],
-      ifscCode: json['ifscCode'],
-      bankName: json['bankName'],
+      paymentMethod: json['paymentMethod']?.toString(),
+      upiId: json['upiId']?.toString(),
+      accountHolderName: json['accountHolderName']?.toString(),
+      accountNumber: json['accountNumber']?.toString(),
+      ifscCode: json['ifscCode']?.toString(),
+      bankName: json['bankName']?.toString(),
     );
   }
 }

@@ -121,7 +121,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
   }
 
   Widget _buildBody(WalletProvider provider, List<LeaderboardUser> leaderboard) {
-    if (provider.error != null) {
+    if (provider.leaderboardError != null) {
       return ListView(
         children: [
           _buildTimeframeSelector(provider),
@@ -138,7 +138,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40),
             child: Text(
-              provider.error!,
+              provider.leaderboardError!,
               textAlign: TextAlign.center,
               style: text12(color: Colors.grey),
             ),
@@ -158,7 +158,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
       );
     }
 
-    if (provider.isLoading) {
+    if (provider.isLeaderboardLoading) {
       return ListView(
         children: [
           _buildTimeframeSelector(provider),
@@ -224,7 +224,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           return Expanded(
             child: InkWell(
               onTap: () {
-                if (_selectedTimeframe == filter && !walletProvider.isLoading) return;
+                if (_selectedTimeframe == filter && !walletProvider.isLeaderboardLoading) return;
                 setState(() => _selectedTimeframe = filter);
                 walletProvider.fetchLeaderboard(range: filter);
               },
@@ -262,7 +262,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
   }
 
   Widget _buildMyRankTile(WalletProvider walletProvider, List<LeaderboardUser> leaderboard) {
-    if (walletProvider.isLoading) return const SizedBox.shrink();
+    if (walletProvider.isLeaderboardLoading) return const SizedBox.shrink();
 
     final profileProvider = context.watch<ProfileProvider>();
     final user = profileProvider.user;

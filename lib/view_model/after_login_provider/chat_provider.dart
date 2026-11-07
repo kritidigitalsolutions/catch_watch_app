@@ -51,6 +51,9 @@ class ChatProvider extends ChangeNotifier {
   final Map<String, PublicKey> _partnerPublicKeys = {};
   final Map<String, SecretKey> _sharedSecrets = {};
   final Map<String, SecretKey> _legacySharedSecrets = {};
+  /// Shared secrets keyed by the PEER'S KEY FINGERPRINT (not by userId), so a rotated
+  /// key can never be served a stale secret.
+  final Map<String, SecretKey> _secretsByFp = {};
   bool _isPublicKeySyncing = false;
   bool _publicKeySavedOnServer = false;
   Completer<void>? _initCompleter;
@@ -120,18 +123,20 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  ChatProvider() {
-    _initSocket();
-    _initNotificationListener();
-    initE2EE();
-    initAgoraChat();
+  ChatProvider({bool autoInit = true}) {
+    if (autoInit) {
+      _initSocket();
+      _initNotificationListener();
+      initE2EE();
+      initAgoraChat();
+    }
   }
 
   Future<void> initAgoraChat() async {
     try {
       debugPrint('🚀 Agora: Starting initialization...');
       final response = await _chatRepository.getAgoraToken();
-      
+
       if (response != null && response['success'] == true) {
         final data = response['data'];
         _agoraAppKey = data['appKey'];
@@ -186,7 +191,7 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> loginToAgora() async {
     if (!_isAgoraInitialized || _agoraUserId == null || _agoraToken == null) return;
-    
+
     try {
       debugPrint('🚀 Agora: Attempting login for $_agoraUserId...');
       await ChatClient.getInstance.loginWithAgoraToken(_agoraUserId!, _agoraToken!);
@@ -252,6 +257,7 @@ class ChatProvider extends ChangeNotifier {
     _partnerPublicKeys.clear();
     _sharedSecrets.clear();
     _legacySharedSecrets.clear();
+    _secretsByFp.clear();
     _conversations.clear();
     _messages.clear();
     _pinnedMessages.clear();
@@ -414,6 +420,7 @@ class ChatProvider extends ChangeNotifier {
     _partnerPublicKeys.clear();
     _sharedSecrets.clear();
     _legacySharedSecrets.clear();
+    _secretsByFp.clear();
     _myPublicKeyJwk = null;
 
     // Ensure Device ID exists
@@ -530,14 +537,14 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> syncPublicKey() async {
     if (_isPublicKeySyncing) return;
-    
+
     if (_myKeyPair == null) {
       if (kDebugMode) {
         debugPrint('⚠️ E2EE Sync: KeyPair is missing. Cannot send public key.');
       }
       return;
     }
-    
+
     final token = HiveService.getToken();
     if (token == null || token.isEmpty) {
       if (kDebugMode) {
@@ -549,13 +556,13 @@ class ChatProvider extends ChangeNotifier {
     _isPublicKeySyncing = true;
     try {
       final jwkString = await EncryptionHelper.exportPublicKey(_myKeyPair!);
-      
+
       if (kDebugMode) {
         debugPrint('📡 API CALL: POST /api/chat/keys');
       }
 
       final response = await _chatRepository.savePublicKey(jwkString);
-      
+
       if (response != null && response['success'] == true) {
         _publicKeySavedOnServer = true;
         if (kDebugMode) {
@@ -634,144 +641,265 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  Future<SecretKey?> _getSharedSecret(String partnerId, {dynamic providedPublicKeyJwk, bool forceFetch = false}) async {
-    if (kDebugMode) {
-      debugPrint('E2EE: Attempting to get shared secret for partnerId: $partnerId (forceFetch: $forceFetch)');
-    }
+  // ---------------------------------------------------------------------------
+  // E2EE key helpers (fingerprint based)
+  //
+  // Rules that fix the "[Encrypted message]" / "message not visible on other
+  // platform" bug:
+  //  1. SEND  -> always encrypt to the partner's CURRENT key fetched from the server.
+  //  2. READ  -> derive the secret from the key that was actually used for the
+  //              message (envelope.senderPublicKey for received messages,
+  //              recipientPublicKey for messages I sent), never from a cached
+  //              per-user key.
+  //  3. Secrets are cached per key fingerprint, never per userId.
+  // ---------------------------------------------------------------------------
 
-    if (_myKeyPair == null) {
-      if (kDebugMode) {
-        debugPrint('E2EE: _myKeyPair is NULL in _getSharedSecret. Ensuring keys are ready...');
-      }
-      await ensureReady();
-      if (_myKeyPair == null) {
-        if (kDebugMode) {
-          debugPrint('E2EE ERROR: _myKeyPair is still NULL after ensureReady.');
-        }
-        return null;
-      }
+  String? _jwkToString(dynamic jwk) {
+    if (jwk == null) return null;
+    if (jwk is String) return jwk.trim().isEmpty ? null : jwk;
+    try {
+      return jsonEncode(jwk);
+    } catch (_) {
+      return null;
     }
-    
-    // Check if the provided key is different from what we have cached
-    if (providedPublicKeyJwk != null) {
-      final currentJwk = HiveService.getPartnerPublicKey(partnerId);
-      final newJwkString = providedPublicKeyJwk is String ? providedPublicKeyJwk : jsonEncode(providedPublicKeyJwk);
-      
-      if (currentJwk != newJwkString) {
-        debugPrint('E2EE: NEW Public Key detected for $partnerId. Invalidating secrets...');
-        _partnerPublicKeys.remove(partnerId);
-        _sharedSecrets.remove(partnerId);
-        _legacySharedSecrets.remove(partnerId);
-        await HiveService.savePartnerPublicKey(partnerId, newJwkString);
-      }
-    }
+  }
 
-    if (!forceFetch && _sharedSecrets.containsKey(partnerId)) {
-      debugPrint('E2EE: Returning cached secret for $partnerId');
-      return _sharedSecrets[partnerId];
+  /// Fingerprint of a public JWK (x.y of the P-256 point). Same key => same value.
+  String? _fp(dynamic jwk) {
+    try {
+      final str = _jwkToString(jwk);
+      if (str == null) return null;
+      final m = jsonDecode(str);
+      if (m is! Map) return null;
+      final x = m['x']?.toString();
+      final y = m['y']?.toString();
+      if (x == null || y == null || x.isEmpty || y.isEmpty) return null;
+      return '$x.$y';
+    } catch (_) {
+      return null;
     }
+  }
+
+  /// Fetches the partner's CURRENT public key from the server (falls back to the
+  /// conversation metadata the server sent, never to the local Hive cache).
+  Future<Map<String, dynamic>?> _fetchFreshPartnerKey(String partnerId) async {
+    String? jwk;
+    String? keyId;
+    String? deviceId;
 
     try {
-      PublicKey? partnerPublicKey;
-      
-      if (_partnerPublicKeys.containsKey(partnerId)) {
-        partnerPublicKey = _partnerPublicKeys[partnerId];
-        debugPrint('E2EE: Using cached public key for $partnerId');
+      final response = await _chatRepository.getUserPublicKey(partnerId);
+      if (response != null && response['success'] == true) {
+        final data = response['data'] ?? response['user'] ?? response;
+        if (data is Map) {
+          final activeSession = data['activeSession'] ?? data['session'];
+          dynamic rawKey;
+          if (activeSession is Map) {
+            deviceId = activeSession['deviceId']?.toString();
+            keyId = activeSession['keyId']?.toString();
+            rawKey = activeSession['publicKey'];
+          }
+          deviceId ??= data['deviceId']?.toString();
+          keyId ??= data['keyId']?.toString();
+          rawKey ??= data['publicKey'];
+          jwk = _jwkToString(rawKey);
+        }
+      } else {
+        debugPrint('E2EE: API failed to return public key for $partnerId. Error: ${response?['message']}');
       }
+    } catch (e) {
+      debugPrint('E2EE: Error fetching fresh public key for $partnerId: $e');
+    }
 
-      if (partnerPublicKey == null) {
-        dynamic partnerPublicKeyJwk = providedPublicKeyJwk;
-        
-        // 1. Check persistent storage
-        if (!forceFetch && partnerPublicKeyJwk == null) {
-          partnerPublicKeyJwk = HiveService.getPartnerPublicKey(partnerId);
-          if (partnerPublicKeyJwk != null) {
-            debugPrint('E2EE: Found public key in Hive storage for $partnerId');
+    // Fallback: key sent by the server inside the conversation list
+    if (jwk == null) {
+      for (final conv in _conversations) {
+        final p = conv.partner;
+        if (p != null && (p.sId == partnerId || p.id == partnerId) && p.publicKey != null) {
+          jwk = _jwkToString(p.publicKey);
+          if (jwk != null) {
+            debugPrint('E2EE: Using conversation-metadata key for $partnerId (API unavailable)');
+            break;
           }
         }
-
-        // 2. Check conversations list with deep search
-        if (partnerPublicKeyJwk == null) {
-          debugPrint('E2EE: Searching for partner $partnerId in ${_conversations.length} conversations...');
-          for (var conv in _conversations) {
-            final p = conv.partner;
-            if (p != null) {
-              final pSid = p.sId?.toString();
-              final pId = p.id?.toString();
-              
-              if ((pSid != null && pSid == partnerId) || (pId != null && pId == partnerId)) {
-                if (p.publicKey != null) {
-                  debugPrint('E2EE: Found public key in conversation metadata for partner $partnerId');
-                  partnerPublicKeyJwk = p.publicKey;
-                  break;
-                }
-              }
-            }
-          }
-        }
-
-        // 3. Fallback to API
-        if (partnerPublicKeyJwk == null) {
-          debugPrint('E2EE: Public key not in cache/metadata. Fetching from API for partner: $partnerId');
-          final response = await _chatRepository.getUserPublicKey(partnerId);
-          if (response != null && response['success'] == true) {
-            // Flexible parsing of API response
-            final data = response['data'] ?? response['user'] ?? response;
-            if (data is Map) {
-              final activeSession = data['activeSession'] ?? data['session'];
-              String? devId;
-              String? kId;
-              if (activeSession is Map) {
-                devId = activeSession['deviceId']?.toString();
-                kId = activeSession['keyId']?.toString();
-                partnerPublicKeyJwk = activeSession['publicKey'];
-              }
-              devId ??= data['deviceId']?.toString();
-              kId ??= data['keyId']?.toString();
-              if (devId != null || kId != null) {
-                _partnerSessions[partnerId] = {
-                  if (devId != null) 'deviceId': devId,
-                  if (kId != null) 'keyId': kId,
-                };
-              }
-              partnerPublicKeyJwk ??= data['publicKey'];
-            }
-            
-            if (partnerPublicKeyJwk != null) {
-              debugPrint('E2EE: API returned public key for $partnerId');
-            } else {
-              debugPrint('E2EE ERROR: API response success but publicKey not found in: $data');
-            }
-          } else {
-            debugPrint('E2EE: API failed to return public key for $partnerId. Error: ${response?['message']}');
-          }
-        }
-
-        if (partnerPublicKeyJwk != null) {
-          debugPrint('E2EE: Importing partner public key for $partnerId. JWK type: ${partnerPublicKeyJwk.runtimeType}');
-          partnerPublicKey = await EncryptionHelper.importPublicKey(partnerPublicKeyJwk);
-          _partnerPublicKeys[partnerId] = partnerPublicKey;
-          
-          // Persist it
-          final jwkString = partnerPublicKeyJwk is String ? partnerPublicKeyJwk : jsonEncode(partnerPublicKeyJwk);
-          await HiveService.savePartnerPublicKey(partnerId, jwkString);
-        } else {
-          debugPrint('E2EE WARNING: Failed to obtain any public key for $partnerId. The user may not have E2EE set up.');
-        }
       }
+    }
 
-      if (partnerPublicKey != null) {
-        debugPrint('E2EE: Deriving shared secret with EncryptionHelper...');
-        final secret = await EncryptionHelper.deriveSharedSecret(_myKeyPair!, partnerPublicKey);
-        _sharedSecrets[partnerId] = secret;
-        debugPrint('E2EE: Shared secret derived successfully for $partnerId');
-        return secret;
+    if (jwk == null) {
+      debugPrint('E2EE WARNING: Failed to obtain any public key for $partnerId.');
+      return null;
+    }
+    if (deviceId != null && deviceId.isEmpty) deviceId = null;
+    if (keyId != null && keyId.isEmpty) keyId = null;
+
+    _partnerSessions[partnerId] = {
+      if (deviceId != null) 'deviceId': deviceId,
+      if (keyId != null) 'keyId': keyId,
+    };
+    try {
+      await HiveService.savePartnerPublicKey(partnerId, jwk);
+    } catch (_) {}
+
+    debugPrint('E2EE: Fresh partner key for $partnerId -> x=${_extractX8(jwk)}');
+    return {'jwk': jwk, 'keyId': keyId, 'deviceId': deviceId};
+  }
+
+  /// ECDH secret for an arbitrary peer key (cached by fingerprint).
+  Future<SecretKey?> _secretForPeerJwk(dynamic peerJwk) async {
+    if (_myKeyPair == null) {
+      await ensureReady();
+    }
+    final myKp = _myKeyPair;
+    if (myKp == null) return null;
+
+    final fp = _fp(peerJwk);
+    final jwkStr = _jwkToString(peerJwk);
+    if (fp == null || jwkStr == null) return null;
+
+    final cached = _secretsByFp[fp];
+    if (cached != null) return cached;
+
+    try {
+      final peer = await EncryptionHelper.importPublicKey(jwkStr);
+      final secret = await EncryptionHelper.deriveSharedSecret(myKp, peer);
+      _secretsByFp[fp] = secret;
+      return secret;
+    } catch (e, st) {
+      debugPrint('E2EE Error deriving secret for peer key x=${_extractX8(jwkStr)}: $e\n$st');
+      return null;
+    }
+  }
+
+  /// Everything needed to encrypt a message to [partnerId] right now.
+  /// Returns {secret, jwk, keyId, deviceId} or null.
+  Future<Map<String, dynamic>?> _prepareRecipientCrypto(String partnerId) async {
+    final fresh = await _fetchFreshPartnerKey(partnerId);
+    if (fresh == null) return null;
+    final secret = await _secretForPeerJwk(fresh['jwk']);
+    if (secret == null) return null;
+    return {...fresh, 'secret': secret};
+  }
+
+  /// Builds the `encryption` payload (used by send / forward / edit).
+  Map<String, dynamic> _buildEncryptionPayload({
+    required String partnerId,
+    required String myUserId,
+    required String myDeviceId,
+    required String? myPublicKeyJwk,
+    required Map<String, dynamic>? recipient,
+    required String ciphertext,
+    required String iv,
+  }) {
+    final recipientJwk = recipient?['jwk'] as String?;
+    final recipientDeviceId = (recipient?['deviceId'] as String?) ?? 'dev_${partnerId}_01';
+    final recipientKeyId = (recipient?['keyId'] as String?) ?? 'key_$partnerId';
+    final myKeyId = 'key_$myUserId';
+
+    // Extra fields that let ANY client later pick the right key.
+    final extra = <String, dynamic>{
+      if (recipientJwk != null) 'recipientPublicKey': recipientJwk,
+      if (_fp(recipientJwk) != null) 'recipientKeyFingerprint': _fp(recipientJwk),
+      if (_fp(myPublicKeyJwk) != null) 'senderKeyFingerprint': _fp(myPublicKeyJwk),
+    };
+
+    final envelopes = <Map<String, dynamic>>[
+      // 1. Recipient envelope
+      {
+        'userId': partnerId,
+        'deviceId': recipientDeviceId,
+        'keyId': recipientKeyId,
+        'senderDeviceId': myDeviceId,
+        'senderKeyId': myKeyId,
+        'senderPublicKey': myPublicKeyJwk,
+        'ciphertext': ciphertext,
+        'iv': iv,
+        ...extra,
+      },
+    ];
+
+    // 2. Sender-copy envelope so the sender can decrypt their own sent messages
+    if (myUserId.isNotEmpty) {
+      envelopes.add({
+        'userId': myUserId,
+        'deviceId': myDeviceId,
+        'keyId': myKeyId,
+        'senderDeviceId': myDeviceId,
+        'senderKeyId': myKeyId,
+        'senderPublicKey': myPublicKeyJwk,
+        'ciphertext': ciphertext,
+        'iv': iv,
+        ...extra,
+      });
+    }
+
+    return {
+      'version': 2,
+      'senderDeviceId': myDeviceId,
+      'senderKeyId': myKeyId,
+      'senderPublicKey': myPublicKeyJwk,
+      'recipientDeviceId': recipientDeviceId,
+      'recipientKeyId': recipientKeyId,
+      ...extra,
+      'envelopes': envelopes,
+    };
+  }
+
+  /// Tries every known derivation (standard, raw, legacy, hashed) against ONE peer key.
+  Future<String?> _decryptWithPeerKey(
+      String cipher,
+      String? iv,
+      String peerJwk,
+      String label,
+      Map<String, String> attempts,
+      ) async {
+    final myKp = _myKeyPair;
+    if (myKp == null) return null;
+
+    dynamic peer;
+    try {
+      peer = await EncryptionHelper.importPublicKey(peerJwk);
+    } catch (e) {
+      attempts['$label/import'] = 'Exception: [${e.runtimeType}]';
+      return null;
+    }
+
+    final variants = <String, Future<dynamic> Function()>{
+      'standard': () => _secretForPeerJwk(peerJwk),
+      'raw': () => EncryptionHelper.deriveSharedSecretRaw(myKp, peer),
+      'legacy': () => EncryptionHelper.deriveSharedSecretLegacy(myKp, peer),
+      'hashed': () => EncryptionHelper.deriveSharedSecretHashed(myKp, peer),
+    };
+
+    for (final entry in variants.entries) {
+      final key = '$label/${entry.key}';
+      try {
+        final dynamic secret = await entry.value();
+        if (secret == null) {
+          attempts[key] = 'Skipped (secret is null)';
+          continue;
+        }
+        final decrypted = await EncryptionHelper.decrypt(cipher, secret, iv: iv);
+        if (decrypted != cipher) {
+          attempts[key] = 'SUCCESS';
+          return decrypted;
+        }
+        attempts[key] = 'Failed (decrypted == ciphertext)';
+      } catch (e) {
+        attempts[key] = 'Exception: [${e.runtimeType}]';
       }
-    } catch (e, stack) {
-      debugPrint('E2EE Error deriving shared secret for $partnerId: $e');
-      debugPrint('E2EE Stacktrace: $stack');
     }
     return null;
+  }
+
+  /// Compatibility wrapper. With [providedPublicKeyJwk] it derives from exactly that
+  /// key; otherwise it uses the partner's CURRENT key from the server.
+  /// It no longer reads/writes the per-user Hive/memory cache (that was the bug).
+  Future<SecretKey?> _getSharedSecret(String partnerId, {dynamic providedPublicKeyJwk, bool forceFetch = false}) async {
+    if (providedPublicKeyJwk != null) {
+      return _secretForPeerJwk(providedPublicKeyJwk);
+    }
+    final crypto = await _prepareRecipientCrypto(partnerId);
+    return crypto?['secret'] as SecretKey?;
   }
 
   Future<SecretKey?> _getLegacySharedSecret(String partnerId) async {
@@ -827,7 +955,7 @@ class ChatProvider extends ChangeNotifier {
     try {
       final type = message.data['type'];
       final conversationId = message.data['conversationId'];
-      
+
       if (type == 'CHAT_MESSAGE' || conversationId != null) {
         debugPrint('Processing foreground notification: Type=$type, Conv=$conversationId');
 
@@ -846,7 +974,7 @@ class ChatProvider extends ChangeNotifier {
             }
             _onNewMessage(payload);
           }
-          
+
           // Try to reconnect
           _socketService.connect();
         }
@@ -899,7 +1027,7 @@ class ChatProvider extends ChangeNotifier {
       case 'call_cancelled':
       case 'call_busy':
       case 'call_missed':
-        // Handled by CallProvider
+      // Handled by CallProvider
         break;
       default:
         debugPrint('Unhandled Socket Event: $event');
@@ -910,7 +1038,7 @@ class ChatProvider extends ChangeNotifier {
     try {
       debugPrint('Processing New Message Payload: $payload');
       final MessageModel newMessage;
-      
+
       if (payload is Map<String, dynamic> && payload.containsKey('_id')) {
         newMessage = MessageModel.fromJson(payload);
       } else {
@@ -939,13 +1067,13 @@ class ChatProvider extends ChangeNotifier {
           messageType: payload['messageType'] ?? 'text',
           mediaUrl: payload['mediaUrl'],
           createdAt: payload['createdAt'] ?? DateTime.now().toIso8601String(),
-          sender: senderData is Map 
-            ? Sender.fromJson(Map<String, dynamic>.from(senderData))
-            : Sender(
-                sId: payload['senderId'] ?? payload['sender_id'],
-                name: payload['senderName'] ?? payload['sender_name'],
-                profileImage: payload['senderImage'] ?? payload['sender_image'],
-              ),
+          sender: senderData is Map
+              ? Sender.fromJson(Map<String, dynamic>.from(senderData))
+              : Sender(
+            sId: payload['senderId'] ?? payload['sender_id'],
+            name: payload['senderName'] ?? payload['sender_name'],
+            profileImage: payload['senderImage'] ?? payload['sender_image'],
+          ),
           status: 'DELIVERED',
           isEncrypted: isCall ? false : (explicitEncrypted || (hasCiphertext && extractedIv != null && extractedIv.isNotEmpty) || (payload['encryption'] is Map)),
           iv: extractedIv,
@@ -961,7 +1089,7 @@ class ChatProvider extends ChangeNotifier {
           return;
         }
         _processedMessageIds.add(newMessage.sId!);
-        
+
         // Keep the set size manageable
         if (_processedMessageIds.length > 500) {
           _processedMessageIds.remove(_processedMessageIds.first);
@@ -971,19 +1099,19 @@ class ChatProvider extends ChangeNotifier {
       // CRITICAL: Content-based deduplication for call events that might have different IDs
       if (newMessage.messageType == 'call' || newMessage.messageType == 'audio_call' || newMessage.messageType == 'video_call') {
         final String fingerprint = '${newMessage.conversationId}_${newMessage.messageType}_${newMessage.sender?.sId}';
-        
+
         if (_processingFingerprints.contains(fingerprint)) {
           debugPrint('Duplicate call event detected by simultaneous processing fingerprint');
           return;
         }
 
         final bool alreadyExists = _messages.take(10).any((m) {
-          return m.messageType == newMessage.messageType && 
-                 m.conversationId == newMessage.conversationId &&
-                 m.sender?.sId == newMessage.sender?.sId &&
-                 DateTime.now().difference(DateTime.tryParse(m.createdAt ?? '') ?? DateTime.now()).inSeconds.abs() < 5;
+          return m.messageType == newMessage.messageType &&
+              m.conversationId == newMessage.conversationId &&
+              m.sender?.sId == newMessage.sender?.sId &&
+              DateTime.now().difference(DateTime.tryParse(m.createdAt ?? '') ?? DateTime.now()).inSeconds.abs() < 5;
         });
-        
+
         if (alreadyExists) {
           debugPrint('Duplicate call event detected by existing message content');
           return;
@@ -1027,7 +1155,7 @@ class ChatProvider extends ChangeNotifier {
       if (kDebugMode) {
         debugPrint('Resolved Message: ID=${newMessage.sId}, isEncrypted=${newMessage.isEncrypted}, isDecrypted=${newMessage.isDecrypted}, Conv=${newMessage.conversationId}');
       }
-      
+
       if (conversationId == null) {
         debugPrint('Warning: New message has no conversationId');
         return;
@@ -1036,14 +1164,14 @@ class ChatProvider extends ChangeNotifier {
       // Update current message list if it's the active conversation
       if (conversationId == _activeConversationId) {
         debugPrint('Updating active conversation messages list');
-        
+
         // Final deduplication before inserting into active list
         bool alreadyExists = _messages.any((m) => m.sId == newMessage.sId);
-        
+
         if (!alreadyExists) {
           _messages.insert(0, newMessage);
           debugPrint('Message inserted into list');
-          
+
           // Vibrate for new message in active chat (short)
           Vibration.vibrate(duration: 50);
         } else {
@@ -1090,7 +1218,7 @@ class ChatProvider extends ChangeNotifier {
           String senderName = newMessage.sender?.name?.trim() ?? '';
           if (senderName.isEmpty) {
             final conv = _conversations.firstWhere(
-              (c) => c.sId == conversationId,
+                  (c) => c.sId == conversationId,
               orElse: () => ConversationModel(),
             );
             senderName = conv.partner?.name?.trim() ??
@@ -1130,7 +1258,7 @@ class ChatProvider extends ChangeNotifier {
   void _onStatusUpdate(dynamic payload) {
     try {
       final status = UserStatus.fromJson(payload);
-      
+
       // Update partner status in conversations list
       bool changed = false;
       for (var conv in _conversations) {
@@ -1145,7 +1273,7 @@ class ChatProvider extends ChangeNotifier {
         _currentUserStatus = status;
         changed = true;
       }
-      
+
       if (changed) notifyListeners();
     } catch (e) {
       debugPrint('Error handling status update socket event: $e');
@@ -1156,7 +1284,7 @@ class ChatProvider extends ChangeNotifier {
     try {
       final conversationId = payload['conversationId'] ?? payload['conversation_id'];
       debugPrint('Message Read Event for Conversation: $conversationId (Active: $_activeConversationId)');
-      
+
       if (conversationId == null) return;
 
       // Update in conversation list
@@ -1191,7 +1319,7 @@ class ChatProvider extends ChangeNotifier {
     try {
       final conversationId = payload['conversationId'] ?? payload['conversation_id'];
       final messageId = payload['messageId'] ?? payload['message_id'] ?? payload['_id'];
-      
+
       debugPrint('Message Delivered Event for Conversation: $conversationId, Message: $messageId');
 
       if (conversationId == null) return;
@@ -1224,7 +1352,7 @@ class ChatProvider extends ChangeNotifier {
     try {
       final messageId = payload['messageId'];
       final reaction = ReactionModel.fromJson(payload['reaction'] ?? payload);
-      
+
       final index = _messages.indexWhere((m) => m.sId == messageId);
       if (index != -1) {
         final reactions = _messages[index].reactions ?? [];
@@ -1247,7 +1375,7 @@ class ChatProvider extends ChangeNotifier {
       final newText = payload['text'] ?? payload['message'] ?? payload['body'];
       final isEncrypted = payload['isEncrypted'] == true || payload['isEncrypted'] == 'true';
       final iv = payload['iv'];
-      
+
       // Robust senderId detection
       var senderId = payload['senderId'];
       if (senderId == null && payload['sender'] != null) {
@@ -1265,8 +1393,8 @@ class ChatProvider extends ChangeNotifier {
       final existingMsg = index != -1 ? _messages[index] : null;
 
       // IGNORE MY OWN EDITS for text overwrite, but update metadata
-      final bool isMe = (senderId != null && senderId == HiveService.userId) || 
-                       (existingMsg != null && (existingMsg.sender?.sId == HiveService.userId || existingMsg.sender?.id == HiveService.userId));
+      final bool isMe = (senderId != null && senderId == HiveService.userId) ||
+          (existingMsg != null && (existingMsg.sender?.sId == HiveService.userId || existingMsg.sender?.id == HiveService.userId));
 
       if (isMe) {
         debugPrint('E2EE: Ignoring broadcast of my own edit text to preserve plain text');
@@ -1305,7 +1433,7 @@ class ChatProvider extends ChangeNotifier {
             lastMsg.isEncrypted = isEncrypted;
             lastMsg.iv = iv;
             lastMsg.isDecrypted = false;
-            
+
             final partnerId = senderId ?? _conversations[convIndex].partner?.sId ?? _conversations[convIndex].partner?.id;
             if (isEncrypted && newText != null && partnerId != null) {
               await _decryptMessagesList([lastMsg], partnerId);
@@ -1323,7 +1451,7 @@ class ChatProvider extends ChangeNotifier {
         }
         _conversations[convIndex].lastMessageAt = DateTime.now().toIso8601String(); // Ensure it stays at top
       }
-      
+
       notifyListeners();
     } catch (e) {
       debugPrint('Error handling message edited socket event: $e');
@@ -1369,7 +1497,7 @@ class ChatProvider extends ChangeNotifier {
 
     // Ensure socket is connected when we start interacting with chat
     _socketService.connect();
-    
+
     // Check key sync status
     if (!_publicKeySavedOnServer) {
       checkServerSyncStatus();
@@ -1390,7 +1518,7 @@ class ChatProvider extends ChangeNotifier {
             try {
               final newJwk = conv.partner!.publicKey is String ? conv.partner!.publicKey : jsonEncode(conv.partner!.publicKey);
               final oldJwk = HiveService.getPartnerPublicKey(partnerId);
-              
+
               if (newJwk != oldJwk) {
                 debugPrint('E2EE: Detected updated public key in conversation list for $partnerId. Updating cache...');
                 await HiveService.savePartnerPublicKey(partnerId, newJwk);
@@ -1414,7 +1542,7 @@ class ChatProvider extends ChangeNotifier {
           } else {
             _blockedUserIds.remove(partnerId);
           }
-          
+
           if (conv.isBlockedByPartner == true) {
             _blockedByPartnerIds.add(partnerId);
           } else {
@@ -1442,7 +1570,7 @@ class ChatProvider extends ChangeNotifier {
     _conversations.sort((a, b) {
       if (a.isPinned == true && b.isPinned != true) return -1;
       if (a.isPinned != true && b.isPinned == true) return 1;
-      
+
       DateTime timeA = DateTime.tryParse(a.lastMessageAt ?? '') ?? DateTime(2000);
       DateTime timeB = DateTime.tryParse(b.lastMessageAt ?? '') ?? DateTime(2000);
       return timeB.compareTo(timeA);
@@ -1469,7 +1597,7 @@ class ChatProvider extends ChangeNotifier {
       if (kDebugMode) {
         debugPrint('Toggle pin response: $response');
       }
-      
+
       final index = _conversations.indexWhere((c) => c.sId == conversationId);
       if (index != -1) {
         _conversations[index].isPinned = !(_conversations[index].isPinned ?? false);
@@ -1522,10 +1650,10 @@ class ChatProvider extends ChangeNotifier {
     try {
       final response = await _chatRepository.fetchMessages(conversationId, page: page);
       _pagination = response.pagination;
-      
+
       // Reverse the list because API returns Oldest First, but we want Newest at index 0 for reverse ListView
       final List<MessageModel> newMessages = (response.data ?? []).reversed.toList();
-      
+
       // Decrypt messages
       String? partnerId = _activePartnerId;
       if (partnerId == null) {
@@ -1605,52 +1733,22 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> _decryptMessagesList(List<MessageModel> messages, String partnerId) async {
     // 1. Identify which messages actually need decryption.
-    // Plain text (isEncrypted == false or null) and call messages are untouched!
     final List<MessageModel> encryptedMessages = [];
     for (final m in messages) {
       if (m.isEncrypted == true && !m.isDecrypted) {
         encryptedMessages.add(m);
       }
     }
-
-    if (encryptedMessages.isEmpty) {
-      // Nothing to decrypt: plain text and call messages remain completely untouched!
-      return;
-    }
+    if (encryptedMessages.isEmpty) return;
 
     if (kDebugMode) {
       debugPrint('E2EE: Decrypting ${encryptedMessages.length} encrypted messages for partner $partnerId.');
     }
 
-    // 2. Look for any embedded partner public key in envelopes or message sender
-    dynamic partnerKeyFromMessages;
-    for (final m in encryptedMessages) {
-      if (m.sender?.publicKey != null) {
-        partnerKeyFromMessages = m.sender!.publicKey;
-        break;
-      }
-      if (m.encryption != null && m.encryption!['senderPublicKey'] != null) {
-        partnerKeyFromMessages = m.encryption!['senderPublicKey'];
-        break;
-      }
-      if (m.encryption != null && m.encryption!['envelopes'] is List) {
-        for (final env in m.encryption!['envelopes'] as List) {
-          if (env is Map && env['senderPublicKey'] != null) {
-            partnerKeyFromMessages = env['senderPublicKey'];
-            break;
-          }
-        }
-        if (partnerKeyFromMessages != null) break;
-      }
+    if (_myKeyPair == null) {
+      await ensureReady();
     }
-
-    SecretKey? secret = await _getSharedSecret(partnerId, providedPublicKeyJwk: partnerKeyFromMessages);
-
-    // If secret derivation failed, ONLY set placeholder on the encrypted messages that failed!
-    if (secret == null) {
-      if (kDebugMode) {
-        debugPrint('E2EE: Could not obtain shared secret for $partnerId. Setting placeholder ONLY on ${encryptedMessages.length} encrypted messages.');
-      }
+    if (_myKeyPair == null) {
       for (final msg in encryptedMessages) {
         msg.cipherText ??= msg.text;
         msg.text = '🔒 [Encrypted message]';
@@ -1658,48 +1756,39 @@ class ChatProvider extends ChangeNotifier {
       return;
     }
 
-    // Derive alternate secrets (Raw ECDH, Legacy, Hashed) for fallback
-    SecretKey? rawSecret;
-    final partnerKey = _partnerPublicKeys[partnerId];
-    if (_myKeyPair != null && partnerKey != null) {
-      try {
-        rawSecret = await EncryptionHelper.deriveSharedSecretRaw(_myKeyPair!, partnerKey);
-      } catch (e, st) {
-        if (kDebugMode) debugPrint('⚠️ [E2EE] deriveSharedSecretRaw error: $e\n$st');
-      }
-    }
-
-    SecretKey? legacySecret = await _getLegacySharedSecret(partnerId);
-
     final currentUserId = HiveService.userId ?? '';
     final myDeviceId = HiveService.getDeviceId();
     final myKeyId = currentUserId.isNotEmpty ? 'key_$currentUserId' : null;
 
-    bool recovered = false;
+    String? myJwk;
+    try {
+      myJwk = await EncryptionHelper.exportPublicKey(_myKeyPair!);
+    } catch (_) {}
+    final myFp = _fp(myJwk);
+    final myLocalKeyX8 = myJwk != null ? _extractX8(myJwk) : 'n/a';
 
-    String myLocalKeyX8 = 'n/a';
-    if (_myKeyPair != null) {
-      try {
-        final jwkStr = await EncryptionHelper.exportPublicKey(_myKeyPair!);
-        myLocalKeyX8 = _extractX8(jwkStr);
-      } catch (_) {
-        myLocalKeyX8 = 'n/a';
+    // Partner's CURRENT key: fetched lazily, at most once per batch, and only if the
+    // key embedded in the message itself did not work.
+    String? partnerCurrentJwk;
+    bool partnerFetched = false;
+    Future<String?> getPartnerCurrentJwk() async {
+      if (!partnerFetched) {
+        partnerFetched = true;
+        final fresh = await _fetchFreshPartnerKey(partnerId);
+        partnerCurrentJwk = fresh?['jwk'] as String?;
       }
+      return partnerCurrentJwk;
     }
 
     for (final msg in messages) {
-      // CRITICAL: if not encrypted, skip completely! Plain text and calls remain untouched!
-      if (msg.isEncrypted != true || msg.isDecrypted) {
-        continue;
-      }
+      if (msg.isEncrypted != true || msg.isDecrypted) continue;
 
       msg.cipherText ??= msg.text;
 
-      // Envelope lookup:
-      // Look for envelope matching current user first, with fallback to keyId/deviceId or single envelope
+      // ---- Envelope lookup (unchanged logic) --------------------------------
       String? cipherToDecrypt = msg.cipherText ?? msg.text;
       String? targetIv = msg.iv;
-      String matchMethod = 'koi nahi';
+      String matchMethod = 'none';
       Map<String, dynamic>? matchedEnvelope;
       int envelopesCount = 0;
 
@@ -1707,7 +1796,6 @@ class ChatProvider extends ChangeNotifier {
         final List envelopesList = msg.encryption!['envelopes'] as List;
         envelopesCount = envelopesList.length;
 
-        // 1. Primary match: envelope.userId == currentUserId
         if (currentUserId.isNotEmpty) {
           for (final env in envelopesList) {
             if (env is Map && env['userId']?.toString() == currentUserId) {
@@ -1717,8 +1805,6 @@ class ChatProvider extends ChangeNotifier {
             }
           }
         }
-
-        // 2. Fallback: match by keyId or deviceId
         if (matchedEnvelope == null) {
           for (final env in envelopesList) {
             if (env is Map) {
@@ -1736,166 +1822,60 @@ class ChatProvider extends ChangeNotifier {
             }
           }
         }
-
-        // 3. Fallback: if only 1 envelope is present
         if (matchedEnvelope == null && envelopesList.length == 1 && envelopesList.first is Map) {
           matchedEnvelope = Map<String, dynamic>.from(envelopesList.first);
           matchMethod = 'single fallback';
         }
-
         if (matchedEnvelope != null) {
           cipherToDecrypt = matchedEnvelope['ciphertext']?.toString() ?? cipherToDecrypt;
           targetIv = matchedEnvelope['iv']?.toString() ?? targetIv;
         }
       }
 
-      // Extract sender public key for diagnostic display
-      String senderKeyX8 = 'n/a';
-      try {
-        dynamic rawSenderKey = msg.sender?.publicKey ??
-            msg.encryption?['senderPublicKey'] ??
-            matchedEnvelope?['senderPublicKey'];
-        if (rawSenderKey == null && _partnerPublicKeys.containsKey(partnerId)) {
-          final pKey = _partnerPublicKeys[partnerId];
-          if (pKey != null) {
-            rawSenderKey = EncryptionHelper.exportPublicKeyJwk(pKey);
-          }
+      // ---- Which key was really used for THIS message? ----------------------
+      final String? embeddedSenderJwk =
+      _jwkToString(matchedEnvelope?['senderPublicKey'] ?? msg.encryption?['senderPublicKey']);
+      final String? embeddedRecipientJwk =
+      _jwkToString(matchedEnvelope?['recipientPublicKey'] ?? msg.encryption?['recipientPublicKey']);
+      final String? embeddedSenderFp = _fp(embeddedSenderJwk);
+
+      final bool isMine = (currentUserId.isNotEmpty && msg.sender?.sId == currentUserId) ||
+          (embeddedSenderFp != null && embeddedSenderFp == myFp);
+
+      final Map<String, String> attempts = {};
+      final Set<String> triedFps = {};
+      String usedKey = 'none';
+      final String? cipher = cipherToDecrypt;
+      final String? ivToUse = targetIv;
+
+      Future<bool> tryKey(String label, String? jwk) async {
+        final fp = _fp(jwk);
+        if (jwk == null || fp == null || cipher == null || cipher.isEmpty) return false;
+        if (!triedFps.add(fp)) return false; // already tried this exact key
+        final plain = await _decryptWithPeerKey(cipher, ivToUse, jwk, label, attempts);
+        if (plain != null) {
+          msg.text = plain;
+          msg.isDecrypted = true;
+          usedKey = '$label (x=${_extractX8(jwk)})';
+          return true;
         }
-        rawSenderKey ??= HiveService.getPartnerPublicKey(partnerId);
-        senderKeyX8 = _extractX8(rawSenderKey);
-      } catch (_) {
-        senderKeyX8 = 'n/a';
+        return false;
       }
 
-      String standardAttempt = 'Not attempted';
-      String rawAttempt = 'Not attempted';
-      String legacyAttempt = 'Not attempted';
-      String hashedAttempt = 'Not attempted';
-
-      if (cipherToDecrypt == null || cipherToDecrypt.isEmpty) {
-        if (kDebugMode) {
-          debugPrint('==================== [E2EE DIAGNOSTIC REPORT] ====================');
-          debugPrint('1. Message ID: ${msg.sId}, CreatedAt: ${msg.createdAt}');
-          debugPrint('2. isEncrypted: ${msg.isEncrypted}, isDecrypted: ${msg.isDecrypted}');
-          debugPrint('3. encryption.version: ${msg.encryption?['version']}, senderKeyId: ${msg.encryption?['senderKeyId']}, senderDeviceId: ${msg.encryption?['senderDeviceId']}, Envelopes Count: $envelopesCount');
-          debugPrint('4. Matched Envelope Method: $matchMethod');
-          debugPrint('5. Envelope userId: ${matchedEnvelope?['userId']}, CurrentUserId: $currentUserId');
-          debugPrint('6. SenderPublicKey.x (first 8): $senderKeyX8, LocalPublicKey.x (first 8): $myLocalKeyX8');
-          debugPrint('7. _myKeyPair is null: ${_myKeyPair == null} (${_myKeyPair != null ? 'NOT NULL' : 'NULL'})');
-          debugPrint('8. Decrypt Attempts: Skipped - ciphertext is null or empty');
-          debugPrint('==================================================================');
-        }
-        continue;
-      }
-
-      Future<void> attemptDecryption() async {
-        // 1. Try Standard Tweaked
-        if (secret != null) {
-          try {
-            final decrypted = await EncryptionHelper.decrypt(cipherToDecrypt!, secret, iv: targetIv);
-            if (decrypted != cipherToDecrypt) {
-              msg.text = decrypted;
-              msg.isDecrypted = true;
-              standardAttempt = 'SUCCESS';
-              return;
-            } else {
-              standardAttempt = 'Failed (decrypted == ciphertext)';
-            }
-          } catch (e) {
-            standardAttempt = 'Exception: [${e.runtimeType}] $e';
-          }
+      if (cipher != null && cipher.isNotEmpty) {
+        if (!isMine) {
+          // Received message: peer = the key the sender embedded in the message.
+          await tryKey('envelope.senderPublicKey', embeddedSenderJwk) ||
+              await tryKey('sender.profileKey', _jwkToString(msg.sender?.publicKey)) ||
+              await tryKey('partner.currentKey', await getPartnerCurrentJwk());
         } else {
-          standardAttempt = 'Skipped (secret is null)';
-        }
-
-        // 2. Try Raw 32-byte ECDH
-        if (rawSecret != null) {
-          try {
-            final decrypted = await EncryptionHelper.decrypt(cipherToDecrypt!, rawSecret, iv: targetIv);
-            if (decrypted != cipherToDecrypt) {
-              msg.text = decrypted;
-              msg.isDecrypted = true;
-              rawAttempt = 'SUCCESS';
-              return;
-            } else {
-              rawAttempt = 'Failed (decrypted == ciphertext)';
-            }
-          } catch (e) {
-            rawAttempt = 'Exception: [${e.runtimeType}] $e';
-          }
-        } else {
-          rawAttempt = 'Skipped (rawSecret is null)';
-        }
-
-        // 3. Try Legacy
-        if (legacySecret != null) {
-          try {
-            final decrypted = await EncryptionHelper.decrypt(cipherToDecrypt!, legacySecret, iv: targetIv);
-            if (decrypted != cipherToDecrypt) {
-              msg.text = decrypted;
-              msg.isDecrypted = true;
-              legacyAttempt = 'SUCCESS';
-              return;
-            } else {
-              legacyAttempt = 'Failed (decrypted == ciphertext)';
-            }
-          } catch (e) {
-            legacyAttempt = 'Exception: [${e.runtimeType}] $e';
-          }
-        } else {
-          legacyAttempt = 'Skipped (legacySecret is null)';
-        }
-
-        // 4. Try Hashed
-        try {
-          final pKey = _partnerPublicKeys[partnerId];
-          if (pKey != null && _myKeyPair != null) {
-            final hashedSecret = await EncryptionHelper.deriveSharedSecretHashed(_myKeyPair!, pKey);
-            final decrypted = await EncryptionHelper.decrypt(cipherToDecrypt!, hashedSecret, iv: targetIv);
-            if (decrypted != cipherToDecrypt) {
-              msg.text = decrypted;
-              msg.isDecrypted = true;
-              hashedAttempt = 'SUCCESS';
-              return;
-            } else {
-              hashedAttempt = 'Failed (decrypted == ciphertext)';
-            }
-          } else {
-            hashedAttempt = 'Skipped (pKey: ${pKey != null}, _myKeyPair: ${_myKeyPair != null})';
-          }
-        } catch (e) {
-          hashedAttempt = 'Exception: [${e.runtimeType}] $e';
+          // My own message: peer = the recipient key I encrypted to.
+          await tryKey('recipientPublicKey', embeddedRecipientJwk) ||
+              await tryKey('partner.currentKey', await getPartnerCurrentJwk()) ||
+              await tryKey('self(legacy-bug)', myJwk);
         }
       }
 
-      await attemptDecryption();
-
-      // If still failed and haven't tried recovery for this batch yet
-      if (!msg.isDecrypted && !recovered) {
-        if (kDebugMode) {
-          debugPrint('E2EE: Decryption failed for message sId: ${msg.sId}. Attempting cache recovery...');
-        }
-        recovered = true;
-        _partnerPublicKeys.remove(partnerId);
-        _sharedSecrets.remove(partnerId);
-        _legacySharedSecrets.remove(partnerId);
-        await HiveService.deletePartnerPublicKey(partnerId);
-
-        secret = await _getSharedSecret(partnerId, forceFetch: true);
-        final freshPartnerKey = _partnerPublicKeys[partnerId];
-        if (_myKeyPair != null && freshPartnerKey != null) {
-          try {
-            rawSecret = await EncryptionHelper.deriveSharedSecretRaw(_myKeyPair!, freshPartnerKey);
-          } catch (_) {}
-        }
-        legacySecret = await _getLegacySharedSecret(partnerId);
-
-        if (secret != null) {
-          await attemptDecryption();
-        }
-      }
-
-      // Safe fallback ONLY for this encrypted message
       if (!msg.isDecrypted) {
         msg.cipherText ??= msg.text;
         msg.text = '🔒 [Encrypted message]';
@@ -1904,17 +1884,14 @@ class ChatProvider extends ChangeNotifier {
       if (kDebugMode) {
         debugPrint('==================== [E2EE DIAGNOSTIC REPORT] ====================');
         debugPrint('1. Message ID: ${msg.sId}, CreatedAt: ${msg.createdAt}');
-        debugPrint('2. isEncrypted: ${msg.isEncrypted}, isDecrypted: ${msg.isDecrypted}');
+        debugPrint('2. isEncrypted: ${msg.isEncrypted}, isDecrypted: ${msg.isDecrypted}, isMine: $isMine');
         debugPrint('3. encryption.version: ${msg.encryption?['version']}, senderKeyId: ${msg.encryption?['senderKeyId']}, senderDeviceId: ${msg.encryption?['senderDeviceId']}, Envelopes Count: $envelopesCount');
         debugPrint('4. Matched Envelope Method: $matchMethod');
         debugPrint('5. Envelope userId: ${matchedEnvelope?['userId']}, CurrentUserId: $currentUserId');
-        debugPrint('6. SenderPublicKey.x (first 8): $senderKeyX8, LocalPublicKey.x (first 8): $myLocalKeyX8');
-        debugPrint('7. _myKeyPair is null: ${_myKeyPair == null} (${_myKeyPair != null ? 'NOT NULL' : 'NULL'})');
-        debugPrint('8. Decrypt Attempts:');
-        debugPrint('   - Standard: $standardAttempt');
-        debugPrint('   - Raw ECDH: $rawAttempt');
-        debugPrint('   - Legacy:   $legacyAttempt');
-        debugPrint('   - Hashed:   $hashedAttempt');
+        debugPrint('6. EmbeddedSenderKey.x: ${_extractX8(embeddedSenderJwk)}, EmbeddedRecipientKey.x: ${_extractX8(embeddedRecipientJwk)}, LocalPublicKey.x: $myLocalKeyX8');
+        debugPrint('7. Key used: $usedKey');
+        debugPrint('8. Decrypt Attempts: ${attempts.isEmpty ? 'none' : ''}');
+        attempts.forEach((k, v) => debugPrint('   - $k: $v'));
         debugPrint('==================================================================');
       }
     }
@@ -1945,9 +1922,10 @@ class ChatProvider extends ChangeNotifier {
       String? encryptedText = text;
       String? iv;
       bool isEncrypted = false;
+      Map<String, dynamic>? recipientCrypto;
       if (messageType == 'text' && text != null && partnerId != null) {
         debugPrint('E2EE: Attempting to encrypt message for partnerId: $partnerId');
-        
+
         if (_myKeyPair == null) {
           debugPrint('E2EE WARNING: My KeyPair is NULL. Ensuring ready...');
           await ensureReady();
@@ -1959,28 +1937,18 @@ class ChatProvider extends ChangeNotifier {
           await syncPublicKey();
         }
 
-        // PROACTIVE KEY LOOKUP: Try to find partner's public key in conversations list
-        dynamic partnerKeyFromMeta;
-        for (var conv in _conversations) {
-          final p = conv.partner;
-          if (p != null && ((p.sId == partnerId) || (p.id == partnerId))) {
-            partnerKeyFromMeta = p.publicKey;
-            if (partnerKeyFromMeta != null) {
-              debugPrint('E2EE: Proactively found partner key in conversation metadata');
-              break;
-            }
-          }
-        }
-
-        final secret = await _getSharedSecret(partnerId, providedPublicKeyJwk: partnerKeyFromMeta);
+        // Always encrypt to the partner's CURRENT key from the server.
+        // (Old code used conversation metadata + cached secret => stale key => receiver MAC error.)
+        recipientCrypto = await _prepareRecipientCrypto(partnerId);
+        final secret = recipientCrypto?['secret'] as SecretKey?;
 
         if (secret != null) {
           debugPrint('E2EE: Shared secret obtained. Calling EncryptionHelper.encrypt...');
           final encryptionResult = await EncryptionHelper.encrypt(text, secret);
-          
+
           final String? cipherText = encryptionResult['text'];
           final String? nonce = encryptionResult['iv'];
-          
+
           debugPrint('E2EE: Encryption Result - cipherText isNull: ${cipherText == null}, iv isNullOrEmpty: ${nonce == null || nonce.isEmpty}');
 
           if (cipherText != null && cipherText != text && nonce != null && nonce.isNotEmpty) {
@@ -2028,11 +1996,6 @@ class ChatProvider extends ChangeNotifier {
         }
       }
 
-      final partnerSession = partnerId != null ? _partnerSessions[partnerId] : null;
-      final recipientDeviceId = partnerSession?['deviceId'] ?? (partnerId != null ? 'dev_${partnerId}_01' : 'dev_unknown');
-      final recipientKeyId = partnerSession?['keyId'] ?? (partnerId != null ? 'key_$partnerId' : 'key_unknown');
-      final myKeyId = 'key_$myUserId';
-
       final Map<String, dynamic> data = {
         'conversationId': conversationId,
         'recipientId': partnerId,
@@ -2040,47 +2003,21 @@ class ChatProvider extends ChangeNotifier {
         'iv': iv ?? '',
         'messageType': messageType,
         'replyTo': actualReplyTo,
-        'text': encryptedText ?? text ?? '', 
+        'text': encryptedText ?? text ?? '',
+        // FIX: image/video/file messages were sent WITHOUT mediaUrl, so the server saved an empty URL.
+        if (mediaUrl != null && mediaUrl.isNotEmpty) 'mediaUrl': mediaUrl,
       };
 
       if (isEncrypted && encryptedText != null && iv != null && partnerId != null) {
-        final List<Map<String, dynamic>> envelopes = [
-          // 1. Recipient envelope
-          {
-            'userId': partnerId,
-            'deviceId': recipientDeviceId,
-            'keyId': recipientKeyId,
-            'senderDeviceId': myDeviceId,
-            'senderKeyId': myKeyId,
-            'senderPublicKey': myPublicKeyJwk,
-            'ciphertext': encryptedText,
-            'iv': iv,
-          },
-        ];
-
-        // 2. Sender-copy envelope so sender can decrypt their own sent messages!
-        if (myUserId.isNotEmpty) {
-          envelopes.add({
-            'userId': myUserId,
-            'deviceId': myDeviceId,
-            'keyId': myKeyId,
-            'senderDeviceId': myDeviceId,
-            'senderKeyId': myKeyId,
-            'senderPublicKey': myPublicKeyJwk,
-            'ciphertext': encryptedText,
-            'iv': iv,
-          });
-        }
-
-        data['encryption'] = {
-          'version': 2,
-          'senderDeviceId': myDeviceId,
-          'senderKeyId': myKeyId,
-          'senderPublicKey': myPublicKeyJwk,
-          'recipientDeviceId': recipientDeviceId,
-          'recipientKeyId': recipientKeyId,
-          'envelopes': envelopes,
-        };
+        data['encryption'] = _buildEncryptionPayload(
+          partnerId: partnerId,
+          myUserId: myUserId,
+          myDeviceId: myDeviceId,
+          myPublicKeyJwk: myPublicKeyJwk,
+          recipient: recipientCrypto,
+          ciphertext: encryptedText,
+          iv: iv,
+        );
         data['ciphertext'] = encryptedText;
         data['senderPublicKey'] = myPublicKeyJwk;
       }
@@ -2088,15 +2025,15 @@ class ChatProvider extends ChangeNotifier {
       final response = await _chatRepository.sendMessage(data);
       if (response['success'] == true) {
         clearReplyingMessage();
-        
+
         // OPTIMISTIC UPDATE: Add message to local list instead of re-fetching
         // This prevents the "blink" caused by fetchMessages(conversationId)
         final sentMessage = MessageModel.fromJson(response['data']);
-        
+
         // Decrypt for local display (it should be the plain text anyway, but good to be consistent)
         if (sentMessage.messageType == 'text') {
-           sentMessage.text = text;
-           sentMessage.isDecrypted = true;
+          sentMessage.text = text;
+          sentMessage.isDecrypted = true;
         }
 
         if (conversationId == _activeConversationId) {
@@ -2104,7 +2041,7 @@ class ChatProvider extends ChangeNotifier {
             _messages.insert(0, sentMessage);
           }
         }
-        
+
         // Update conversation last message
         final convIndex = _conversations.indexWhere((c) => c.sId == conversationId);
         if (convIndex != -1) {
@@ -2120,7 +2057,7 @@ class ChatProvider extends ChangeNotifier {
     } on dio.DioException catch (e) {
       if (e.response?.statusCode == 403) {
         _error = e.response?.data['message'] ?? "Cannot send message to blocked user";
-        
+
         // Immediately update local blocked status to hide typing bar
         final conv = _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel());
         if (conv.partner?.sId != null) {
@@ -2149,14 +2086,16 @@ class ChatProvider extends ChangeNotifier {
     try {
       await ensureReady();
       debugPrint('E2EE: Forwarding message to $recipientId');
-      
+
       String? textToForward = originalMessage.text;
       String? iv;
       bool isEncrypted = false;
-      
+      Map<String, dynamic>? recipientCrypto;
+
       // Ensure we have plain text to encrypt
       if (originalMessage.messageType == 'text' && textToForward != null) {
-        final secret = await _getSharedSecret(recipientId);
+        recipientCrypto = await _prepareRecipientCrypto(recipientId);
+        final secret = recipientCrypto?['secret'] as SecretKey?;
         if (secret != null) {
           final encryptionResult = await EncryptionHelper.encrypt(textToForward, secret);
           textToForward = encryptionResult['text'];
@@ -2196,14 +2135,9 @@ class ChatProvider extends ChangeNotifier {
         await HiveService.saveDeviceId(myDeviceId);
       }
 
-      final partnerSession = _partnerSessions[recipientId];
-      final targetDeviceId = partnerSession?['deviceId'] ?? 'dev_${recipientId}_01';
-      final targetKeyId = partnerSession?['keyId'] ?? 'key_$recipientId';
-      final myKeyId = 'key_$myUserId';
-
       // Find if we already have a conversation with the recipient
       final existingConv = _conversations.firstWhere(
-        (c) => c.partner?.sId == recipientId || c.partner?.id == recipientId,
+            (c) => c.partner?.sId == recipientId || c.partner?.id == recipientId,
         orElse: () => ConversationModel(),
       );
 
@@ -2221,43 +2155,15 @@ class ChatProvider extends ChangeNotifier {
       };
 
       if (isEncrypted && textToForward != null && iv != null) {
-        final List<Map<String, dynamic>> envelopes = [
-          // 1. Recipient envelope
-          {
-            'userId': recipientId,
-            'deviceId': targetDeviceId,
-            'keyId': targetKeyId,
-            'senderDeviceId': myDeviceId,
-            'senderKeyId': myKeyId,
-            'senderPublicKey': myPublicKeyJwk,
-            'ciphertext': textToForward,
-            'iv': iv,
-          },
-        ];
-
-        // 2. Sender-copy envelope
-        if (myUserId.isNotEmpty) {
-          envelopes.add({
-            'userId': myUserId,
-            'deviceId': myDeviceId,
-            'keyId': myKeyId,
-            'senderDeviceId': myDeviceId,
-            'senderKeyId': myKeyId,
-            'senderPublicKey': myPublicKeyJwk,
-            'ciphertext': textToForward,
-            'iv': iv,
-          });
-        }
-
-        data['encryption'] = {
-          'version': 2,
-          'senderDeviceId': myDeviceId,
-          'senderKeyId': myKeyId,
-          'senderPublicKey': myPublicKeyJwk,
-          'recipientDeviceId': targetDeviceId,
-          'recipientKeyId': targetKeyId,
-          'envelopes': envelopes,
-        };
+        data['encryption'] = _buildEncryptionPayload(
+          partnerId: recipientId,
+          myUserId: myUserId,
+          myDeviceId: myDeviceId,
+          myPublicKeyJwk: myPublicKeyJwk,
+          recipient: recipientCrypto,
+          ciphertext: textToForward,
+          iv: iv,
+        );
         data['ciphertext'] = textToForward;
         data['senderPublicKey'] = myPublicKeyJwk;
       }
@@ -2280,7 +2186,7 @@ class ChatProvider extends ChangeNotifier {
       await ensureReady();
       final conv = _conversations.firstWhere((c) => c.sId == conversationId, orElse: () => ConversationModel());
       final partnerId = conv.partner?.sId ?? conv.partner?.id;
-      
+
       // OPTIMISTIC UPDATE: Update UI instantly
       final index = _messages.indexWhere((m) => m.sId == messageId);
       if (index != -1) {
@@ -2303,7 +2209,8 @@ class ChatProvider extends ChangeNotifier {
       Map<String, dynamic>? encryptionMetadata;
 
       if (partnerId != null) {
-        final secret = await _getSharedSecret(partnerId);
+        final recipientCrypto = await _prepareRecipientCrypto(partnerId);
+        final secret = recipientCrypto?['secret'] as SecretKey?;
         if (secret != null) {
           final encryptionResult = await EncryptionHelper.encrypt(newText, secret);
           encryptedText = encryptionResult['text'] ?? newText;
@@ -2334,56 +2241,23 @@ class ChatProvider extends ChangeNotifier {
               await HiveService.saveDeviceId(myDeviceId);
             }
 
-            final partnerSession = _partnerSessions[partnerId];
-            final recipientDeviceId = partnerSession?['deviceId'] ?? 'dev_${partnerId}_01';
-            final recipientKeyId = partnerSession?['keyId'] ?? 'key_$partnerId';
-            final myKeyId = 'key_$myUserId';
-
-            final List<Map<String, dynamic>> envelopes = [
-              // 1. Recipient envelope
-              {
-                'userId': partnerId,
-                'deviceId': recipientDeviceId,
-                'keyId': recipientKeyId,
-                'senderDeviceId': myDeviceId,
-                'senderKeyId': myKeyId,
-                'senderPublicKey': myPublicKeyJwk,
-                'ciphertext': encryptedText,
-                'iv': iv,
-              },
-            ];
-
-            // 2. Sender-copy envelope
-            if (myUserId.isNotEmpty) {
-              envelopes.add({
-                'userId': myUserId,
-                'deviceId': myDeviceId,
-                'keyId': myKeyId,
-                'senderDeviceId': myDeviceId,
-                'senderKeyId': myKeyId,
-                'senderPublicKey': myPublicKeyJwk,
-                'ciphertext': encryptedText,
-                'iv': iv,
-              });
-            }
-
-            encryptionMetadata = {
-              'version': 2,
-              'senderDeviceId': myDeviceId,
-              'senderKeyId': myKeyId,
-              'senderPublicKey': myPublicKeyJwk,
-              'recipientDeviceId': recipientDeviceId,
-              'recipientKeyId': recipientKeyId,
-              'envelopes': envelopes,
-            };
+            encryptionMetadata = _buildEncryptionPayload(
+              partnerId: partnerId,
+              myUserId: myUserId,
+              myDeviceId: myDeviceId,
+              myPublicKeyJwk: myPublicKeyJwk,
+              recipient: recipientCrypto,
+              ciphertext: encryptedText,
+              iv: iv,
+            );
           }
         }
       }
 
       final response = await _chatRepository.editMessage(
-        messageId, 
-        encryptedText, 
-        isEncrypted: isEncrypted, 
+        messageId,
+        encryptedText,
+        isEncrypted: isEncrypted,
         iv: iv,
         encryption: encryptionMetadata,
       );
@@ -2433,7 +2307,7 @@ class ChatProvider extends ChangeNotifier {
   Future<void> reactToMessage(String messageId, String emoji) async {
     try {
       final currentUserId = HiveService.userId;
-      
+
       // Update locally for immediate feedback
       final index = _messages.indexWhere((m) => m.sId == messageId);
       if (index != -1) {
@@ -2546,7 +2420,7 @@ class ChatProvider extends ChangeNotifier {
       if (partnerId != null && _pinnedMessages.isNotEmpty) {
         await _decryptMessagesList(_pinnedMessages, partnerId);
       }
-      
+
       notifyListeners();
     } catch (e) {
       debugPrint('Error fetching pinned messages: $e');
@@ -2588,7 +2462,7 @@ class ChatProvider extends ChangeNotifier {
       // 2. Server Search
       final response = await _chatRepository.searchInMessages(query, conversationId: conversationId);
       final List<MessageModel> serverResults = response;
-      
+
       // Resolve partnerId for decryption
       String? partnerId;
       if (conversationId != null) {
@@ -2596,7 +2470,7 @@ class ChatProvider extends ChangeNotifier {
         partnerId = conv.partner?.sId ?? conv.partner?.id;
       }
       partnerId ??= _activePartnerId;
-      
+
       if (partnerId != null && serverResults.isNotEmpty) {
         await _decryptMessagesList(serverResults, partnerId);
       }
@@ -2609,7 +2483,7 @@ class ChatProvider extends ChangeNotifier {
           }
         }
       }
-      
+
       // Sort by date descending
       combinedResults.sort((a, b) {
         final aTime = DateTime.tryParse(a.createdAt ?? '') ?? DateTime(0);

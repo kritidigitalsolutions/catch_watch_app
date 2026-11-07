@@ -903,6 +903,7 @@ void _showOtherUserProfileMenu(BuildContext context, UserModel user) {
                   text: 'Check out ${user.name ?? 'this creator'} on Catch&Watch: @${user.username ?? ''}',
                   contentId: user.id,
                   contentType: 'user',
+                  context: context,
                 );
               },
             ),

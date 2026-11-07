@@ -2,8 +2,8 @@ import 'dart:io';
 
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/models/watchlist_model.dart';
+import 'package:catch_watch/utils/entitlement_helper.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
-import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/video_upload_provider.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/menu_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
@@ -13,7 +13,6 @@ import 'package:catch_watch/views/after_login_pages/profile_page/dashboard_scree
 import 'package:catch_watch/views/after_login_pages/profile_page/wallet_screen.dart';
 import 'package:catch_watch/view_model/after_login_provider/verification_provider.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/verification/verification_main_screen.dart';
-import 'package:catch_watch/views/after_login_pages/profile_page/vip_support/vip_support_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -21,6 +20,7 @@ import 'package:video_player/video_player.dart';
 import '../../../utils/empty_state_widget.dart';
 import '../../../utils/hive_service/hive_service.dart';
 import '../../../models/content_model.dart';
+import '../../../res/appUrl.dart';
 import '../../../res/app_colors.dart';
 import '../../../utils/text_style.dart';
 import '../../../view_model/after_login_provider/profile_provider.dart';
@@ -529,7 +529,7 @@ class _GridCard extends StatelessWidget {
     }
 
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
         if (item is VideoUploadProvider) return;
 
         if (item is ReelModel) {
@@ -551,37 +551,7 @@ class _GridCard extends StatelessWidget {
         } else if (item is WatchlistItem || item is Content) {
           final content = item is WatchlistItem ? item.item : item as Content;
           if (content == null) return;
-
-          if (content.type == 'shortFilm' || content.type == 'short' || content.type == 'shortfilm') {
-            final subProvider = context.read<SubscriptionProvider>();
-            bool canWatch = content.isPremium != true || subProvider.currentSubscription != null;
-
-            if (!canWatch) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
-              );
-              return;
-            }
-
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ShortVideoPlayerScreen(
-                  isVisible: true,
-                  initialReels: [ReelModel.fromContent(content)],
-                  showBackButton: true,
-                ),
-              ),
-            );
-            return;
-          }
-
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-                builder: (_) => MovieDetailScreen(content: content)),
-          );
+          await EntitlementHelper.openContent(context, content);
         }
       },
       child: ClipRRect(
@@ -729,12 +699,10 @@ class _VideoPreviewThumbnailState extends State<_VideoPreviewThumbnail> {
     super.initState();
     if (widget.videoUrl.startsWith('http')) {
       final token = HiveService.getToken();
-      Map<String, String> headers = {
-        'Referer': 'https://catchandwatch.com',
-      };
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-      }
+      final Map<String, String> headers = AppUrl.buildVideoRequestHeaders(
+        widget.videoUrl,
+        token: token,
+      );
       _controller = VideoPlayerController.networkUrl(
         Uri.parse(widget.videoUrl),
         httpHeaders: headers,

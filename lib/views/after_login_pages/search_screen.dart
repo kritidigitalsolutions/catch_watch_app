@@ -1,10 +1,10 @@
 import 'package:catch_watch/models/content_model.dart';
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/models/user_model.dart';
+import 'package:catch_watch/utils/entitlement_helper.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/user_search_provider.dart';
-import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/user_profile_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -308,12 +308,7 @@ class _SearchScreenState extends State<SearchScreen> {
         color: AppColors.primary,
       ),
       onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => MovieDetailScreen(content: item),
-          ),
-        );
+        EntitlementHelper.openContent(context, item);
       },
     );
   }

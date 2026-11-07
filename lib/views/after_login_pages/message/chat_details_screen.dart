@@ -1,6 +1,7 @@
 import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
 import 'package:catch_watch/views/after_login_pages/message/media_preview_screen.dart';
+import 'package:catch_watch/views/after_login_pages/report/report_bottom_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/text_style.dart';
@@ -41,12 +42,29 @@ class ChatDetailsScreen extends StatelessWidget {
                     builder: (context) => UserProfileScreen(username: username),
                   ),
                 );
+              } else if (value == 'report') {
+                showReportBottomSheet(
+                  context,
+                  targetType: 'user',
+                  targetId: partnerId,
+                  targetTitle: 'Report $name',
+                );
               }
             },
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: 'profile',
                 child: Text('View Profile'),
+              ),
+              const PopupMenuItem(
+                value: 'report',
+                child: Row(
+                  children: [
+                    Icon(Icons.flag_outlined, size: 20, color: Colors.redAccent),
+                    SizedBox(width: 8),
+                    Text('Report User', style: TextStyle(color: Colors.redAccent)),
+                  ],
+                ),
               ),
             ],
           ),
@@ -221,6 +239,26 @@ class ChatDetailsScreen extends StatelessWidget {
                       _showBlockDialog(context);
                     }
                   },
+                );
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.flag_outlined, color: Colors.redAccent),
+              title: const Text(
+                "Report User",
+                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                "Report @$username for inappropriate content, abuse, or spam",
+                style: text12(color: Colors.grey),
+              ),
+              onTap: () {
+                showReportBottomSheet(
+                  context,
+                  targetType: 'user',
+                  targetId: partnerId,
+                  targetTitle: 'Report $name',
                 );
               },
             ),

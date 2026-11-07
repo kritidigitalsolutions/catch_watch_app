@@ -5,7 +5,10 @@ import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:flutter/material.dart';
 
 class ReportProvider extends ChangeNotifier {
-  final ReportRepository _repository = ReportRepository();
+  final ReportRepository _repository;
+
+  ReportProvider({ReportRepository? repository})
+      : _repository = repository ?? ReportRepository();
 
   bool _isSubmitting = false;
   String? _errorMessage;
@@ -29,6 +32,10 @@ class ReportProvider extends ChangeNotifier {
     required String reason,
     String? description,
   }) async {
+    if (_isSubmitting) {
+      return null;
+    }
+
     if (!HiveService.isLogin()) {
       _errorMessage = 'You need to be logged in to submit a report.';
       notifyListeners();

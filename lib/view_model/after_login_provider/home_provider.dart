@@ -57,6 +57,9 @@ class HomeScreenProvider extends ChangeNotifier {
           title: itemData['title'],
           progress: itemData['progress'],
           remaining: itemData['remaining'],
+          positionMs: itemData['positionMs'] is int
+              ? itemData['positionMs'] as int
+              : int.tryParse(itemData['positionMs']?.toString() ?? ''),
           content: itemData['content'] != null ? Content.fromJson(Map<String, dynamic>.from(itemData['content'])) : null,
         );
       }).toList();
@@ -106,13 +109,15 @@ class HomeScreenProvider extends ChangeNotifier {
     if (total.inMilliseconds == 0) return;
     final progress = position.inMilliseconds / total.inMilliseconds;
     final remaining = total - position;
-    
+    final positionMs = position.inMilliseconds;
+
     final newItem = ContentItem(
       image: (content.banner != null && content.banner!.isNotEmpty) ? content.banner : content.poster ?? '',
       views: '100k',
       title: content.title ?? '',
       progress: progress.toStringAsFixed(2),
       remaining: '${remaining.inMinutes}m remaining',
+      positionMs: positionMs,
       content: content,
     );
 
@@ -122,6 +127,7 @@ class HomeScreenProvider extends ChangeNotifier {
       'title': newItem.title,
       'progress': newItem.progress,
       'remaining': newItem.remaining,
+      'positionMs': positionMs,
       'content': content.toJson(),
     });
 
@@ -259,6 +265,7 @@ class ContentItem {
   final String? episode;
   final String? badge;
   final String title;
+  final int? positionMs; // Last known playback position in milliseconds
   final Content? content;
 
   const ContentItem({
@@ -270,6 +277,7 @@ class ContentItem {
     this.meta,
     this.episode,
     this.badge,
+    this.positionMs,
     this.content,
   });
 }

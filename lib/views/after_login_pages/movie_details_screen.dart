@@ -1,27 +1,221 @@
 import 'package:catch_watch/models/content_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
+import 'package:catch_watch/utils/entitlement_helper.dart';
 import 'package:catch_watch/utils/text_style.dart';
 import 'package:catch_watch/utils/share_helper.dart';
 import 'package:catch_watch/view_model/after_login_provider/movie_details_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
+import 'package:catch_watch/views/after_login_pages/profile_page/subsrciption_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
 class MovieDetailScreen extends StatelessWidget {
   final Content content;
-  const MovieDetailScreen({super.key, required this.content});
+
+  /// When set, playback resumes from this position (Continue Watching).
+  final Duration? resumePosition;
+
+  const MovieDetailScreen({
+    super.key,
+    required this.content,
+    this.resumePosition,
+  });
 
   @override
   Widget build(BuildContext context) {
+    // Watch SubscriptionProvider so if subscription status updates while on this screen
+    // (e.g. following a modal purchase), the view unlocks automatically.
+    context.watch<SubscriptionProvider>();
+
+    // Centralized entitlement gate: every movie/TV entry point routes through
+    // this screen, so premium content can never be reached without an active
+    // subscription. Displays a locked view with a Subscribe CTA rather than embedding
+    // SubscriptionScreen directly in the route hierarchy.
+    if (!EntitlementHelper.canWatch(context, content)) {
+      return _LockedMovieDetailView(content: content);
+    }
+
     // Refresh watchlist when details are opened to ensure "Saved" status is up to date
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<WatchlistProvider>().fetchWatchlist();
     });
 
     return ChangeNotifierProvider(
-      create: (_) => MovieDetailProvider(content, context: context),
+      create: (_) => MovieDetailProvider(
+        content,
+        context: context,
+        initialPosition: resumePosition,
+      ),
       child: const _MovieDetailView(),
+    );
+  }
+}
+
+class _LockedMovieDetailView extends StatelessWidget {
+  final Content content;
+
+  const _LockedMovieDetailView({required this.content});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppColors.textPrimary),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          content.title ?? 'Movie Details',
+          style: text18(fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+        ),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Center(
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        width: 220,
+                        height: 320,
+                        color: AppColors.grey200,
+                        child: content.poster != null && content.poster!.isNotEmpty
+                            ? Image.network(
+                                content.poster!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) => const Icon(
+                                  Icons.movie_outlined,
+                                  size: 64,
+                                  color: AppColors.grey400,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.movie_outlined,
+                                size: 64,
+                                color: AppColors.grey400,
+                              ),
+                      ),
+                    ),
+                    Container(
+                      width: 220,
+                      height: 320,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        color: Colors.black.withOpacity(0.55),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: const BoxDecoration(
+                              color: AppColors.primary,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.lock_rounded, color: Colors.white, size: 36),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'PREMIUM',
+                            style: text14(color: Colors.white, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                content.title ?? 'Untitled',
+                textAlign: TextAlign.center,
+                style: text20(fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+              ),
+              const SizedBox(height: 8),
+              if (content.genre != null && content.genre!.isNotEmpty)
+                Text(
+                  content.genre!.join(' • '),
+                  textAlign: TextAlign.center,
+                  style: text13(color: AppColors.textSecondary),
+                ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF0E8),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.workspace_premium_rounded, color: AppColors.primary, size: 24),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Premium Subscription Required',
+                          style: text15(fontWeight: FontWeight.bold, color: AppColors.primary),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'This content is exclusively available to Catch & Watch Premium members. Subscribe to get unlimited access to all movies, series, and short films.',
+                      textAlign: TextAlign.center,
+                      style: text13(color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 28),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    elevation: 0,
+                  ),
+                  onPressed: () async {
+                    final subscribed = await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+                    );
+                    if (context.mounted && subscribed == true) {
+                      await context.read<SubscriptionProvider>().fetchSubscriptionStatus();
+                    }
+                  },
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.star_rounded, color: Colors.white, size: 22),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Subscribe to Watch',
+                        style: text16(fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -138,12 +332,43 @@ class _VideoContent extends StatelessWidget {
           children: [
             const Icon(Icons.error_outline, color: AppColors.white54, size: 40),
             const SizedBox(height: 10),
-            Text(
-              provider.errorMessage,
-              style: text13(color: AppColors.white54),
-              textAlign: TextAlign.center,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                provider.errorMessage,
+                style: text13(color: AppColors.white54),
+                textAlign: TextAlign.center,
+              ),
             ),
             const SizedBox(height: 12),
+            GestureDetector(
+              onTap: provider.retry,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.refresh_rounded,
+                      color: AppColors.white,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Retry',
+                      style: text13(
+                        color: AppColors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       );
@@ -617,6 +842,7 @@ class _HeaderActions extends StatelessWidget {
               imageUrl: content.poster,
               contentId: content.id,
               contentType: content.type ?? 'video',
+              context: context,
             );
           },
         ),

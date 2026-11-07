@@ -1,6 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:pinput/pinput.dart';
 import 'package:provider/provider.dart';
 import 'package:sms_autofill/sms_autofill.dart';
@@ -26,7 +26,9 @@ class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
     super.initState();
     _pinController.clear();
     _editTapRecognizer = TapGestureRecognizer()..onTap = _handleBackOrEdit;
-    listenForCode(); // Removed await as it's a void function
+    try {
+      listenForCode();
+    } catch (_) {}
     _printAppSignature();
     // Ensure focus on the first box and provider OTP is clean
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -55,14 +57,22 @@ class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
   }
 
   void _printAppSignature() async {
-    String signature = await SmsAutoFill().getAppSignature;
-    debugPrint("App Signature for SMS: $signature");
+    if (!kDebugMode) return;
+    try {
+      final bool debugEnabled =
+          mounted && context.read<AuthProvider>().isDebugMode;
+      if (!debugEnabled) return;
+      String signature = await SmsAutoFill().getAppSignature;
+      debugPrint("App Signature for SMS: $signature");
+    } catch (_) {}
   }
 
   @override
   void dispose() {
     _editTapRecognizer.dispose();
-    unregisterListener();
+    try {
+      unregisterListener().catchError((Object _) {});
+    } catch (_) {}
     _pinController.dispose();
     _pinFocusNode.dispose();
     super.dispose();
@@ -80,9 +90,20 @@ class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
 
     // Keep controller in sync if OTP is auto-filled in provider or reset
     if (auth.otpCode.isEmpty && _pinController.text.isNotEmpty) {
-      _pinController.clear();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && auth.otpCode.isEmpty && _pinController.text.isNotEmpty) {
+          _pinController.clear();
+        }
+      });
     } else if (auth.otpCode.length == 6 && _pinController.text != auth.otpCode) {
-      _pinController.text = auth.otpCode;
+      final String targetCode = auth.otpCode;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted &&
+            auth.otpCode == targetCode &&
+            _pinController.text != targetCode) {
+          _pinController.text = targetCode;
+        }
+      });
     }
 
     final defaultPinTheme = PinTheme(
@@ -101,7 +122,7 @@ class _OtpScreenState extends State<OtpScreen> with CodeAutoFill {
     );
 
     final submittedPinTheme = defaultPinTheme.copyDecorationWith(
-      color: AppColors.primary.withOpacity(0.08),
+      color: AppColors.primary.withValues(alpha: 0.08),
       border: Border.all(color: AppColors.primary),
     );
 

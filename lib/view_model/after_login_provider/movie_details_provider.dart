@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:catch_watch/models/content_model.dart';
+import 'package:catch_watch/res/appUrl.dart';
 import 'package:catch_watch/view_model/after_login_provider/home_provider.dart';
 import 'package:catch_watch/repository/content_repository.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
@@ -14,11 +15,23 @@ import 'package:http/http.dart' as http;
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
-class MovieDetailProvider extends ChangeNotifier {
+class MovieDetailProvider extends ChangeNotifier with WidgetsBindingObserver {
   // ── Data ──────────────────────────────────────────────────────────────────
   final Content content;
   final BuildContext? context;
   final ContentRepository _contentRepository = ContentRepository();
+
+  // ── Throttling ────────────────────────────────────────────────────────────
+  // Playback progress is persisted and the UI is notified on a throttle so we
+  // don't hit Hive / rebuild the player on every video frame tick.
+  static const Duration _progressSaveInterval = Duration(seconds: 5);
+  static const Duration _uiNotifyInterval = Duration(milliseconds: 500);
+  DateTime _lastProgressSave = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastUiNotify = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // Set when playback was paused because the app moved to the background, so
+  // it can be resumed automatically when the app returns to the foreground.
+  bool _resumeOnForeground = false;
 
   String? _currentBaseUrl; // Tracks the original URL (episode or movie) across quality/audio changes
 
@@ -106,8 +119,9 @@ class MovieDetailProvider extends ChangeNotifier {
 
   // ─────────────────────────────────────────────────────────────────────────
 
-  MovieDetailProvider(this.content, {this.context}) {
-    _initPlayer();
+  MovieDetailProvider(this.content, {this.context, Duration? initialPosition}) {
+    WidgetsBinding.instance.addObserver(this);
+    _initPlayer(initialPosition: initialPosition);
     if (content.type == 'tvshow') {
       _fetchEpisodes();
     }
@@ -115,6 +129,42 @@ class MovieDetailProvider extends ChangeNotifier {
     // Listen for calls
     if (context != null) {
       context!.read<CallProvider>().addListener(_callStatusListener);
+    }
+  }
+
+  // ── App lifecycle ─────────────────────────────────────────────────────────
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final ctrl = _videoController;
+    if (ctrl == null) return;
+
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+        // Persist the current position before the app is suspended, then pause
+        // so audio does not keep playing in the background.
+        _saveProgress();
+        if (ctrl.value.isPlaying) {
+          _resumeOnForeground = true;
+          ctrl.pause();
+          _audioController?.pause();
+        }
+        WakelockPlus.disable();
+        break;
+      case AppLifecycleState.resumed:
+        if (_resumeOnForeground) {
+          _resumeOnForeground = false;
+          if (_isInitialized) {
+            ctrl.play();
+            _audioController?.play();
+            WakelockPlus.enable();
+          }
+        }
+        break;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+        break;
     }
   }
 
@@ -202,21 +252,24 @@ class MovieDetailProvider extends ChangeNotifier {
       _detectQualityFromUrl(baseVideoUrl);
     }
 
-    // Load available qualities for HLS/MP4 if needed
+    // Load available qualities. Only an HLS master playlist exposes real,
+    // independently addressable variant URLs; for plain files (e.g. MP4) the
+    // API provides a single source, so we never advertise guessed qualities
+    // that would resolve to dead URLs.
     if (baseVideoUrl.startsWith('http') && _availableQualityUrls.isEmpty) {
       if (baseVideoUrl.contains('.m3u8')) {
         await _loadHlsQualities(baseVideoUrl);
-      } else if (baseVideoUrl.contains('.mp4')) {
-        _setupMp4Qualities(baseVideoUrl);
+      }
+      if (_availableQualityUrls.isEmpty) {
+        _availableQualityUrls = {'Auto': baseVideoUrl};
+        _qualityOptions = ['Auto'];
       }
     }
 
-    // 2. Quality Application
+    // 2. Quality Application (only real, discovered URLs are ever used)
     String finalVideoUrl = baseVideoUrl;
     if (_availableQualityUrls.containsKey(_selectedQuality)) {
       finalVideoUrl = _availableQualityUrls[_selectedQuality]!;
-    } else if (finalVideoUrl.startsWith('http') && _selectedQuality != 'Auto') {
-      finalVideoUrl = _applyQualityToUrl(finalVideoUrl, _selectedQuality);
     }
     debugPrint('Final Video URL (Quality: $_selectedQuality): $finalVideoUrl');
 
@@ -248,16 +301,16 @@ class MovieDetailProvider extends ChangeNotifier {
 
     try {
       final token = HiveService.getToken();
-      Map<String, String> headers = {'Referer': 'https://catchandwatch.com'};
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-      }
 
       // Initialize Video
       if (finalVideoUrl.startsWith('http')) {
+        final Map<String, String> videoHeaders = AppUrl.buildVideoRequestHeaders(
+          finalVideoUrl,
+          token: token,
+        );
         _videoController = VideoPlayerController.networkUrl(
           Uri.parse(finalVideoUrl),
-          httpHeaders: headers,
+          httpHeaders: videoHeaders,
           videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
         );
       } else {
@@ -272,9 +325,13 @@ class MovieDetailProvider extends ChangeNotifier {
       // Initialize Audio if needed
       if (isSeparateAudio && audioUrl != null) {
         if (audioUrl.startsWith('http')) {
+          final Map<String, String> audioHeaders = AppUrl.buildVideoRequestHeaders(
+            audioUrl,
+            token: token,
+          );
           _audioController = VideoPlayerController.networkUrl(
             Uri.parse(audioUrl),
-            httpHeaders: headers,
+            httpHeaders: audioHeaders,
           );
         } else {
           _audioController = VideoPlayerController.file(File(audioUrl));
@@ -304,10 +361,37 @@ class MovieDetailProvider extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('Error initializing player: $e');
+
+      // Quality fallback: if a non-Auto variant failed to load, retry once with
+      // the base URL so a bad quality URL never leaves the player dead.
+      if (_selectedQuality != 'Auto' && finalVideoUrl != baseVideoUrl) {
+        debugPrint('Quality "$_selectedQuality" failed to load; falling back to Auto.');
+        _selectedQuality = 'Auto';
+        if (_videoController != null) {
+          _videoController!.removeListener(_onVideoUpdate);
+          await _videoController!.dispose();
+          _videoController = null;
+        }
+        if (_audioController != null) {
+          await _audioController!.dispose();
+          _audioController = null;
+        }
+        await _initPlayer(initialPosition: initialPosition, autoPlay: autoPlay);
+        return;
+      }
+
       _hasError = true;
       _errorMessage = 'Could not load video. Please try again.';
       notifyListeners();
     }
+  }
+
+  /// Re-initializes the player after a playback failure (retry button).
+  Future<void> retry() async {
+    _hasError = false;
+    _errorMessage = '';
+    notifyListeners();
+    await _initPlayer(autoPlay: true);
   }
 
   void _onVideoUpdate() {
@@ -346,22 +430,45 @@ class MovieDetailProvider extends ChangeNotifier {
       notifyListeners();
     }
 
-    // Update continue watching in HomeProvider
-    if (ctrl.value.isPlaying && context != null) {
-      context!.read<HomeScreenProvider>().addToContinueWatching(
-        content,
-        ctrl.value.position,
-        ctrl.value.duration,
-      );
+    final now = DateTime.now();
+
+    // Persist the playback position to "Continue Watching" on a throttle so we
+    // don't hit Hive (disk I/O) on every frame tick.
+    if (ctrl.value.isPlaying &&
+        now.difference(_lastProgressSave) >= _progressSaveInterval) {
+      _saveProgress(timestamp: now);
     }
 
-    // Auto-hide controls while playing
-    if (ctrl.value.isPlaying) notifyListeners();
-
-    // Loop ended
-    if (ctrl.value.position >= ctrl.value.duration &&
-        ctrl.value.duration > Duration.zero) {
+    // Throttle UI rebuilds for the progress bar / time label while playing.
+    final bool ended = ctrl.value.duration > Duration.zero &&
+        ctrl.value.position >= ctrl.value.duration;
+    if (ended || now.difference(_lastUiNotify) >= _uiNotifyInterval) {
+      _lastUiNotify = now;
       notifyListeners();
+    }
+  }
+
+  /// Persists the current playback [position] so "Continue Watching" can resume
+  /// from where the user left off. Writes are throttled by [_progressSaveInterval]
+  /// when called from the frame listener; lifecycle events may force a save.
+  void _saveProgress({DateTime? timestamp}) {
+    final ctrl = _videoController;
+    final ctx = context;
+    if (ctrl == null || ctx == null || !_isInitialized) return;
+
+    final duration = ctrl.value.duration;
+    final position = ctrl.value.position;
+    if (duration <= Duration.zero || position <= Duration.zero) return;
+
+    _lastProgressSave = timestamp ?? DateTime.now();
+    try {
+      ctx.read<HomeScreenProvider>().addToContinueWatching(
+        content,
+        position,
+        duration,
+      );
+    } catch (e) {
+      debugPrint('Error saving playback progress: $e');
     }
   }
 
@@ -524,13 +631,14 @@ class MovieDetailProvider extends ChangeNotifier {
   Future<void> _loadHlsQualities(String masterUrl) async {
     try {
       final token = HiveService.getToken();
-      Map<String, String> headers = {
-        'Referer': 'https://catchandwatch.com',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-      };
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-      }
+      final Map<String, String> headers = AppUrl.buildVideoRequestHeaders(
+        masterUrl,
+        token: token,
+        extraHeaders: const <String, String>{
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        },
+      );
 
       final response = await http.get(Uri.parse(masterUrl), headers: headers);
       if (response.statusCode == 200) {
@@ -576,25 +684,6 @@ class MovieDetailProvider extends ChangeNotifier {
     }
   }
 
-  void _setupMp4Qualities(String url) {
-    _availableQualityUrls = {'Auto': url};
-    final qualities = ['1080p', '720p', '480p', '360p', '240p'];
-    for (var q in qualities) {
-      final qUrl = _applyQualityToUrl(url, q);
-      _availableQualityUrls[q] = qUrl;
-    }
-    _qualityOptions = _availableQualityUrls.keys.toList();
-    // Sort
-    final sortedKeys = _qualityOptions.where((k) => k != 'Auto').toList();
-    sortedKeys.sort((a, b) {
-      final vA = int.tryParse(a.replaceAll('p', '')) ?? 0;
-      final vB = int.tryParse(b.replaceAll('p', '')) ?? 0;
-      return vB.compareTo(vA);
-    });
-    _qualityOptions = ['Auto', ...sortedKeys];
-    notifyListeners();
-  }
-
   void setQuality(String quality) async {
     if (_selectedQuality == quality) return;
 
@@ -616,56 +705,6 @@ class MovieDetailProvider extends ChangeNotifier {
 
     await _initPlayer(initialPosition: currentPosition, autoPlay: wasPlaying);
     _resetHideTimer();
-  }
-
-  String _applyQualityToUrl(String url, String quality) {
-    if (!url.startsWith('http')) return url;
-
-    final qualityFolderRegex = RegExp(r'/(1080p|720p|480p|360p|240p)/', caseSensitive: false);
-    final qualityTagRegex = RegExp(r'[_-](1080p|720p|480p|360p|240p)(\.mp4|\.m3u8)', caseSensitive: false);
-
-    if (quality == 'Auto') {
-      if (url.contains(qualityFolderRegex)) return url.replaceFirst(qualityFolderRegex, '/');
-      if (url.contains(qualityTagRegex)) {
-        final extMatch = qualityTagRegex.firstMatch(url);
-        if (extMatch != null) {
-          return url.replaceFirst(qualityTagRegex, extMatch.group(2)!);
-        }
-      }
-      return url;
-    }
-
-    final String q = quality.toLowerCase();
-
-    // 1. HLS (.m3u8)
-    if (url.contains('.m3u8')) {
-      // Pattern: .../720p/playlist.m3u8
-      if (url.contains(qualityFolderRegex)) return url.replaceFirst(qualityFolderRegex, '/$q/');
-      
-      // Pattern: .../playlist.m3u8 -> .../720p/playlist.m3u8
-      if (url.contains('playlist.m3u8')) return url.replaceFirst('playlist.m3u8', '$q/playlist.m3u8');
-      
-      // Pattern: .../video.m3u8 -> .../video_720p.m3u8
-      if (url.contains(qualityTagRegex)) return url.replaceFirst(qualityTagRegex, '_$q.m3u8');
-      
-      // Default guess for HLS
-      if (!url.contains(q)) {
-        return url.replaceFirst('.m3u8', '_$q.m3u8');
-      }
-    }
-
-    // 2. MP4
-    if (url.contains('.mp4')) {
-      if (url.contains(qualityTagRegex)) return url.replaceFirst(qualityTagRegex, '_$q.mp4');
-      if (url.contains(qualityFolderRegex)) return url.replaceFirst(qualityFolderRegex, '/$q/');
-      
-      // Default guess for MP4: video.mp4 -> video_720p.mp4
-      if (!url.contains(q)) {
-        return url.replaceFirst('.mp4', '_$q.mp4');
-      }
-    }
-
-    return url;
   }
 
   // ── Audio Tracks ──────────────────────────────────────────────────────────
@@ -696,10 +735,15 @@ class MovieDetailProvider extends ChangeNotifier {
 
   void enterFullscreen(BuildContext context) {
     _isFullscreen = true;
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
+    // iPads support multitasking / Split View; forcing landscape breaks that,
+    // so we only lock landscape on phones and let tablets rotate freely.
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    if (!isTablet) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     notifyListeners();
   }

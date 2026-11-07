@@ -1,4 +1,5 @@
 import 'package:catch_watch/res/appUrl.dart';
+import 'package:dio/dio.dart' as dio;
 import '../data/network/api_network_service.dart';
 import '../data/network/base_api_service.dart';
 
@@ -24,10 +25,19 @@ class ReelsRepository {
     }
   }
 
-  Future<dynamic> uploadReel(dynamic data, {Function(int, int)? onSendProgress}) async {
+  Future<dynamic> uploadReel(
+    dynamic data, {
+    Function(int, int)? onSendProgress,
+    dio.CancelToken? cancelToken,
+  }) async {
     try {
       if (_apiService is NetworkApiService) {
-        return await (_apiService as NetworkApiService).postApiWithProgress(AppUrl.uploadReel, data, onSendProgress: onSendProgress);
+        return await _apiService.postApiWithProgress(
+          AppUrl.uploadReel,
+          data,
+          onSendProgress: onSendProgress,
+          cancelToken: cancelToken,
+        );
       }
       dynamic response = await _apiService.postApi(AppUrl.uploadReel, data);
       return response;

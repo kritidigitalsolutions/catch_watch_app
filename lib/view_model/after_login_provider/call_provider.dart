@@ -461,7 +461,16 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
 
         if (event is CallEventActionCallCallback) {
           debugPrint('📞 CallKit Callback (Notification Tapped)');
-          _showIncomingCallScreen();
+
+          // Route to the screen that matches the current call state so an
+          // already-connected call opens the active screen instead of a
+          // stale incoming screen.
+          if (_status == CallStatus.active) {
+            _showActiveCallScreen();
+          } else {
+            _showIncomingCallScreen();
+          }
+
           return;
         }
 
@@ -755,22 +764,17 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
               '${message.data}',
         );
 
-        final String type =
-            message.data['type']
-                ?.toString()
-                .toUpperCase() ??
-                '';
-
         // ------------------------------------------------------
-        // IMPORTANT:
+        // INCOMING CALL
         //
-        // Incoming calls are already displayed by CallKit.
-        //
-        // Do NOT call _handleIncomingCall() here.
+        // Reuse NotificationService's detection so the foreground path accepts
+        // exactly the same payload shapes as the background/CallKit path
+        // (e.g. type == 'VIDEO_CALL' / 'AUDIO_CALL', not only 'CALL').
         // ------------------------------------------------------
 
-        if (type == 'CALL' ||
-            type == 'INCOMING_CALL') {
+        if (NotificationService.isIncomingCallPayload(
+          message.data,
+        )) {
           debugPrint(
             '📞 Foreground Incoming call: showing UI',
           );
@@ -786,16 +790,11 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
         // CALL TERMINATION FROM FCM
         // ------------------------------------------------------
 
-        if (type == 'CALL_CANCELLED' ||
-            type == 'CALL_ENDED' ||
-            type == 'CALL_REJECTED' ||
-            type == 'CALL_BUSY' ||
-            type == 'CANCEL' ||
-            type == 'REJECTED' ||
-            type == 'ENDED' ||
-            type == 'BUSY') {
+        if (NotificationService.isCallEndPayload(
+          message.data,
+        )) {
           debugPrint(
-            '📴 Call termination received via FCM: $type',
+            '📴 Call termination received via FCM',
           );
 
           _handleCallEnd(
@@ -1557,7 +1556,14 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   // SHOW ACTIVE CALL SCREEN
   // ============================================================
 
-  void _showActiveCallScreen() {
+  Future<void> _showActiveCallScreen() async {
+    // Wait for navigator to be ready if the app is just launching.
+    int retry = 0;
+    while (navigatorKey.currentState == null && retry < 20) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      retry++;
+    }
+
     final NavigatorState? navigator =
         navigatorKey.currentState;
 
@@ -2109,7 +2115,15 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
           onTokenPrivilegeWillExpire:
               (RtcConnection connection, String token) async {
             debugPrint('⚠️ [AGORA_RTC] Token privilege will expire soon');
-            await _refreshRtcToken();
+            final success = await _refreshRtcToken();
+            if (!success) {
+              // Proactive refresh failed. The current token is still valid
+              // until it actually expires, so onRequestToken/onError will retry
+              // and terminate only if renewal genuinely cannot be obtained.
+              debugPrint(
+                '⚠️ [AGORA_RTC] Proactive token refresh failed; awaiting expiry callback',
+              );
+            }
           },
           onRequestToken: (RtcConnection connection) async {
             debugPrint('⚠️ [AGORA_RTC] Token expired, requesting fresh token');
@@ -2192,23 +2206,50 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
   // REFRESH RTC TOKEN
   // ============================================================
 
-  bool _isRefreshingRtcToken = false;
+  /// Shared in-flight RTC token refresh.
+  ///
+  /// Agora can fire several callbacks (onTokenPrivilegeWillExpire,
+  /// onRequestToken, onConnectionStateChanged, onError) inside the same
+  /// window. They must all observe ONE backend request and the SAME result,
+  /// instead of short-circuiting with a spurious `false` that tears down a
+  /// healthy call.
+  Future<bool>? _rtcTokenRefreshFuture;
+  String? _rtcTokenRefreshCallId;
 
-  Future<bool> _refreshRtcToken() async {
+  Future<bool> _refreshRtcToken() {
+    final callId = _currentCall?.sId;
+    // Reuse the in-flight refresh only for the SAME call, so simultaneous
+    // callbacks share a single API request and receive the same outcome. A
+    // different call always triggers its own refresh.
+    final existing = _rtcTokenRefreshFuture;
+    if (existing != null && _rtcTokenRefreshCallId == callId) {
+      debugPrint(
+        '⏳ [AGORA_RTC] Token refresh already in progress, awaiting shared request',
+      );
+      return existing;
+    }
+
+    final future = _performRtcTokenRefresh();
+    _rtcTokenRefreshFuture = future;
+    _rtcTokenRefreshCallId = callId;
+    // Clear the slot only if this refresh is still the active one, so a later
+    // refresh is never discarded by an earlier completion.
+    future.whenComplete(() {
+      if (identical(_rtcTokenRefreshFuture, future)) {
+        _rtcTokenRefreshFuture = null;
+        _rtcTokenRefreshCallId = null;
+      }
+    });
+    return future;
+  }
+
+  Future<bool> _performRtcTokenRefresh() async {
     final callId = _currentCall?.sId;
     if (callId == null || callId.isEmpty) {
       debugPrint('❌ [AGORA_RTC] Cannot refresh token: missing callId');
       return false;
     }
 
-    if (_isRefreshingRtcToken) {
-      debugPrint(
-        '⏳ [AGORA_RTC] Token refresh already in progress, skipping duplicate request',
-      );
-      return false;
-    }
-
-    _isRefreshingRtcToken = true;
     try {
       debugPrint('🔄 [AGORA_RTC] Fetching fresh token for call: $callId');
       final String freshToken = await _callRepository.getCallToken(callId);
@@ -2236,8 +2277,6 @@ class CallProvider extends ChangeNotifier with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('❌ [AGORA_RTC] Failed to refresh token: $e');
       return false;
-    } finally {
-      _isRefreshingRtcToken = false;
     }
   }
 

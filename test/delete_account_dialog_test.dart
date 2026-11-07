@@ -183,7 +183,7 @@ void main() {
         ..mockSuccess = true
         ..mockSub = SubscriptionData(
           status: 'active',
-          endDate: '2026-11-15T00:00:00.000Z',
+          endDate: DateTime.now().add(const Duration(days: 32)).toIso8601String(),
           gateway: 'apple',
         )
         ..mockRemainingDays = 32;
@@ -348,7 +348,7 @@ void main() {
         ..mockSuccess = true
         ..mockSub = SubscriptionData(
           status: 'active',
-          endDate: '2026-11-15T00:00:00.000Z',
+          endDate: DateTime.now().add(const Duration(days: 32)).toIso8601String(),
           gateway: 'apple',
         )
         ..mockRemainingDays = 32;
@@ -455,7 +455,7 @@ void main() {
         ..mockSuccess = true
         ..mockSub = SubscriptionData(
           status: 'cancelled',
-          endDate: '2026-10-31T00:00:00.000Z',
+          endDate: DateTime.now().add(const Duration(days: 17)).toIso8601String(),
           gateway: 'apple',
         )
         ..mockRemainingDays = 17;
@@ -562,6 +562,97 @@ void main() {
 
       // Confirms transition succeeded to Step 2
       expect(find.text('Apple Subscription Notice'), findsOneWidget);
+    });
+
+    testWidgets(
+        'Scenario J: Lifecycle guard prevents duplicate dialogs and resets on Cancel, widget disposal, and showDialog exceptions',
+        (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(800, 1400);
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final subProvider = MockSubscriptionProvider()..mockSub = null;
+      final profileProvider = MockProfileProvider();
+      final authProvider = MockAuthProvider();
+
+      late BuildContext savedBtnContext;
+      await tester.pumpWidget(
+        createTestApp(
+          subProvider: subProvider,
+          profileProvider: profileProvider,
+          authProvider: authProvider,
+          child: Builder(
+            builder: (ctx) {
+              savedBtnContext = ctx;
+              return ElevatedButton(
+                onPressed: () => showDeleteAccountDialog(ctx, entryPoint: 'lifecycle_test'),
+                child: const Text('Open Dialog'),
+              );
+            },
+          ),
+        ),
+      );
+
+      expect(isDeleteAccountDialogOpen, isFalse);
+
+      // 1. Open dialog and attempt duplicate open while already visible
+      await tester.tap(find.text('Open Dialog'));
+      await tester.pumpAndSettle();
+      expect(isDeleteAccountDialogOpen, isTrue);
+      expect(find.byType(DeleteAccountDialog), findsOneWidget);
+
+      // Duplicate invocation while open must be ignored
+      showDeleteAccountDialog(savedBtnContext, entryPoint: 'duplicate_attempt');
+      await tester.pumpAndSettle();
+      expect(find.byType(DeleteAccountDialog), findsOneWidget);
+
+      // 2. Dismiss via Cancel button -> guard resets to false and dialog can re-open
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(isDeleteAccountDialogOpen, isFalse);
+      expect(find.byType(DeleteAccountDialog), findsNothing);
+
+      // Re-open dialog
+      await tester.tap(find.text('Open Dialog'));
+      await tester.pumpAndSettle();
+      expect(isDeleteAccountDialogOpen, isTrue);
+      expect(find.byType(DeleteAccountDialog), findsOneWidget);
+
+      // 3. Replace entire widget tree without popping dialog -> dispose() resets guard
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      expect(isDeleteAccountDialogOpen, isFalse);
+
+      // 4. Synchronous exception in showDialog (context without Navigator) resets guard
+      late BuildContext contextWithoutNavigator;
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Builder(
+            builder: (ctx) {
+              contextWithoutNavigator = ctx;
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      );
+      expect(
+        () => showDeleteAccountDialog(contextWithoutNavigator, entryPoint: 'no_navigator'),
+        throwsFlutterError,
+      );
+      expect(isDeleteAccountDialogOpen, isFalse);
+
+      // 5. Subsequent valid call still opens the dialog normally
+      await tester.pumpWidget(
+        createTestApp(
+          subProvider: subProvider,
+          profileProvider: profileProvider,
+          authProvider: authProvider,
+        ),
+      );
+      await tester.tap(find.text('Open Dialog'));
+      await tester.pumpAndSettle();
+      expect(isDeleteAccountDialogOpen, isTrue);
+      expect(find.byType(DeleteAccountDialog), findsOneWidget);
     });
   });
 }

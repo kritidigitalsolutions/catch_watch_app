@@ -12,9 +12,27 @@ import '../../../view_model/before_login_provider/auth_providers.dart';
 
 bool _isDeleteAccountDialogOpen = false;
 
+/// Whether a [DeleteAccountDialog] instance is currently open.
+@visibleForTesting
+bool get isDeleteAccountDialogOpen => _isDeleteAccountDialogOpen;
+
+/// Resets the open guard flag (used on close, dismissal, errors, and disposal).
+void _resetDeleteAccountDialogOpenGuard(String source) {
+  if (_isDeleteAccountDialogOpen) {
+    _isDeleteAccountDialogOpen = false;
+    debugPrint('[DELETE_ACCOUNT] Open guard reset ($source)');
+  }
+}
+
 /// Displays the compliant confirmation flow for deleting the user's account,
 /// including StoreKit subscription guidance for Apple users.
 void showDeleteAccountDialog(BuildContext context, {String entryPoint = 'unknown'}) {
+  if (!context.mounted) {
+    debugPrint(
+      '[DELETE_ACCOUNT] Context not mounted, aborting dialog open (entryPoint: $entryPoint)',
+    );
+    return;
+  }
   if (_isDeleteAccountDialogOpen) {
     debugPrint(
       '[DELETE_ACCOUNT] Dialog already open, ignoring duplicate request (entryPoint: $entryPoint)',
@@ -24,17 +42,21 @@ void showDeleteAccountDialog(BuildContext context, {String entryPoint = 'unknown
   _isDeleteAccountDialogOpen = true;
   debugPrint('[DELETE_ACCOUNT] Dialog opened from entryPoint: $entryPoint');
 
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogContext) => DeleteAccountDialog(
-      parentContext: context,
-      entryPoint: entryPoint,
-    ),
-  ).then((_) {
-    _isDeleteAccountDialogOpen = false;
-    debugPrint('[DELETE_ACCOUNT] Dialog dismissed/popped from navigation stack');
-  });
+  try {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => DeleteAccountDialog(
+        parentContext: context,
+        entryPoint: entryPoint,
+      ),
+    ).whenComplete(() {
+      _resetDeleteAccountDialogOpenGuard('dialog route completed/dismissed');
+    });
+  } catch (e) {
+    _resetDeleteAccountDialogOpenGuard('exception in showDialog: $e');
+    rethrow;
+  }
 }
 
 class DeleteAccountDialog extends StatefulWidget {
@@ -104,6 +126,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
 
   @override
   void dispose() {
+    _resetDeleteAccountDialogOpenGuard('widget dispose');
     WidgetsBinding.instance.removeObserver(this);
     _otherReasonController.dispose();
     debugPrint(
@@ -1422,13 +1445,21 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
 
                 setState(() => _deletionError = null);
 
-                final success = await profileProvider.deleteAccount(
-                  reason: reason,
-                  reasonDetails: reasonDetails,
-                  context: effectiveContext,
-                );
+                bool success = false;
+                String? caughtError;
+                try {
+                  success = await profileProvider.deleteAccount(
+                    reason: reason,
+                    reasonDetails: reasonDetails,
+                    context: effectiveContext,
+                  );
+                } catch (e) {
+                  caughtError = e.toString().replaceAll('Exception: ', '').trim();
+                  success = false;
+                }
 
                 if (success) {
+                  _resetDeleteAccountDialogOpenGuard('account deletion succeeded');
                   if (dialogCtx.mounted) {
                     Navigator.pop(dialogCtx);
                   }
@@ -1454,12 +1485,15 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
                     ),
                   );
                 } else {
-                  debugPrint('[DELETE_ACCOUNT] Account deletion failed: ${profileProvider.deleteAccountError}');
-                  final errorMsg = profileProvider.deleteAccountError ??
+                  debugPrint('[DELETE_ACCOUNT] Account deletion failed: ${caughtError ?? profileProvider.deleteAccountError}');
+                  final errorMsg = caughtError ??
+                      profileProvider.deleteAccountError ??
                       'Unable to delete your account right now. Please try again.';
-                  setState(() {
-                    _deletionError = errorMsg;
-                  });
+                  if (mounted) {
+                    setState(() {
+                      _deletionError = errorMsg;
+                    });
+                  }
                   scaffoldMessenger.showSnackBar(
                     SnackBar(
                       content: Text(errorMsg),

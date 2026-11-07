@@ -166,27 +166,31 @@ class _ReportBottomSheetState extends State<ReportBottomSheet> {
     if (!mounted) return;
 
     if (response != null && response.success) {
-      Navigator.of(context).pop(true);
-      ScaffoldMessenger.of(widget.parentContext).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  response.message,
-                  style: text13(color: Colors.white, fontWeight: FontWeight.w500),
+      if (widget.parentContext.mounted) {
+        ScaffoldMessenger.of(widget.parentContext).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    response.message,
+                    style: text13(color: Colors.white, fontWeight: FontWeight.w500),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
+            backgroundColor: AppColors.primary,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            duration: const Duration(seconds: 4),
           ),
-          backgroundColor: AppColors.primary,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          duration: const Duration(seconds: 4),
-        ),
-      );
+        );
+      }
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
     } else {
       // Failure stays open, displays message, allows retrying
       setState(() {

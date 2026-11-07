@@ -1,10 +1,11 @@
+import 'dart:async';
 import 'dart:io';
-
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/share_helper.dart';
 import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/user_profile_screen.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -21,6 +22,102 @@ import 'package:catch_watch/views/after_login_pages/report/report_bottom_sheet.d
 import 'package:catch_watch/view_model/after_login_provider/block_provider.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/block_confirmation_dialog.dart';
 import 'package:catch_watch/view_model/after_login_provider/user_search_provider.dart';
+
+/// Why a reel video failed to play (drives the message shown to the user).
+enum _PlaybackFailureKind {
+  none(''),
+  missingUrl('This video has no playable link.'),
+  blockedContent("This video type isn't available on iOS."),
+  invalidUrl('The video link is invalid.'),
+  expiredOrDenied(
+      'The video link expired or access was denied. Pull down to refresh the feed.'),
+  notFound('This video is no longer available.'),
+  serverError('The video server is having problems. Please try again shortly.'),
+  network('Check your internet connection and retry.'),
+  timeout('The video took too long to load. Please retry.'),
+  unsupportedFormat("This video format isn't supported on your device."),
+  unknown('Something went wrong while loading this video.');
+
+  const _PlaybackFailureKind(this.userMessage);
+  final String userMessage;
+}
+
+/// Result of a lightweight reachability probe against a video URL.
+class ReelVideoProbeResult {
+  final int? statusCode;
+  final String? contentType;
+  final Object? error;
+  const ReelVideoProbeResult({this.statusCode, this.contentType, this.error});
+}
+
+typedef ReelVideoProbe = Future<ReelVideoProbeResult> Function(
+  String url,
+  Map<String, String> headers,
+);
+
+Future<ReelVideoProbeResult> _defaultReelVideoProbe(
+  String url,
+  Map<String, String> headers,
+) async {
+  final HttpClient client = HttpClient()
+    ..connectionTimeout = const Duration(seconds: 8);
+  try {
+    final HttpClientRequest request = await client
+        .getUrl(Uri.parse(url))
+        .timeout(const Duration(seconds: 8));
+    headers.forEach(request.headers.set);
+    request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-1');
+    final HttpClientResponse response =
+        await request.close().timeout(const Duration(seconds: 8));
+    final String? contentType = response.headers.contentType?.mimeType;
+    await response.drain<void>().timeout(const Duration(seconds: 4));
+    return ReelVideoProbeResult(
+      statusCode: response.statusCode,
+      contentType: contentType,
+    );
+  } catch (e) {
+    return ReelVideoProbeResult(error: e);
+  } finally {
+    client.close(force: true);
+  }
+}
+
+/// Probe used to diagnose failed playback. Overridable in tests.
+ReelVideoProbe debugReelVideoProbe = _defaultReelVideoProbe;
+
+/// Removes query strings/fragments/userinfo so signed URLs and tokens never reach logs.
+String redactReelUrl(String url) {
+  final Uri? uri = Uri.tryParse(url);
+  if (uri == null || !uri.hasScheme) return url.split('?').first;
+  final String hasQuery = uri.hasQuery ? '?<redacted>' : '';
+  return '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}${uri.path}$hasQuery';
+}
+
+/// Maps a probe result to a failure kind, or `null` if the probe cannot explain the failure.
+_PlaybackFailureKind? _classifyReelProbe(ReelVideoProbeResult probe) {
+  final Object? error = probe.error;
+  if (error != null) {
+    if (error is TimeoutException) return _PlaybackFailureKind.timeout;
+    if (error is SocketException || error is HandshakeException) {
+      return _PlaybackFailureKind.network;
+    }
+    return null;
+  }
+  final int? status = probe.statusCode;
+  if (status == null) return null;
+  if (status == 401 || status == 403) return _PlaybackFailureKind.expiredOrDenied;
+  if (status == 404 || status == 410) return _PlaybackFailureKind.notFound;
+  if (status >= 500) return _PlaybackFailureKind.serverError;
+  if (status >= 400 && status != 416) return _PlaybackFailureKind.unknown;
+  final String type = (probe.contentType ?? '').toLowerCase();
+  if (type.startsWith('text/') ||
+      type == 'application/json' ||
+      type.startsWith('image/')) {
+    return _PlaybackFailureKind.unsupportedFormat;
+  }
+  // Reachable, 2xx and video-ish content: the player rejected it, most likely a codec/container issue.
+  return _PlaybackFailureKind.unsupportedFormat;
+}
 
 class ShortVideoPlayerScreen extends StatefulWidget {
   final bool isVisible;
@@ -44,17 +141,42 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
   late final PageController _pageController;
   late int _currentIndex;
 
+  List<ReelModel> _getDisplayReels(ReelsProvider provider) {
+    final List<ReelModel> source = widget.initialReels ?? provider.reels;
+    return source.where(provider.shouldIncludeReelInFeed).toList();
+  }
+
+  int _resolveInitialIndex() {
+    final List<ReelModel>? initialList = widget.initialReels;
+    if (initialList == null || initialList.isEmpty) {
+      return widget.initialIndex;
+    }
+    final List<ReelModel> filtered = ReelsProvider.filterPlayableReels(initialList);
+    if (filtered.isEmpty) return 0;
+
+    if (widget.initialIndex >= 0 && widget.initialIndex < initialList.length) {
+      final ReelModel selected = initialList[widget.initialIndex];
+      final int matchedIndex = filtered.indexWhere(
+        (r) => identical(r, selected) || (r.id != null && r.id == selected.id),
+      );
+      if (matchedIndex != -1) return matchedIndex;
+    }
+    return widget.initialIndex.clamp(0, filtered.length - 1);
+  }
+
   @override
   void initState() {
     super.initState();
-    _currentIndex = widget.initialIndex;
-    _pageController = PageController(initialPage: widget.initialIndex);
+    _currentIndex = _resolveInitialIndex();
+    _pageController = PageController(initialPage: _currentIndex);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final reelsProvider = context.read<ReelsProvider>();
       if (widget.initialReels != null) {
-        reelsProvider.applyInteractionsTo(widget.initialReels!);
+        reelsProvider.applyInteractionsTo(
+          _getDisplayReels(reelsProvider),
+        );
       } else {
         if (!reelsProvider.hasFetchedFeed && !reelsProvider.isLoading) {
           reelsProvider.fetchReelsFeed().then((_) {
@@ -96,12 +218,12 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
     await reelsProvider.ensureReelVisible(targetId);
     
     final index = reelsProvider.reels.indexWhere((r) => r.id == targetId);
-    if (index != -1 && mounted) {
-      if (_pageController.hasClients) {
+    if (mounted) {
+      if (index != -1 && _pageController.hasClients) {
         _pageController.jumpToPage(index);
         setState(() => _currentIndex = index);
-        reelsProvider.setTargetReelId(null);
       }
+      reelsProvider.setTargetReelId(null);
     }
   }
 
@@ -190,8 +312,6 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
                           itemBuilder: (context, index) {
                             final comment = p.currentComments[index];
                             final user = comment['user'];
-                            final String? commentAuthorId = user is Map ? user['_id']?.toString() : user?.toString();
-                            final bool isAuthor = currentUserId != null && commentAuthorId == currentUserId;
                             final bool isPinned = comment['isPinned'] ?? false;
 
                             return GestureDetector(
@@ -205,16 +325,20 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    CircleAvatar(
+                                    _SafeCircularImage(
                                       radius: 16,
-                                      backgroundImage: user?['profileImage'] != null && user['profileImage'].toString().isNotEmpty
-                                          ? NetworkImage(user['profileImage'].toString().startsWith('http') 
-                                              ? user['profileImage'] 
-                                              : '${AppUrl.serverUrl}/${user['profileImage']}')
-                                          : null,
-                                      child: user?['profileImage'] == null || user!['profileImage'].toString().isEmpty
-                                          ? Text(user?['name']?[0] ?? '?')
-                                          : null,
+                                      imageUrl: ReelModel.normalizeMediaUrl(
+                                        user is Map ? user['profileImage']?.toString() : null,
+                                      ),
+                                      backgroundColor: AppColors.primary,
+                                      fallback: Text(
+                                        (user is Map &&
+                                                user['name'] != null &&
+                                                user['name'].toString().trim().isNotEmpty)
+                                            ? user['name'].toString().trim()[0]
+                                            : '?',
+                                        style: text12(color: Colors.white, fontWeight: FontWeight.w700),
+                                      ),
                                     ),
                                     const SizedBox(width: 12),
                                     Expanded(
@@ -485,6 +609,7 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
                     imageUrl: reel.thumbnail,
                     contentId: reel.id,
                     contentType: 'reel',
+                    context: context,
                   );
                 },
               ),
@@ -499,7 +624,7 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<ReelsProvider>();
-    final reels = widget.initialReels ?? provider.reels;
+    final reels = _getDisplayReels(provider);
     final bool canPop = Navigator.canPop(context);
     final bool shouldShowBack = widget.showBackButton ?? (canPop && widget.initialReels != null);
 
@@ -639,6 +764,39 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
       );
     }
 
+    Widget buildPager() {
+      return PageView.builder(
+        controller: _pageController,
+        scrollDirection: Axis.vertical,
+        itemCount: reels.length,
+        onPageChanged: _onPageChanged,
+        // Always scrollable so pull-to-refresh works even with a single reel.
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        itemBuilder: (context, index) {
+          final reel = reels[index];
+          return _ShortVideoPage(
+            key: ValueKey(
+              '${reel.isSponsoredAd ? "ad" : "reel"}_${reel.id ?? reel.adId ?? index}_${reel.videoUrl ?? ""}',
+            ),
+            reel: reel,
+            isActive: widget.isVisible && index == _currentIndex,
+            onLike: () {
+              if (reel.id != null) provider.toggleLike(reel.id!, reel: reel);
+            },
+            onSave: () {
+              if (reel.id != null) provider.toggleBookmark(reel.id!, reel: reel);
+            },
+            onComment: () => _showComments(reel),
+            onMore: () => _showReelOptions(context, reel),
+            onRefreshFeed:
+                widget.initialReels == null ? _refreshFeed : null,
+          );
+        },
+      );
+    }
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
@@ -650,34 +808,45 @@ class _ShortVideoPlayerScreenState extends State<ShortVideoPlayerScreen> {
         backgroundColor: Colors.black,
         body: Stack(
           children: [
-            PageView.builder(
-              controller: _pageController,
-              scrollDirection: Axis.vertical,
-              itemCount: reels.length,
-              onPageChanged: _onPageChanged,
-              physics: const BouncingScrollPhysics(),
-              itemBuilder: (context, index) {
-                final reel = reels[index];
-                return _ShortVideoPage(
-                  key: ValueKey(reel.id ?? index.toString()),
-                  reel: reel,
-                  isActive: widget.isVisible && index == _currentIndex,
-                  onLike: () {
-                    if (reel.id != null) provider.toggleLike(reel.id!, reel: reel);
-                  },
-                  onSave: () {
-                    if (reel.id != null) provider.toggleBookmark(reel.id!, reel: reel);
-                  },
-                  onComment: () => _showComments(reel),
-                  onMore: () => _showReelOptions(context, reel),
-                );
-              },
-            ),
+            if (widget.initialReels == null)
+              RefreshIndicator(
+                onRefresh: _refreshFeed,
+                color: AppColors.primary,
+                backgroundColor: const Color(0xFF1E1E1E),
+                edgeOffset: MediaQuery.paddingOf(context).top,
+                notificationPredicate: (notification) => notification.depth == 0,
+                child: buildPager(),
+              )
+            else
+              buildPager(),
             if (shouldShowBack) buildBackBtn(),
           ],
         ),
       ),
     );
+  }
+
+  /// Pull-to-refresh handler: re-fetches page 1 of the feed (replacing stale
+  /// data, keeping server ordering and sponsored interleaving), resets to the
+  /// first reel and surfaces failures without wiping the existing feed.
+  Future<void> _refreshFeed() async {
+    if (widget.initialReels != null || !mounted) return;
+    final ReelsProvider provider = context.read<ReelsProvider>();
+    final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(context);
+    final bool ok = await provider.refreshReelsFeed();
+    if (!mounted) return;
+    if (ok) {
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(0);
+      }
+      setState(() => _currentIndex = 0);
+    } else {
+      messenger?.showSnackBar(
+        const SnackBar(
+          content: Text("Couldn't refresh reels. Showing your previous feed."),
+        ),
+      );
+    }
   }
 }
 
@@ -688,6 +857,7 @@ class _ShortVideoPage extends StatefulWidget {
   final VoidCallback onSave;
   final VoidCallback onComment;
   final VoidCallback onMore;
+  final Future<void> Function()? onRefreshFeed;
 
   const _ShortVideoPage({
     super.key,
@@ -697,42 +867,96 @@ class _ShortVideoPage extends StatefulWidget {
     required this.onSave,
     required this.onComment,
     required this.onMore,
+    this.onRefreshFeed,
   });
 
   @override
   State<_ShortVideoPage> createState() => _ShortVideoPageState();
 }
 
-class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
+class _ShortVideoPageState extends State<_ShortVideoPage>
+    with RouteAware, WidgetsBindingObserver {
   VideoPlayerController? _controller;
   YoutubePlayerController? _ytController;
+  int _initGeneration = 0;
+  Size _lastKnownVideoSize = Size.zero;
+  bool _lastKnownIsInitialized = false;
   bool _hasStarted = false;
+  bool _hasRenderedFirstFrame = false;
   bool _showPlayIcon = false;
   bool _isYoutube = false;
+  bool _isImageAd = false;
+  bool _hasVideoError = false;
+  _PlaybackFailureKind _failureKind = _PlaybackFailureKind.none;
+  String? _failureMessage;
+  int _failureGeneration = -1;
+  int _retryAttempt = 0;
+  bool _isRetrying = false;
+  String _activeUrl = '';
+  static const Duration _initTimeout = Duration(seconds: 25);
   
   // Tracking logic
   late final Stopwatch _watchStopwatch;
+  CallProvider? _callProvider;
   bool _viewRecorded = false;
   bool _impressionRecorded = false;
   static const int _viewThresholdSeconds = 3;
   static const int _qualifiedViewThresholdSeconds = 10;
   bool _qualifiedViewRecorded = false;
 
+  String? get _effectiveAdId {
+    final String? rawAdId = widget.reel.adId?.trim();
+    if (rawAdId != null && rawAdId.isNotEmpty) {
+      return rawAdId;
+    }
+    if (widget.reel.isSponsoredAd) {
+      final String? fallbackId = widget.reel.id?.trim();
+      if (fallbackId != null && fallbackId.isNotEmpty) {
+        return fallbackId;
+      }
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
     _watchStopwatch = Stopwatch();
+    WidgetsBinding.instance.addObserver(this);
     _initializeVideo();
     
-    // Listen for call status changes
+    // Record impression if active sponsored ad on initial mount
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<CallProvider>().addListener(_callListener);
+      if (!mounted) return;
+      if (widget.isActive && widget.reel.isSponsoredAd && !_hasVideoError) {
+        _recordAdImpression();
+      }
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+        // Stop playback so audio doesn't continue in the background.
+        _pauseVideo();
+        break;
+      case AppLifecycleState.resumed:
+        // Resume only the currently visible reel.
+        if (widget.isActive && mounted) {
+          _syncPlayback();
+        }
+        break;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+        break;
+    }
   }
 
   void _callListener() {
     if (mounted) {
-      final callStatus = context.read<CallProvider>().status;
+      final callStatus = (_callProvider ?? context.read<CallProvider>()).status;
       if (callStatus != CallStatus.idle) {
         _pauseVideo();
       } else if (widget.isActive) {
@@ -753,14 +977,196 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
     if (mounted) setState(() {});
   }
 
-  Future<void> _initializeVideo() async {
-    final videoUrl = widget.reel.videoUrl ?? '';
-    if (videoUrl.isEmpty) return;
+  void _disposeControllerSafely(VideoPlayerController controller) {
+    controller.removeListener(_videoListener);
+    unawaited(
+      controller.dispose().catchError((Object e) {
+        _log('dispose_failed', <String, Object?>{'error': e.toString()});
+      }),
+    );
+  }
 
-    if (videoUrl.contains('youtube.com') || videoUrl.contains('youtu.be')) {
-      _isYoutube = true;
+  /// Returns the freshest known copy of the current reel (e.g. after a feed
+  /// refresh delivered a new/unexpired URL), falling back to the widget's reel.
+  ReelModel _latestReel() {
+    try {
+      final ReelsProvider provider = context.read<ReelsProvider>();
+      final String? id = widget.reel.id;
+      if (id == null) return widget.reel;
+      for (final ReelModel candidate in provider.reels) {
+        if (candidate.id == id &&
+            candidate.isSponsoredAd == widget.reel.isSponsoredAd &&
+            (candidate.videoUrl ?? '').trim().isNotEmpty &&
+            provider.shouldIncludeReelInFeed(candidate)) {
+          return candidate;
+        }
+      }
+    } catch (_) {}
+    return widget.reel;
+  }
+
+  /// Structured, token-safe debug logging for reel playback diagnostics.
+  void _log(String event, [Map<String, Object?> fields = const <String, Object?>{}]) {
+    if (!kDebugMode) return;
+    final Map<String, Object?> payload = <String, Object?>{
+      'reelId': widget.reel.id,
+      'type': widget.reel.isSponsoredAd ? 'sponsored' : 'creator',
+      'gen': _initGeneration,
+      'retryAttempt': _retryAttempt,
+      ...fields,
+    };
+    debugPrint('[REEL_PLAYBACK] $event $payload');
+  }
+
+  void _setFailure(_PlaybackFailureKind kind) {
+    _hasVideoError = true;
+    _failureKind = kind;
+    _failureMessage = kind.userMessage;
+  }
+
+  /// Records a playback failure once per initialization generation, logs it,
+  /// then probes the URL (HTTP status / content type) to give a meaningful reason.
+  Future<void> _registerFailure({
+    required int generation,
+    required String url,
+    Object? error,
+    String? description,
+  }) async {
+    if (!mounted || generation != _initGeneration) return;
+    if (_failureGeneration == generation) return;
+    _failureGeneration = generation;
+
+    final String? desc = description ?? error?.toString();
+    _setFailure(error is TimeoutException
+        ? _PlaybackFailureKind.timeout
+        : _PlaybackFailureKind.unknown);
+    _log('init_failed', <String, Object?>{
+      'url': redactReelUrl(url),
+      'error': desc,
+      'kind': _failureKind.name,
+    });
+    if (mounted) setState(() {});
+
+    if (!url.startsWith('http')) return;
+    ReelVideoProbeResult probe;
+    try {
+      probe = await debugReelVideoProbe(
+        url,
+        AppUrl.buildVideoRequestHeaders(url, token: HiveService.getToken()),
+      );
+    } catch (e) {
+      probe = ReelVideoProbeResult(error: e);
+    }
+    if (!mounted || generation != _initGeneration) return;
+    _log('probe_result', <String, Object?>{
+      'url': redactReelUrl(url),
+      'status': probe.statusCode,
+      'contentType': probe.contentType,
+      'probeError': probe.error?.toString(),
+    });
+    final _PlaybackFailureKind? refined = _classifyReelProbe(probe);
+    if (refined != null && refined != _failureKind) {
+      _setFailure(refined);
+      _log('failure_classified', <String, Object?>{'kind': refined.name});
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// Retry: disposes the failed controller and re-creates it from the latest
+  /// valid URL. Ignored while a previous retry is still in flight.
+  Future<void> _retryPlayback() async {
+    if (_isRetrying) return;
+    _isRetrying = true;
+    _retryAttempt++;
+    _log('retry_start');
+    if (mounted) setState(() {});
+    try {
+      final String? reelId = widget.reel.id;
+      if (reelId != null && !widget.reel.isSponsoredAd) {
+        try {
+          await context.read<ReelsProvider>().fetchFreshReel(reelId);
+        } catch (_) {}
+      }
+      await _initializeVideo(isRetry: true);
+      _log('retry_result', <String, Object?>{
+        'success': !_hasVideoError &&
+            (_controller?.value.isInitialized ?? false),
+        'kind': _failureKind.name,
+      });
+    } finally {
+      _isRetrying = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _initializeVideo({bool isRetry = false}) async {
+    final int generation = ++_initGeneration;
+    final ReelModel reel = isRetry ? _latestReel() : widget.reel;
+    final videoUrl = (reel.videoUrl ?? '').trim();
+    _activeUrl = videoUrl;
+    final bool isIOS = ReelsProvider.isIOSPlatform;
+    final bool isAd = reel.isSponsoredAd;
+    _log('init_start', <String, Object?>{
+      'url': redactReelUrl(videoUrl),
+      'isRetry': isRetry,
+    });
+
+    _isYoutube = ReelsProvider.isYoutubeUrl(videoUrl);
+    _isImageAd = !isIOS && isAd && ReelsProvider.isImageAdReel(reel);
+    _hasVideoError = false;
+    _failureKind = _PlaybackFailureKind.none;
+    _failureMessage = null;
+    _showPlayIcon = false;
+    _hasRenderedFirstFrame = false;
+    _lastKnownVideoSize = Size.zero;
+    _lastKnownIsInitialized = false;
+
+    final oldController = _controller;
+    final oldYtController = _ytController;
+    _controller = null;
+    _ytController = null;
+    if (mounted) setState(() {});
+
+    if (oldController != null) {
+      // Never block (re)initialization on disposing a failed controller:
+      // VideoPlayerController.dispose() awaits its creation completer, which
+      // never completes if platform `create` threw, which would hang Retry forever.
+      _disposeControllerSafely(oldController);
+    }
+    if (oldYtController != null) {
+      oldYtController.removeListener(_ytVideoListener);
+      oldYtController.dispose();
+    }
+
+    if (!mounted || generation != _initGeneration) return;
+
+    if (videoUrl.isEmpty) {
+      _setFailure(_PlaybackFailureKind.missingUrl);
+      _log('init_failed', <String, Object?>{'kind': _failureKind.name});
+      if (mounted) setState(() {});
+      return;
+    }
+
+    // Defense-in-depth on iOS: block YouTube embeds and external/image ad items.
+    if (isIOS && (_isYoutube || ReelsProvider.isAdOrExternalRedirectReel(reel))) {
+      _setFailure(_PlaybackFailureKind.blockedContent);
+      _log('init_failed', <String, Object?>{
+        'url': redactReelUrl(videoUrl),
+        'kind': _failureKind.name,
+      });
+      if (mounted) setState(() {});
+      return;
+    }
+
+    // Static image ads on Android are rendered via Image.network in _VideoBackground.
+    if (_isImageAd) {
+      if (mounted) setState(() {});
+      return;
+    }
+
+    if (_isYoutube) {
       final videoId = YoutubePlayer.convertUrlToId(videoUrl);
-      if (videoId != null) {
+      if (videoId != null && videoId.isNotEmpty) {
         _ytController = YoutubePlayerController(
           initialVideoId: videoId,
           flags: const YoutubePlayerFlags(
@@ -772,64 +1178,130 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
             showLiveFullscreenButton: false,
           ),
         );
+      } else {
+        _setFailure(_PlaybackFailureKind.invalidUrl);
       }
       if (mounted) setState(() {});
-      _syncPlayback();
+      if (!_hasVideoError) {
+        _syncPlayback();
+      }
       return;
     }
 
-    if (_controller != null) {
-      await _controller!.dispose();
+    final Uri? parsedUri = videoUrl.startsWith('http') ? Uri.tryParse(videoUrl) : null;
+    if (videoUrl.startsWith('http') &&
+        (parsedUri == null || !parsedUri.hasAuthority || parsedUri.host.isEmpty)) {
+      _setFailure(_PlaybackFailureKind.invalidUrl);
+      _log('init_failed', <String, Object?>{
+        'url': redactReelUrl(videoUrl),
+        'kind': _failureKind.name,
+      });
+      if (mounted) setState(() {});
+      return;
     }
 
+    final VideoPlayerController nextController;
     if (videoUrl.startsWith('http')) {
       final token = HiveService.getToken();
-      Map<String, String> headers = {
-        'Referer': 'https://catchandwatch.com',
-      };
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-      }
-      _controller = VideoPlayerController.networkUrl(
-        Uri.parse(videoUrl),
+      final Map<String, String> headers = AppUrl.buildVideoRequestHeaders(
+        videoUrl,
+        token: token,
+      );
+      nextController = VideoPlayerController.networkUrl(
+        parsedUri!,
         httpHeaders: headers,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
       );
     } else {
-      _controller = VideoPlayerController.file(
+      nextController = VideoPlayerController.file(
         File(videoUrl),
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
       );
     }
 
+    _controller = nextController;
+    nextController.addListener(_videoListener);
+
     try {
-      await _controller!.initialize();
-      await _controller!.setLooping(true);
-      if (!mounted) return;
+      await nextController.initialize().timeout(_initTimeout);
+      if (!mounted || generation != _initGeneration || _controller != nextController) {
+        _disposeControllerSafely(nextController);
+        return;
+      }
+      if (nextController.value.hasError) {
+        await _registerFailure(
+          generation: generation,
+          url: videoUrl,
+          description: nextController.value.errorDescription,
+        );
+      } else {
+        _lastKnownIsInitialized = nextController.value.isInitialized;
+        _lastKnownVideoSize = nextController.value.size;
+        await nextController.setLooping(true);
+        _log('init_ok', <String, Object?>{
+          'url': redactReelUrl(videoUrl),
+          'size': '${nextController.value.size.width}x${nextController.value.size.height}',
+          'aspectRatio': nextController.value.aspectRatio,
+          'durationMs': nextController.value.duration.inMilliseconds,
+          'positionMs': nextController.value.position.inMilliseconds,
+        });
+      }
+      if (!mounted || generation != _initGeneration) return;
       setState(() {});
-      _syncPlayback();
-    } catch (_) {
-      if (mounted) setState(() {});
+      if (!_hasVideoError) {
+        _syncPlayback();
+      }
+    } catch (e) {
+      if (!mounted || generation != _initGeneration || _controller != nextController) {
+        _disposeControllerSafely(nextController);
+        return;
+      }
+      await _registerFailure(generation: generation, url: videoUrl, error: e);
     }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final newCallProvider = context.read<CallProvider>();
+    if (_callProvider != newCallProvider) {
+      _callProvider?.removeListener(_callListener);
+      _callProvider = newCallProvider;
+      _callProvider?.addListener(_callListener);
+    }
     _syncPlayback();
   }
 
   @override
   void didUpdateWidget(covariant _ShortVideoPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.isActive != widget.isActive) {
+    if (oldWidget.reel.id != widget.reel.id ||
+        oldWidget.reel.adId != widget.reel.adId ||
+        oldWidget.reel.videoUrl != widget.reel.videoUrl ||
+        oldWidget.reel.isSponsoredAd != widget.reel.isSponsoredAd) {
+      _impressionRecorded = false;
+      _viewRecorded = false;
+      _qualifiedViewRecorded = false;
+      _initializeVideo();
+      if (widget.isActive && widget.reel.isSponsoredAd && !_hasVideoError) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && widget.isActive && widget.reel.isSponsoredAd && !_hasVideoError) {
+            _recordAdImpression();
+          }
+        });
+      }
+    } else if (oldWidget.isActive != widget.isActive) {
+      if (widget.isActive && widget.reel.isSponsoredAd && !_hasVideoError) {
+        _recordAdImpression();
+      }
       _syncPlayback();
     }
   }
 
   void _syncPlayback() {
+    if (!mounted) return;
     final bool isRouteActive = ModalRoute.of(context)?.isCurrent ?? true;
-    final callProvider = context.read<CallProvider>();
+    final callProvider = _callProvider ?? context.read<CallProvider>();
     final bool isCallActive = callProvider.status != CallStatus.idle;
 
     if (!isRouteActive || isCallActive) {
@@ -866,13 +1338,24 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
     if (mounted) {
       setState(() {
         if (widget.isActive) {
-          _controller!.play();
+          if (!_controller!.value.isPlaying) {
+            _controller!.play();
+          }
           _hasStarted = true;
-          _watchStopwatch.start();
-          _controller!.addListener(_videoListener);
+          if (!_watchStopwatch.isRunning) {
+            _watchStopwatch.start();
+          }
+          if (widget.reel.isSponsoredAd && !_hasVideoError) {
+            _recordAdImpression();
+          }
         } else {
-          _controller!.pause();
-          _controller!.seekTo(Duration.zero);
+          if (_controller!.value.isPlaying) {
+            _controller!.pause();
+          }
+          // Avoid seeking to zero if near beginning to prevent texture freeze on iOS
+          if (_controller!.value.position > const Duration(seconds: 1)) {
+            _controller!.seekTo(Duration.zero);
+          }
           _hasStarted = false;
           _showPlayIcon = false;
           
@@ -880,14 +1363,41 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
             _watchStopwatch.stop();
             _reportViewIfNecessary();
           }
-          _controller!.removeListener(_videoListener);
         }
       });
     }
   }
 
   void _videoListener() {
-    if (!_impressionRecorded && widget.reel.isAd == true && _watchStopwatch.elapsed.inMilliseconds > 100) {
+    final controller = _controller;
+    if (controller == null) return;
+
+    if (controller.value.hasError && !_hasVideoError) {
+      _registerFailure(
+        generation: _initGeneration,
+        url: _activeUrl,
+        description: controller.value.errorDescription,
+      );
+      return;
+    }
+
+    if (controller.value.position > Duration.zero) {
+      if (!_hasRenderedFirstFrame) {
+        _hasRenderedFirstFrame = true;
+        if (mounted) setState(() {});
+      }
+    }
+
+    // Rebuild when iOS AVPlayer reports or updates video presentation size / initialization state
+    final Size currentSize = controller.value.size;
+    final bool currentInit = controller.value.isInitialized;
+    if (currentInit != _lastKnownIsInitialized || currentSize != _lastKnownVideoSize) {
+      _lastKnownIsInitialized = currentInit;
+      _lastKnownVideoSize = currentSize;
+      if (mounted) setState(() {});
+    }
+
+    if (!_impressionRecorded && widget.reel.isSponsoredAd && _watchStopwatch.elapsed.inMilliseconds > 100) {
       _recordAdImpression();
     }
 
@@ -895,13 +1405,13 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
       _reportViewIfNecessary();
     }
     
-    if (widget.reel.isAd == true && !_qualifiedViewRecorded && _watchStopwatch.elapsed.inSeconds >= _qualifiedViewThresholdSeconds) {
+    if (widget.reel.isSponsoredAd && !_qualifiedViewRecorded && _watchStopwatch.elapsed.inSeconds >= _qualifiedViewThresholdSeconds) {
       _recordAdQualifiedView();
     }
   }
 
   void _ytVideoListener() {
-    if (!_impressionRecorded && widget.reel.isAd == true && _watchStopwatch.elapsed.inMilliseconds > 100) {
+    if (!_impressionRecorded && widget.reel.isSponsoredAd && _watchStopwatch.elapsed.inMilliseconds > 100) {
       _recordAdImpression();
     }
 
@@ -909,26 +1419,33 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
       _reportViewIfNecessary();
     }
 
-    if (widget.reel.isAd == true && !_qualifiedViewRecorded && _watchStopwatch.elapsed.inSeconds >= _qualifiedViewThresholdSeconds) {
+    if (widget.reel.isSponsoredAd && !_qualifiedViewRecorded && _watchStopwatch.elapsed.inSeconds >= _qualifiedViewThresholdSeconds) {
       _recordAdQualifiedView();
     }
   }
 
   void _recordAdImpression() {
-    if (_impressionRecorded || widget.reel.adId == null) return;
+    final String? adId = _effectiveAdId;
+    if (_impressionRecorded || adId == null) return;
+    final provider = context.read<ReelsProvider>();
+    if (provider.hasRecordedAdImpression(adId, campaignId: widget.reel.campaignId)) {
+      _impressionRecorded = true;
+      return;
+    }
     _impressionRecorded = true;
-    context.read<ReelsProvider>().recordAdEvent(
-      adId: widget.reel.adId!,
+    provider.recordAdEvent(
+      adId: adId,
       campaignId: widget.reel.campaignId ?? '',
       eventType: 'IMPRESSION',
     );
   }
 
   void _recordAdQualifiedView() {
-    if (_qualifiedViewRecorded || widget.reel.adId == null) return;
+    final String? adId = _effectiveAdId;
+    if (_qualifiedViewRecorded || adId == null) return;
     _qualifiedViewRecorded = true;
     context.read<ReelsProvider>().recordAdEvent(
-      adId: widget.reel.adId!,
+      adId: adId,
       campaignId: widget.reel.campaignId ?? '',
       eventType: 'QUALIFIED_VIEW',
       watchDuration: _watchStopwatch.elapsed.inSeconds,
@@ -942,17 +1459,16 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
     if (_watchStopwatch.elapsed.inSeconds >= _viewThresholdSeconds) {
       _viewRecorded = true;
       final reelId = widget.reel.id;
-      if (reelId != null) {
-        if (widget.reel.isAd == true && widget.reel.adId != null) {
-          context.read<ReelsProvider>().recordAdEvent(
-            adId: widget.reel.adId!,
-            campaignId: widget.reel.campaignId ?? '',
-            eventType: 'VIEW',
-            watchDuration: _watchStopwatch.elapsed.inSeconds,
-          );
-        } else {
-          context.read<ReelsProvider>().recordReelView(reelId, _watchStopwatch.elapsed.inSeconds);
-        }
+      final String? adId = _effectiveAdId;
+      if (widget.reel.isSponsoredAd && adId != null) {
+        context.read<ReelsProvider>().recordAdEvent(
+          adId: adId,
+          campaignId: widget.reel.campaignId ?? '',
+          eventType: 'VIEW',
+          watchDuration: _watchStopwatch.elapsed.inSeconds,
+        );
+      } else if (reelId != null) {
+        context.read<ReelsProvider>().recordReelView(reelId, _watchStopwatch.elapsed.inSeconds);
       }
     }
   }
@@ -991,7 +1507,9 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
 
   @override
   void dispose() {
-    context.read<CallProvider>().removeListener(_callListener);
+    _initGeneration++;
+    WidgetsBinding.instance.removeObserver(this);
+    _callProvider?.removeListener(_callListener);
     _controller?.removeListener(_videoListener);
     _controller?.dispose();
     _ytController?.dispose();
@@ -1001,7 +1519,15 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
 
   @override
   Widget build(BuildContext context) {
-    final bool isAd = widget.reel.isAd == true;
+    final bool isAd = widget.reel.isSponsoredAd;
+    final bool hasPlaybackError = _hasVideoError ||
+        (!_isYoutube && !_isImageAd && (_controller?.value.hasError ?? false));
+    final bool isNativeLoading = !_isYoutube &&
+        !_isImageAd &&
+        !hasPlaybackError &&
+        (_controller == null ||
+            !_controller!.value.isInitialized ||
+            (!_hasRenderedFirstFrame && (_controller?.value.isBuffering ?? false)));
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -1009,21 +1535,19 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          _VideoBackground(
-            controller: _controller,
-            ytController: _ytController,
-            reel: widget.reel,
-            hasStarted: _hasStarted,
-          ),
-          if (isAd)
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _handleAdClick,
-                behavior: HitTestBehavior.opaque,
-                child: Container(color: Colors.transparent),
-              ),
+          Positioned.fill(
+            child: _VideoBackground(
+              controller: _controller,
+              ytController: _ytController,
+              reel: widget.reel,
+              hasStarted: _hasStarted,
             ),
-          const _ShortGradient(),
+          ),
+          const Positioned.fill(
+            child: IgnorePointer(
+              child: _ShortGradient(),
+            ),
+          ),
           Positioned(
             top: MediaQuery.paddingOf(context).top + 12,
             left: 16,
@@ -1057,7 +1581,10 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
             left: 16,
             right: isAd ? 16 : 82,
             bottom: 34 + MediaQuery.paddingOf(context).bottom,
-            child: _ShortInfo(reel: widget.reel),
+            child: _ShortInfo(
+              reel: widget.reel,
+              onAdClick: isAd ? _handleAdClick : null,
+            ),
           ),
           if (!isAd)
             Positioned(
@@ -1065,15 +1592,83 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
               bottom: 40 + MediaQuery.paddingOf(context).bottom,
               child: _MusicDisc(image: widget.reel.thumbnail),
             ),
-          if (_controller == null || !_controller!.value.isInitialized)
-            if (!isAd || (widget.reel.videoUrl != null && !widget.reel.videoUrl!.contains('youtube.com')))
-              const Center(
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 2.5,
-                ),
+          if (isNativeLoading)
+            const Center(
+              child: CircularProgressIndicator(
+                color: Colors.white,
+                strokeWidth: 2.5,
               ),
-          if (_showPlayIcon && !isAd)
+            ),
+          if (hasPlaybackError)
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.error_outline_rounded,
+                    color: Colors.white70,
+                    size: 42,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Unable to play video',
+                    style: text14(
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (_failureMessage != null) ...[
+                    const SizedBox(height: 6),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: Text(
+                        _failureMessage!,
+                        textAlign: TextAlign.center,
+                        style: text12(color: Colors.white54),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  if (_failureKind != _PlaybackFailureKind.blockedContent)
+                    TextButton.icon(
+                      onPressed: _isRetrying ? null : _retryPlayback,
+                      icon: _isRetrying
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.refresh_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                      label: Text(
+                        _isRetrying ? 'Retrying…' : 'Retry',
+                        style: text12(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  if (widget.onRefreshFeed != null)
+                    TextButton(
+                      onPressed: _isRetrying ? null : () => widget.onRefreshFeed!(),
+                      child: Text(
+                        'Refresh feed',
+                        style: text12(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          if (_showPlayIcon && !isAd && !hasPlaybackError)
             Center(
               child: Container(
                 width: 74,
@@ -1089,35 +1684,35 @@ class _ShortVideoPageState extends State<_ShortVideoPage> with RouteAware {
                 ),
               ),
             ),
-          if (isAd)
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _handleAdClick,
-                behavior: HitTestBehavior.opaque,
-                child: Container(color: Colors.transparent),
-              ),
-            ),
         ],
       ),
     );
   }
 
-  void _handleAdClick() async {
+  Future<void> _handleAdClick() async {
     final reel = widget.reel;
+    if (!reel.isSponsoredAd) return;
     final provider = context.read<ReelsProvider>();
-    
-    if (reel.destinationUrl != null) {
-      final url = Uri.parse(reel.destinationUrl!);
-      if (await canLaunchUrl(url)) {
-        // Record CLICK event
-        if (reel.adId != null) {
-          provider.recordAdEvent(
-            adId: reel.adId!,
-            campaignId: reel.campaignId ?? '',
-            eventType: 'CLICK',
-          );
-        }
-        await launchUrl(url, mode: LaunchMode.externalApplication);
+    final String? adId = _effectiveAdId;
+
+    // Always record CLICK event when a sponsored ad or its CTA is tapped
+    if (adId != null) {
+      provider.recordAdEvent(
+        adId: adId,
+        campaignId: reel.campaignId ?? '',
+        eventType: 'CLICK',
+      );
+    }
+
+    final String destination = (reel.destinationUrl ?? '').trim();
+    if (destination.isNotEmpty) {
+      final Uri? url = Uri.tryParse(destination);
+      if (url != null && (url.scheme == 'http' || url.scheme == 'https')) {
+        try {
+          if (await canLaunchUrl(url)) {
+            await launchUrl(url, mode: LaunchMode.externalApplication);
+          }
+        } catch (_) {}
       }
     }
   }
@@ -1137,32 +1732,113 @@ class _VideoBackground extends StatelessWidget {
     required this.hasStarted,
   });
 
+  Widget _buildSafeThumbnailPlaceholder() {
+    final String? thumbUrl = reel.thumbnail;
+    if (ReelModel.isValidThumbnailUrl(
+      thumbUrl,
+      videoUrl: reel.videoUrl,
+      destinationUrl: reel.destinationUrl,
+    )) {
+      return Image.network(
+        thumbUrl!,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return const ColoredBox(color: Colors.black);
+        },
+      );
+    }
+    return const ColoredBox(color: Colors.black);
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (ytController != null) {
+    if (!ReelsProvider.isIOSPlatform && ytController != null) {
       return YoutubePlayer(
         controller: ytController!,
         showVideoProgressIndicator: false,
       );
     }
 
-    if (reel.isAd == true && (reel.videoUrl?.contains('magnific.com') == true || reel.videoUrl?.endsWith('.jpg') == true || reel.videoUrl?.endsWith('.png') == true)) {
-        return Image.network(reel.videoUrl!, fit: BoxFit.cover);
+    if (!ReelsProvider.isIOSPlatform &&
+        reel.isSponsoredAd &&
+        ReelsProvider.isImageAdReel(reel) &&
+        ReelModel.isValidThumbnailUrl(
+          reel.videoUrl,
+          destinationUrl: reel.destinationUrl,
+        )) {
+      return Image.network(
+        reel.videoUrl!,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return const ColoredBox(color: Colors.black);
+        },
+      );
     }
 
-    if (controller == null || !controller!.value.isInitialized) {
-      return reel.thumbnail != null && reel.thumbnail!.isNotEmpty
-          ? Image.network(reel.thumbnail!, fit: BoxFit.cover)
-          : Container(color: Colors.black);
+    final VideoPlayerController? activeController = controller;
+    if (activeController == null) {
+      return _buildSafeThumbnailPlaceholder();
     }
 
-    return FittedBox(
-      fit: BoxFit.cover,
-      child: SizedBox(
-        width: controller!.value.size.width,
-        height: controller!.value.size.height,
-        child: VideoPlayer(controller!),
-      ),
+    return ValueListenableBuilder<VideoPlayerValue>(
+      valueListenable: activeController,
+      builder: (context, value, _) {
+        if (!value.isInitialized) {
+          return _buildSafeThumbnailPlaceholder();
+        }
+
+        final Size rawSize = value.size;
+        final bool hasValidSize = rawSize.width.isFinite &&
+            rawSize.height.isFinite &&
+            rawSize.width > 0 &&
+            rawSize.height > 0;
+
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final double viewportW =
+                (constraints.maxWidth.isFinite && constraints.maxWidth > 0)
+                    ? constraints.maxWidth
+                    : 1080.0;
+            final double viewportH =
+                (constraints.maxHeight.isFinite && constraints.maxHeight > 0)
+                    ? constraints.maxHeight
+                    : 1920.0;
+
+            final double contentW;
+            final double contentH;
+            if (hasValidSize) {
+              contentW = rawSize.width;
+              contentH = rawSize.height;
+            } else {
+              final double rawAspect = value.aspectRatio;
+              final double safeAspect =
+                  (rawAspect.isFinite && rawAspect > 0 && rawAspect != 1.0)
+                      ? rawAspect
+                      : (9.0 / 16.0);
+              contentW = viewportW;
+              contentH = viewportW / safeAspect;
+            }
+
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                _buildSafeThumbnailPlaceholder(),
+                SizedBox.expand(
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    clipBehavior: Clip.hardEdge,
+                    child: SizedBox(
+                      width: contentW > 0 ? contentW : viewportW,
+                      height: contentH > 0 ? contentH : viewportH,
+                      child: VideoPlayer(activeController),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -1246,6 +1922,7 @@ class _ShortActions extends StatelessWidget {
               imageUrl: reel.thumbnail,
               contentId: reel.id,
               contentType: 'reel',
+              context: context,
             );
           },
         ),
@@ -1308,15 +1985,36 @@ class _ActionButton extends StatelessWidget {
 
 class _ShortInfo extends StatelessWidget {
   final ReelModel reel;
+  final VoidCallback? onAdClick;
 
-  const _ShortInfo({required this.reel});
+  const _ShortInfo({required this.reel, this.onAdClick});
 
   @override
   Widget build(BuildContext context) {
     final reelsProvider = context.read<ReelsProvider>();
-    final currentUser = HiveService.getUser();
-    final bool isAd = reel.isAd == true;
-    final bool isSelf = !isAd && currentUser?.sId == reel.user?.id;
+    final bool isAd = reel.isSponsoredAd;
+
+    final String myId = (HiveService.userId ?? HiveService.getUser()?.sId ?? '').toString();
+    final String authorId = (reel.user?.id ?? '').toString();
+    final bool isSelf = !isAd && myId.isNotEmpty && authorId.isNotEmpty && myId == authorId;
+
+    final String? advertiserDisplayName = (reel.advertiserName != null && reel.advertiserName!.trim().isNotEmpty)
+        ? reel.advertiserName!.trim()
+        : ((reel.user?.name != null && reel.user!.name!.trim().isNotEmpty)
+            ? reel.user!.name!.trim()
+            : ((reel.user?.username != null && reel.user!.username!.trim().isNotEmpty)
+                ? reel.user!.username!.trim()
+                : null));
+    final String? advertiserAvatar = (reel.advertiserLogo != null && reel.advertiserLogo!.trim().isNotEmpty)
+        ? reel.advertiserLogo!.trim()
+        : ((reel.user?.profileImage != null && reel.user!.profileImage!.trim().isNotEmpty)
+            ? reel.user!.profileImage!.trim()
+            : null);
+    final String? effectiveCtaText = (reel.ctaText != null && reel.ctaText!.trim().isNotEmpty)
+        ? reel.ctaText!.trim()
+        : ((reel.destinationUrl != null && reel.destinationUrl!.trim().isNotEmpty)
+            ? 'Learn More'
+            : null);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1325,21 +2023,45 @@ class _ShortInfo extends StatelessWidget {
         if (isAd)
           Row(
             children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: const BoxDecoration(
-                  color: Colors.white24,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.campaign_rounded, color: Colors.white, size: 20),
+              _SafeCircularImage(
+                radius: 18,
+                imageUrl: advertiserAvatar,
+                videoUrl: reel.videoUrl,
+                destinationUrl: reel.destinationUrl,
+                backgroundColor: Colors.white24,
+                fallback: const Icon(Icons.campaign_rounded, color: Colors.white, size: 20),
               ),
               const SizedBox(width: 8),
-              Text(
-                'Sponsored',
-                style: text14(color: Colors.white, fontWeight: FontWeight.w800),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (advertiserDisplayName != null)
+                      Text(
+                        advertiserDisplayName,
+                        overflow: TextOverflow.ellipsis,
+                        style: text14(color: Colors.white, fontWeight: FontWeight.w800),
+                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'Sponsored',
+                            style: text11(color: Colors.white, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-              const Spacer(),
             ],
           )
         else
@@ -1356,18 +2078,18 @@ class _ShortInfo extends StatelessWidget {
                     );
                   }
                 },
-                child: CircleAvatar(
+                child: _SafeCircularImage(
                   radius: 20,
-                  backgroundImage: reel.user?.profileImage != null && reel.user!.profileImage!.isNotEmpty
-                      ? NetworkImage(reel.user!.profileImage!)
-                      : null,
+                  imageUrl: reel.user?.profileImage,
+                  videoUrl: reel.videoUrl,
+                  destinationUrl: reel.destinationUrl,
                   backgroundColor: AppColors.primary,
-                  child: reel.user?.profileImage == null || reel.user!.profileImage!.isEmpty
-                      ? Text(
-                          reel.user?.name?[0] ?? '?',
-                          style: text16(color: Colors.white, fontWeight: FontWeight.w800),
-                        )
-                      : null,
+                  fallback: Text(
+                    (reel.user?.name != null && reel.user!.name!.trim().isNotEmpty)
+                        ? reel.user!.name!.trim()[0]
+                        : '?',
+                    style: text16(color: Colors.white, fontWeight: FontWeight.w800),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1394,7 +2116,8 @@ class _ShortInfo extends StatelessWidget {
                 const SizedBox(width: 4),
                 const Icon(Icons.verified_rounded, color: AppColors.primary, size: 14),
               ],
-              if (!isSelf && reel.user?.id != null) ...[
+              // if (!isSelf && reel.user?.id != null) ...[
+              if (!isSelf && myId.isNotEmpty && reel.user?.id != null) ...[
                 const SizedBox(width: 12),
                 Selector<ProfileProvider, bool>(
                   selector: (_, p) => p.isUserFollowed(reel.user!.id!),
@@ -1437,31 +2160,35 @@ class _ShortInfo extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: text14(color: Colors.white.withOpacity(0.86)),
         ),
-        if (isAd && reel.ctaText != null && reel.ctaText!.isNotEmpty) ...[
+        if (isAd && effectiveCtaText != null) ...[
           const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(8),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.primary.withOpacity(0.4),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  reel.ctaText!,
-                  style: text14(color: Colors.white, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(width: 8),
-                const Icon(Icons.open_in_new_rounded, color: Colors.white, size: 16),
-              ],
+          GestureDetector(
+            onTap: onAdClick,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withOpacity(0.4),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    effectiveCtaText,
+                    style: text14(color: Colors.white, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.open_in_new_rounded, color: Colors.white, size: 16),
+                ],
+              ),
             ),
           ),
         ],
@@ -1484,6 +2211,54 @@ class _ShortInfo extends StatelessWidget {
   }
 }
 
+class _SafeCircularImage extends StatelessWidget {
+  final double radius;
+  final String? imageUrl;
+  final String? videoUrl;
+  final String? destinationUrl;
+  final Color backgroundColor;
+  final Widget fallback;
+
+  const _SafeCircularImage({
+    required this.radius,
+    required this.imageUrl,
+    required this.backgroundColor,
+    required this.fallback,
+    this.videoUrl,
+    this.destinationUrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final double diameter = radius * 2;
+    final bool isValid = ReelModel.isValidThumbnailUrl(
+      imageUrl,
+      videoUrl: videoUrl,
+      destinationUrl: destinationUrl,
+    );
+
+    return Container(
+      width: diameter,
+      height: diameter,
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        shape: BoxShape.circle,
+      ),
+      clipBehavior: Clip.antiAlias,
+      alignment: Alignment.center,
+      child: isValid
+          ? Image.network(
+              imageUrl!,
+              width: diameter,
+              height: diameter,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => Center(child: fallback),
+            )
+          : fallback,
+    );
+  }
+}
+
 class _MusicDisc extends StatelessWidget {
   final String? image;
 
@@ -1491,14 +2266,12 @@ class _MusicDisc extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool hasValidImage = ReelModel.isValidThumbnailUrl(image);
     return Container(
       width: 48,
       height: 48,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        image: image != null && image!.isNotEmpty
-            ? DecorationImage(image: NetworkImage(image!), fit: BoxFit.cover)
-            : const DecorationImage(image: AssetImage('assets/images/logo.jpg'), fit: BoxFit.cover),
         border: Border.all(color: Colors.white, width: 2),
         boxShadow: const [
           BoxShadow(
@@ -1508,14 +2281,35 @@ class _MusicDisc extends StatelessWidget {
           ),
         ],
       ),
-      child: Center(
-        child: Container(
-          width: 12,
-          height: 12,
-          decoration: const BoxDecoration(
-            color: Colors.black,
-            shape: BoxShape.circle,
-          ),
+      child: ClipOval(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (hasValidImage)
+              Image.network(
+                image!,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Image.asset(
+                  'assets/images/logo.jpg',
+                  fit: BoxFit.cover,
+                ),
+              )
+            else
+              Image.asset(
+                'assets/images/logo.jpg',
+                fit: BoxFit.cover,
+              ),
+            Center(
+              child: Container(
+                width: 12,
+                height: 12,
+                decoration: const BoxDecoration(
+                  color: Colors.black,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

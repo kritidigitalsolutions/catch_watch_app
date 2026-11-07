@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../../res/app_colors.dart';
+import '../../../utils/empty_state_widget.dart';
+import '../../../utils/error_state_widget.dart';
 import '../../../utils/text_style.dart';
 import '../../../view_model/after_login_provider/wallet_provider.dart';
 import '../../../models/wallet_model.dart';
@@ -52,34 +54,66 @@ class _RedeemHistoryScreenState extends State<RedeemHistoryScreen> with SingleTi
         ),
       ),
       body: Consumer<WalletProvider>(
-        builder: (context, provider, child) {
-          if (provider.isLoading && provider.redeemHistory.isEmpty && provider.redeemRequests.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          return TabBarView(
-            controller: _tabController,
-            children: [
-              _buildList(provider.redeemRequests),
-              _buildList(provider.redeemHistory),
-            ],
-          );
-        },
+        builder: (context, provider, child) => _buildBody(provider),
       ),
     );
   }
 
-  Widget _buildList(List<RedeemHistory> items) {
+  Widget _buildBody(WalletProvider provider) {
+    final bool hasAnyData =
+        provider.redeemRequests.isNotEmpty || provider.redeemHistory.isNotEmpty;
+
+    // Initial load — nothing cached to show yet.
+    if (provider.isRedeemHistoryLoading && !hasAnyData) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    // Request failed with nothing cached — surface a retryable error state.
+    if (provider.redeemHistoryError != null && !hasAnyData) {
+      return ErrorStateWidget(
+        title: 'Unable to load redeem history',
+        message: 'Please check your internet connection and try again.',
+        isLoading: provider.isRedeemHistoryLoading,
+        onRetry: () {
+          if (!provider.isRedeemHistoryLoading) {
+            context.read<WalletProvider>().fetchRedeemHistory();
+          }
+        },
+      );
+    }
+
+    return TabBarView(
+      controller: _tabController,
+      children: [
+        _buildList(provider.redeemRequests, provider),
+        _buildList(provider.redeemHistory, provider),
+      ],
+    );
+  }
+
+  Widget _buildList(List<RedeemHistory> items, WalletProvider provider) {
     if (items.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.history_rounded, size: 64, color: AppColors.grey200),
-            const SizedBox(height: 16),
-            Text("No records found", style: text14(color: AppColors.grey500)),
-          ],
-        ),
+      // A failed request must not be reported as "no records".
+      if (provider.redeemHistoryError != null) {
+        return ErrorStateWidget(
+          title: 'Unable to load redeem history',
+          message: 'Please check your internet connection and try again.',
+          isLoading: provider.isRedeemHistoryLoading,
+          isScrollable: false,
+          onRetry: () {
+            if (!provider.isRedeemHistoryLoading) {
+              context.read<WalletProvider>().fetchRedeemHistory();
+            }
+          },
+        );
+      }
+
+      // Request succeeded and this tab genuinely has no records.
+      return const EmptyStateWidget(
+        title: "No records found",
+        message: "Your redemption activity will appear here.",
+        icon: Icons.history_rounded,
+        isScrollable: false,
       );
     }
 

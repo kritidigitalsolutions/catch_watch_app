@@ -49,6 +49,10 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
   String? _lastShownErrorMessage;
   DateTime? _lastShownErrorTime;
 
+  // Track verified purchase success and screen dismissal
+  bool _didPurchaseSuccess = false;
+  bool _hasPoppedScreen = false;
+
   @override
   void initState() {
     super.initState();
@@ -492,8 +496,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         _pendingAppleIsUpgrade = false;
         _pendingAppleCurrentSubscriptionId = null;
       });
-      // Refresh user profile so premium access is applied everywhere
+      // Refresh user profile and subscription status so premium access is applied everywhere
       context.read<ProfileProvider>().fetchProfile();
+      context.read<SubscriptionProvider>().fetchSubscriptionStatus();
       _showSuccessPopup();
     }
   }
@@ -1112,7 +1117,11 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
 
   // ─── Dialogs ────────────────────────────────────────────────────────────────
 
+  @visibleForTesting
+  void showSuccessPopupForTesting() => _showSuccessPopup();
+
   void _showSuccessPopup() {
+    _didPurchaseSuccess = true;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1134,7 +1143,13 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  if (mounted && !_hasPoppedScreen) {
+                    _hasPoppedScreen = true;
+                    Navigator.of(context).pop(true);
+                  }
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1220,8 +1235,18 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     final provider = context.watch<SubscriptionProvider>();
     final displayPlans = _getEffectivePlans(provider.plans);
 
-    return Scaffold(
-      backgroundColor: Colors.white,
+    return PopScope<bool>(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        if (didPop) return;
+        if (_isPurchasing || _isProcessingPayment) return;
+        if (!_hasPoppedScreen) {
+          _hasPoppedScreen = true;
+          Navigator.of(context).pop(_didPurchaseSuccess ? true : null);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
       body: Column(
         children: [
           _buildTopBar(context),
@@ -1317,6 +1342,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
           ),
         ],
       ),
+      ),
     );
   }
 
@@ -1337,7 +1363,12 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       ),
       child: Row(
         children: [
-          _glassBtn(Icons.arrow_back_ios_new_rounded, () => Navigator.pop(context)),
+          _glassBtn(Icons.arrow_back_ios_new_rounded, () {
+            if (!_hasPoppedScreen) {
+              _hasPoppedScreen = true;
+              Navigator.of(context).pop(_didPurchaseSuccess ? true : null);
+            }
+          }),
           const SizedBox(width: 12),
           Expanded(
             child: Text(

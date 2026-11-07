@@ -33,6 +33,9 @@ import UserNotifications
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
+    // Log only the length (never the raw token) so APNs registration can be
+    // confirmed on a device without leaking the token into logs.
+    print("✅ [APNs] Registered for remote notifications (token length: \(deviceToken.count))")
     super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
   }
 

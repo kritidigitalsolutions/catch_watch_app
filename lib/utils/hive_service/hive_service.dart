@@ -284,19 +284,23 @@ class HiveService {
   }
 
   static Set<String> getLikedIds() {
+    if (!Hive.isBoxOpen(likesBoxName)) return {};
     return _likesBox.keys.map((e) => e.toString()).toSet();
   }
 
   // --- Watch History ---
   static Future<void> saveWatchHistory(String contentId, Map<String, dynamic> data) async {
+    if (!Hive.isBoxOpen(historyBoxName)) return;
     await _historyBox.put(contentId, data);
   }
 
   static Future<void> removeFromWatchHistory(String contentId) async {
+    if (!Hive.isBoxOpen(historyBoxName)) return;
     await _historyBox.delete(contentId);
   }
 
   static Map<dynamic, dynamic> getWatchHistory() {
+    if (!Hive.isBoxOpen(historyBoxName)) return {};
     return _historyBox.toMap();
   }
 
@@ -354,7 +358,11 @@ class HiveService {
     return null;
   }
 
+  @visibleForTesting
+  static String? debugMockUserId;
+
   static String? get userId {
+    if (debugMockUserId != null) return debugMockUserId;
     if (Hive.isBoxOpen(boxName)) {
       final hiveUid = _box.get(userKey)?.sId;
       if (hiveUid != null && hiveUid.trim().isNotEmpty) {
@@ -707,26 +715,35 @@ class HiveService {
   }
 
   static Future<void> saveDeviceId(String deviceId) async {
+    if (!Hive.isBoxOpen(keysBoxName)) return;
     await _keysBox.put('deviceId', deviceId);
   }
 
   static String? getDeviceId() {
+    if (!Hive.isBoxOpen(keysBoxName)) return null;
     return _keysBox.get('deviceId');
   }
 
   static Future<void> savePartnerPublicKey(String partnerId, String jwk) async {
+    if (!Hive.isBoxOpen(keysBoxName)) return;
     await _keysBox.put('partner_jwk_$partnerId', jwk);
   }
 
   static String? getPartnerPublicKey(String partnerId) {
+    if (!Hive.isBoxOpen(keysBoxName)) return null;
     return _keysBox.get('partner_jwk_$partnerId');
   }
 
   static Future<void> deletePartnerPublicKey(String partnerId) async {
+    if (!Hive.isBoxOpen(keysBoxName)) return;
     await _keysBox.delete('partner_jwk_$partnerId');
   }
 
+  @visibleForTesting
+  static bool? debugMockIsLogin;
+
   static bool isLogin() {
+    if (debugMockIsLogin != null) return debugMockIsLogin!;
     if (!Hive.isBoxOpen(boxName)) return false;
     final user = getUser();
     final token = getToken();

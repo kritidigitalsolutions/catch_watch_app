@@ -8,14 +8,77 @@ import 'dart:math';
 enum TimeFilter { all, today, week, month, year }
 enum DashboardMetric { reels, views, likes, comments, shares, saves, points }
 
+/// Independently tracked async operations of [WalletProvider].
+///
+/// Each operation owns its own loading counter and error message so that a
+/// request in one area (e.g. the dashboard) can never overwrite the loading or
+/// error state of another (e.g. the wallet summary).
+enum WalletOperation {
+  dashboard,
+  leaderboard,
+  walletSummary,
+  pointsSummary,
+  pointHistory,
+  redeemHistory,
+  redeem,
+}
+
 class WalletProvider extends ChangeNotifier {
   final WalletRepository _walletRepository = WalletRepository();
 
-  bool _isLoading = false;
-  bool get isLoading => _isLoading;
+  // Per-operation in-flight counters. A counter (rather than a bool) keeps the
+  // loading state correct when the same operation is triggered concurrently.
+  final Map<WalletOperation, int> _pending = {
+    for (final op in WalletOperation.values) op: 0,
+  };
 
-  String? _error;
-  String? get error => _error;
+  // Per-operation error messages. Only the operation that restarts clears its
+  // own error, so a success elsewhere can never wipe it.
+  final Map<WalletOperation, String?> _errors = {
+    for (final op in WalletOperation.values) op: null,
+  };
+
+  void _startOp(WalletOperation op) {
+    _pending[op] = (_pending[op] ?? 0) + 1;
+    _errors[op] = null;
+    notifyListeners();
+  }
+
+  void _finishOp(WalletOperation op) {
+    final int next = (_pending[op] ?? 1) - 1;
+    _pending[op] = next < 0 ? 0 : next;
+    notifyListeners();
+  }
+
+  bool _isOpLoading(WalletOperation op) => (_pending[op] ?? 0) > 0;
+
+  /// Dashboard (creator stats) loading/error.
+  bool get isDashboardLoading => _isOpLoading(WalletOperation.dashboard);
+  String? get dashboardError => _errors[WalletOperation.dashboard];
+
+  /// Leaderboard loading/error.
+  bool get isLeaderboardLoading => _isOpLoading(WalletOperation.leaderboard);
+  String? get leaderboardError => _errors[WalletOperation.leaderboard];
+
+  /// Wallet summary loading/error.
+  bool get isWalletSummaryLoading => _isOpLoading(WalletOperation.walletSummary);
+  String? get walletSummaryError => _errors[WalletOperation.walletSummary];
+
+  /// Points summary loading/error.
+  bool get isPointsSummaryLoading => _isOpLoading(WalletOperation.pointsSummary);
+  String? get pointsSummaryError => _errors[WalletOperation.pointsSummary];
+
+  /// Point (transaction) history loading/error.
+  bool get isPointHistoryLoading => _isOpLoading(WalletOperation.pointHistory);
+  String? get pointHistoryError => _errors[WalletOperation.pointHistory];
+
+  /// Redeem history loading/error.
+  bool get isRedeemHistoryLoading => _isOpLoading(WalletOperation.redeemHistory);
+  String? get redeemHistoryError => _errors[WalletOperation.redeemHistory];
+
+  /// Points redemption loading/error.
+  bool get isRedeeming => _isOpLoading(WalletOperation.redeem);
+  String? get redeemError => _errors[WalletOperation.redeem];
 
   CreatorDashboardData? _dashboardData;
   CreatorDashboardData? get dashboardData => _dashboardData;
@@ -48,7 +111,11 @@ class WalletProvider extends ChangeNotifier {
       case TimeFilter.today: return _dashboardData!.todayPoints ?? 0;
       case TimeFilter.week: return _dashboardData!.weeklyPoints ?? 0;
       case TimeFilter.month: return _dashboardData!.monthlyPoints ?? 0;
-      case TimeFilter.year: return _dashboardData!.totalPoints ?? 0;
+      // Year is disabled until the backend provides year-scoped data, so this
+      // branch is unreachable (see setTimeFilter). The API has no yearly points
+      // field, so we deliberately do NOT fall back to the all-time total here.
+      // TODO(backend): add year-scoped points to support this filter.
+      case TimeFilter.year: return 0;
     }
   }
 
@@ -77,9 +144,13 @@ class WalletProvider extends ChangeNotifier {
   DashboardMetric get selectedGraphMetric => _selectedGraphMetric;
 
   void setTimeFilter(TimeFilter filter) {
+    // Year is not supported by the backend yet (no year-scoped data). Ignore it
+    // so all-time values are never aliased under the Year filter.
+    if (filter == TimeFilter.year) return;
     _selectedTimeFilter = filter;
+    // fetchDashboardData() notifies synchronously at its start, so the filter
+    // change is reflected without an extra (premature) notification here.
     fetchDashboardData();
-    notifyListeners();
   }
 
   void setGraphMetric(DashboardMetric metric) {
@@ -119,20 +190,17 @@ class WalletProvider extends ChangeNotifier {
   // }
 
   Future<void> fetchDashboardData() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    _startOp(WalletOperation.dashboard);
 
     try {
       _dashboardData = await _walletRepository.getDashboardData(range: _selectedTimeFilter.name.toLowerCase());
-      if (_dashboardData?.pointHistory != null) {
-        _pointHistory = _dashboardData!.pointHistory!;
-      }
+      // NOTE: the dashboard payload keeps its own pointHistory; it is exposed via
+      // `dashboardData.pointHistory` and never copied into the wallet's
+      // `pointHistory` list, so the two data sets stay independent.
     } catch (e) {
-      _error = e.toString();
+      _errors[WalletOperation.dashboard] = e.toString();
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      _finishOp(WalletOperation.dashboard);
     }
   }
 
@@ -141,68 +209,57 @@ class WalletProvider extends ChangeNotifier {
 
   Future<void> fetchLeaderboard({String range = 'all'}) async {
     _selectedLeaderboardTimeframe = range;
-    _isLoading = true;
-    _error = null;
-    _leaderboardData = null; // Clear stale results so new filter doesn't show old data
-    notifyListeners();
+    // Clear stale results before notifying so the loading frame shows no old data.
+    _leaderboardData = null;
+    _startOp(WalletOperation.leaderboard);
 
     try {
       debugPrint("Fetching Leaderboard for timeframe: $range");
-      
+
       _leaderboardData = await _walletRepository.getLeaderboard(range: range);
-      
+
       debugPrint("Leaderboard fetch success: ${_leaderboardData?.leaderboard?.length} users");
     } catch (e) {
-      _error = e.toString();
+      _errors[WalletOperation.leaderboard] = e.toString();
       debugPrint("Leaderboard fetch error: $e");
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      _finishOp(WalletOperation.leaderboard);
     }
   }
 
   Future<void> fetchWalletSummary() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    _startOp(WalletOperation.walletSummary);
 
     try {
       _walletSummary = await _walletRepository.getWalletSummary();
     } catch (e) {
-      _error = e.toString();
+      _errors[WalletOperation.walletSummary] = e.toString();
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      _finishOp(WalletOperation.walletSummary);
     }
   }
 
   Future<void> fetchPointsSummary() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    _startOp(WalletOperation.pointsSummary);
 
     try {
       _pointsSummary = await _walletRepository.getPointsSummary();
     } catch (e) {
-      _error = e.toString();
+      _errors[WalletOperation.pointsSummary] = e.toString();
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      _finishOp(WalletOperation.pointsSummary);
     }
   }
 
   Future<void> fetchPointHistory() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    _startOp(WalletOperation.pointHistory);
 
     try {
       _pointHistory = await _walletRepository.getPointHistory();
     } catch (e) {
-      _error = e.toString();
+      _errors[WalletOperation.pointHistory] = e.toString();
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      _finishOp(WalletOperation.pointHistory);
     }
   }
 
@@ -210,19 +267,16 @@ class WalletProvider extends ChangeNotifier {
   List<RedeemHistory> get redeemRequests => _redeemRequests;
 
   Future<void> fetchRedeemHistory() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    _startOp(WalletOperation.redeemHistory);
 
     try {
       final response = await _walletRepository.getRedeemHistory();
       _redeemHistory = response['history'] ?? [];
       _redeemRequests = response['requests'] ?? [];
     } catch (e) {
-      _error = e.toString();
+      _errors[WalletOperation.redeemHistory] = e.toString();
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      _finishOp(WalletOperation.redeemHistory);
     }
   }
 
@@ -235,9 +289,7 @@ class WalletProvider extends ChangeNotifier {
     String? ifscCode,
     String? bankName,
   }) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    _startOp(WalletOperation.redeem);
 
     try {
       final Map<String, dynamic> data = {
@@ -262,14 +314,13 @@ class WalletProvider extends ChangeNotifier {
         await fetchPointHistory();
         return true;
       }
-      _error = response['message'] ?? 'Redeem failed';
+      _errors[WalletOperation.redeem] = response['message'] ?? 'Redeem failed';
       return false;
     } catch (e) {
-      _error = e.toString();
+      _errors[WalletOperation.redeem] = e.toString();
       return false;
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      _finishOp(WalletOperation.redeem);
     }
   }
 }

@@ -39,191 +39,200 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
 
-    return Scaffold(
-      backgroundColor: AppColors.white,
-      appBar: AppBar(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          context.read<AuthProvider>().goBackToCategories();
+        }
+      },
+      child: Scaffold(
         backgroundColor: AppColors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
-          onPressed: () => context.read<AuthProvider>().goBackToCategories(),
+        appBar: AppBar(
+          backgroundColor: AppColors.white,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
+            onPressed: () =>
+                context.read<AuthProvider>().goBackToCategories(context),
+          ),
+          title: Text('Profile', style: text18(fontWeight: FontWeight.w600)),
+          centerTitle: true,
         ),
-        title: Text('Profile', style: text18(fontWeight: FontWeight.w600)),
-        centerTitle: true,
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 24),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 24),
 
-              // ── Avatar ──────────────────────────────────────
-              Center(
-                child: GestureDetector(
-                  onTap: () => _showAvatarOptions(context),
-                  child: Stack(
-                    children: [
-                      Container(
-                        width: 90,
-                        height: 90,
-                        decoration: BoxDecoration(
-                          color: AppColors.grey200,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: AppColors.grey300,
-                            width: 2,
-                          ),
-                        ),
-                        child: auth.avatarPath != null
-                            ? ClipOval(
-                                child: Image.file(
-                                  File(auth.avatarPath!),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) => const Icon(
-                                    Icons.person,
-                                    size: 40,
-                                    color: AppColors.grey600,
-                                  ),
-                                ),
-                              )
-                            : const Icon(
-                                Icons.person,
-                                size: 40,
-                                color: AppColors.grey600,
-                              ),
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          width: 28,
-                          height: 28,
+                // ── Avatar ──────────────────────────────────────
+                Center(
+                  child: GestureDetector(
+                    onTap: () => _showAvatarOptions(context),
+                    child: Stack(
+                      children: [
+                        Container(
+                          width: 90,
+                          height: 90,
                           decoration: BoxDecoration(
-                            color: AppColors.primary,
+                            color: AppColors.grey200,
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
+                            border: Border.all(
+                              color: AppColors.grey300,
+                              width: 2,
+                            ),
                           ),
-                          child: const Icon(
-                            Icons.camera_alt,
-                            size: 14,
-                            color: Colors.white,
+                          child: auth.avatarPath != null
+                              ? ClipOval(
+                                  child: Image.file(
+                                    File(auth.avatarPath!),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) => const Icon(
+                                      Icons.person,
+                                      size: 40,
+                                      color: AppColors.grey600,
+                                    ),
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.person,
+                                  size: 40,
+                                  color: AppColors.grey600,
+                                ),
+                        ),
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: Container(
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                            child: const Icon(
+                              Icons.camera_alt,
+                              size: 14,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                Center(
+                  child: Text(
+                    'Tap to add photo',
+                    style: text12(color: AppColors.textSecondary),
+                  ),
+                ),
+
+                const SizedBox(height: 32),
+
+                // ── Name ────────────────────────────────────────
+                Text('Name', style: text13(fontWeight: FontWeight.w500)),
+                const SizedBox(height: 8),
+                _buildTextField(
+                  controller: _nameController,
+                  hint: 'Enter your name',
+                  errorText: auth.nameError,
+                  onChanged: (v) => context.read<AuthProvider>().setName(v),
+                  textCapitalization: TextCapitalization.words,
+                ),
+
+                const SizedBox(height: 20),
+
+                // ── Username ─────────────────────────────────────
+                Text('Username', style: text13(fontWeight: FontWeight.w500)),
+                const SizedBox(height: 8),
+                _buildTextField(
+                  controller: _usernameController,
+                  hint: 'Choose a username',
+                  errorText: auth.usernameError,
+                  prefix: '@',
+                  onChanged: (v) => context.read<AuthProvider>().setUsername(v),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Only lowercase letters, numbers and underscores.',
+                  style: text11(color: AppColors.textSecondary),
+                ),
+
+                // Selected genres summary
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.grey100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Your interests',
+                        style: text13(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: auth.selectedGenres.map((g) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              g,
+                              style: text11(
+                                color: AppColors.primary,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          );
+                        }).toList(),
                       ),
                     ],
                   ),
                 ),
-              ),
 
-              const SizedBox(height: 8),
+                const SizedBox(height: 32),
 
-              Center(
-                child: Text(
-                  'Tap to add photo',
-                  style: text12(color: AppColors.textSecondary),
+                // ── Save button ──────────────────────────────────
+                AppButton(
+                  title: 'Continue',
+                  isLoading: auth.profileSaving,
+                  onTap: () {
+                    context.read<AuthProvider>().saveProfile(context);
+                  },
                 ),
-              ),
 
-              const SizedBox(height: 32),
-
-              // ── Name ────────────────────────────────────────
-              Text('Name', style: text13(fontWeight: FontWeight.w500)),
-              const SizedBox(height: 8),
-              _buildTextField(
-                controller: _nameController,
-                hint: 'Enter your name',
-                errorText: auth.nameError,
-                onChanged: (v) => context.read<AuthProvider>().setName(v),
-                textCapitalization: TextCapitalization.words,
-              ),
-
-              const SizedBox(height: 20),
-
-              // ── Username ─────────────────────────────────────
-              Text('Username', style: text13(fontWeight: FontWeight.w500)),
-              const SizedBox(height: 8),
-              _buildTextField(
-                controller: _usernameController,
-                hint: 'Choose a username',
-                errorText: auth.usernameError,
-                prefix: '@',
-                onChanged: (v) => context.read<AuthProvider>().setUsername(v),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Only lowercase letters, numbers and underscores.',
-                style: text11(color: AppColors.textSecondary),
-              ),
-
-              // Selected genres summary
-              const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppColors.grey100,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Your interests',
-                      style: text13(fontWeight: FontWeight.w600),
+                if (auth.profileError != null) ...[
+                  const SizedBox(height: 10),
+                  Center(
+                    child: Text(
+                      auth.profileError!,
+                      style: text12(color: AppColors.error),
+                      textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: auth.selectedGenres.map((g) {
-                        return Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            g,
-                            style: text11(
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 32),
-
-              // ── Save button ──────────────────────────────────
-              AppButton(
-                title: 'Continue',
-                isLoading: auth.profileSaving,
-                onTap: () {
-                  context.read<AuthProvider>().saveProfile(context);
-                },
-              ),
-
-              if (auth.profileError != null) ...[
-                const SizedBox(height: 10),
-                Center(
-                  child: Text(
-                    auth.profileError!,
-                    style: text12(color: AppColors.error),
-                    textAlign: TextAlign.center,
                   ),
-                ),
-              ],
+                ],
 
-              const SizedBox(height: 24),
-            ],
+                const SizedBox(height: 24),
+              ],
+            ),
           ),
         ),
       ),
@@ -365,7 +374,7 @@ class _AvatarOption extends StatelessWidget {
             width: 56,
             height: 56,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
+              color: color.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: color, size: 24),

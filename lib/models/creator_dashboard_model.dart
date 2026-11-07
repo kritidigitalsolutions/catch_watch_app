@@ -1,5 +1,64 @@
 import 'wallet_model.dart';
 
+int? _asInt(dynamic value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is double) return value.toInt();
+  if (value is String) return int.tryParse(value.trim());
+  return null;
+}
+
+double? _asDouble(dynamic value) {
+  if (value == null) return null;
+  if (value is double) return value;
+  if (value is int) return value.toDouble();
+  if (value is String) return double.tryParse(value.trim());
+  return null;
+}
+
+bool? _asBool(dynamic value) {
+  if (value == null) return null;
+  if (value is bool) return value;
+  if (value is String) {
+    final v = value.trim().toLowerCase();
+    if (v == 'true') return true;
+    if (v == 'false') return false;
+  }
+  return null;
+}
+
+DateTime? _asDate(dynamic value) {
+  if (value == null) return null;
+  if (value is DateTime) return value;
+  if (value is String) return DateTime.tryParse(value);
+  if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+  return null;
+}
+
+/// Parses a JSON list into [T] using [fromJson], validating that every entry is
+/// a JSON object.
+///
+/// Returns `null` when [value] is not a list, so an absent/foreign optional
+/// field stays absent rather than becoming a misleading empty list. A list that
+/// carries a non-object entry throws a [FormatException] — the malformed
+/// response surfaces as an error instead of silently collapsing to empty or
+/// partial data.
+List<T>? _parseObjectList<T>(
+  dynamic value,
+  T Function(Map<String, dynamic>) fromJson,
+  String field,
+) {
+  if (value is! List) return null;
+  return value.map((dynamic item) {
+    if (item is! Map) {
+      throw FormatException(
+        "Invalid '$field' entry in dashboard response (expected a JSON object)",
+      );
+    }
+    return fromJson(Map<String, dynamic>.from(item));
+  }).toList();
+}
+
 class CreatorDashboardData {
   final bool? success;
   final String? creatorLevel;
@@ -47,38 +106,37 @@ class CreatorDashboardData {
 
   factory CreatorDashboardData.fromJson(Map<String, dynamic> json) {
     Map<String, DashboardTimeStats>? parsedTimeStats;
-    if (json['timeStats'] != null) {
+    if (json['timeStats'] is Map) {
       parsedTimeStats = {};
-      (json['timeStats'] as Map<String, dynamic>).forEach((key, value) {
-        parsedTimeStats![key] = DashboardTimeStats.fromJson(value);
+      (json['timeStats'] as Map).forEach((key, value) {
+        if (value is Map) {
+          parsedTimeStats![key.toString()] =
+              DashboardTimeStats.fromJson(Map<String, dynamic>.from(value));
+        }
       });
     }
 
     return CreatorDashboardData(
-      success: json['success'],
-      creatorLevel: json['creatorLevel'],
-      qualityScore: json['qualityScore'],
-      totalPoints: json['totalPoints'],
-      todayPoints: json['todayPoints'],
-      weeklyPoints: json['weeklyPoints'],
-      monthlyPoints: json['monthlyPoints'],
-      qualifiedViews: json['qualifiedViews'],
-      watchMinutes: json['watchMinutes'],
-      completionRate: (json['completionRate'] ?? 0).toDouble(),
-      likes: json['likes'],
-      comments: json['comments'],
-      shares: json['shares'],
-      saves: json['saves'],
-      followers: json['followers'],
-      redeemablePoints: json['redeemablePoints'],
-      blueTick: json['blueTick'],
+      success: _asBool(json['success']),
+      creatorLevel: json['creatorLevel']?.toString(),
+      qualityScore: _asInt(json['qualityScore']),
+      totalPoints: _asInt(json['totalPoints']),
+      todayPoints: _asInt(json['todayPoints']),
+      weeklyPoints: _asInt(json['weeklyPoints']),
+      monthlyPoints: _asInt(json['monthlyPoints']),
+      qualifiedViews: _asInt(json['qualifiedViews']),
+      watchMinutes: _asInt(json['watchMinutes']),
+      completionRate: _asDouble(json['completionRate']),
+      likes: _asInt(json['likes']),
+      comments: _asInt(json['comments']),
+      shares: _asInt(json['shares']),
+      saves: _asInt(json['saves']),
+      followers: _asInt(json['followers']),
+      redeemablePoints: _asInt(json['redeemablePoints']),
+      blueTick: _asBool(json['blueTick']),
       timeStats: parsedTimeStats,
-      pointHistory: json['pointHistory'] != null 
-          ? (json['pointHistory'] as List).map((i) => PointHistoryLog.fromJson(i)).toList() 
-          : null,
-      topReels: json['topReels'] != null 
-          ? (json['topReels'] as List).map((i) => TopReel.fromJson(i)).toList() 
-          : null,
+      pointHistory: _parseObjectList(json['pointHistory'], PointHistoryLog.fromJson, 'pointHistory'),
+      topReels: _parseObjectList(json['topReels'], TopReel.fromJson, 'topReels'),
     );
   }
 }
@@ -100,11 +158,11 @@ class DashboardTimeStats {
 
   factory DashboardTimeStats.fromJson(Map<String, dynamic> json) {
     return DashboardTimeStats(
-      likes: json['likes'] ?? 0,
-      comments: json['comments'] ?? 0,
-      views: json['views'] ?? 0,
-      saves: json['saves'] ?? 0,
-      shares: json['shares'] ?? 0,
+      likes: _asInt(json['likes']) ?? 0,
+      comments: _asInt(json['comments']) ?? 0,
+      views: _asInt(json['views']) ?? 0,
+      saves: _asInt(json['saves']) ?? 0,
+      shares: _asInt(json['shares']) ?? 0,
     );
   }
 }
@@ -134,15 +192,15 @@ class TopReel {
 
   factory TopReel.fromJson(Map<String, dynamic> json) {
     return TopReel(
-      id: json['_id'],
-      caption: json['caption'],
-      thumbnailUrl: json['thumbnailUrl'],
-      viewsCount: json['viewsCount'],
-      sharesCount: json['sharesCount'],
-      likesCount: json['likesCount'],
-      savesCount: json['savesCount'],
-      commentsCount: json['commentsCount'],
-      createdAt: json['createdAt'] != null ? DateTime.parse(json['createdAt']) : null,
+      id: json['_id']?.toString(),
+      caption: json['caption']?.toString(),
+      thumbnailUrl: json['thumbnailUrl']?.toString(),
+      viewsCount: _asInt(json['viewsCount']),
+      sharesCount: _asInt(json['sharesCount']),
+      likesCount: _asInt(json['likesCount']),
+      savesCount: _asInt(json['savesCount']),
+      commentsCount: _asInt(json['commentsCount']),
+      createdAt: _asDate(json['createdAt']),
     );
   }
 }

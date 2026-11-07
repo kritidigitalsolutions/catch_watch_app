@@ -1,15 +1,14 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:catch_watch/data/network/notification_service.dart';
 import 'package:catch_watch/main.dart';
-import 'package:catch_watch/models/auth_models.dart';
 import 'package:catch_watch/repository/auth_repository.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:catch_watch/utils/hive_service/userdetail.dart';
 import 'package:catch_watch/views/before_login_Pages/categories_screen.dart';
 import 'package:catch_watch/views/before_login_Pages/profile_setup_screen.dart';
 import 'package:dio/dio.dart' as dio;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -87,7 +86,135 @@ class OnboardingItem {
 enum AuthStep { login, otp, categories, profile, done }
 
 class AuthProvider extends ChangeNotifier with CodeAutoFill {
-  final AuthRepository _authRepository = AuthRepository();
+  final AuthRepository _authRepository;
+  final bool _isDebugMode;
+  final WidgetBuilder _homeScreenBuilder;
+  final Future<void> Function(UserDetails user)? _onSessionPersisted;
+
+  AuthProvider({
+    AuthRepository? authRepository,
+    bool isDebugMode = kDebugMode,
+    WidgetBuilder? homeScreenBuilder,
+    Future<void> Function(UserDetails user)? onSessionPersisted,
+  })  : _authRepository = authRepository ?? AuthRepository(),
+        _isDebugMode = kDebugMode && isDebugMode,
+        _homeScreenBuilder =
+            homeScreenBuilder ?? ((_) => const MyHomePage()),
+        _onSessionPersisted = onSessionPersisted;
+
+  /// Supported country dial codes displayed in the LoginScreen country picker.
+  static const Map<String, String> supportedCountries = <String, String>{
+    '🇮🇳 India': '+91',
+    '🇺🇸 USA': '+1',
+    '🇬🇧 UK': '+44',
+    '🇦🇪 UAE': '+971',
+    '🇦🇺 Australia': '+61',
+  };
+
+  /// Normalizes a country dial code to `+<digits>` format (defaults to `+91`).
+  static String normalizeCountryCode(String code) {
+    final String trimmed = code.trim();
+    if (trimmed.isEmpty) return '+91';
+    final String digits = trimmed.replaceAll(RegExp(r'[^\d]'), '');
+    if (digits.isEmpty) return '+91';
+    return '+$digits';
+  }
+
+  /// Minimum valid local subscriber number length for [countryCode].
+  ///
+  /// - India (`+91`) and USA/NANP (`+1`): 10 digits.
+  /// - UAE (`+971`), Australia (`+61`), UK (`+44`), and other international
+  ///   country codes: 9 digits (supporting 9-digit local mobile numbers).
+  static int minPhoneDigitsForCountry(String countryCode) {
+    final String normalized = normalizeCountryCode(countryCode);
+    switch (normalized) {
+      case '+91':
+      case '+1':
+        return 10;
+      case '+971':
+      case '+61':
+      case '+44':
+      default:
+        return 9;
+    }
+  }
+
+  /// Maximum valid local subscriber number length for [countryCode].
+  ///
+  /// - India (`+91`), USA (`+1`), UAE (`+971`), Australia (`+61`), UK (`+44`):
+  ///   10 digits (accommodating 10-digit numbers or 9-digit numbers with a
+  ///   leading trunk `0`).
+  /// - Other international country codes: up to 15 digits per ITU-T E.164.
+  static int maxPhoneDigitsForCountry(String countryCode) {
+    final String normalized = normalizeCountryCode(countryCode);
+    switch (normalized) {
+      case '+91':
+      case '+1':
+      case '+971':
+      case '+61':
+      case '+44':
+        return 10;
+      default:
+        return 15;
+    }
+  }
+
+  /// Validates that [phone] contains only digits and satisfies the valid digit
+  /// length range for [countryCode].
+  static bool isValidPhoneForCountry(String phone, String countryCode) {
+    final String trimmed = phone.trim();
+    if (trimmed.isEmpty || !RegExp(r'^\d+$').hasMatch(trimmed)) {
+      return false;
+    }
+    final int minLen = minPhoneDigitsForCountry(countryCode);
+    final int maxLen = maxPhoneDigitsForCountry(countryCode);
+    return trimmed.length >= minLen && trimmed.length <= maxLen;
+  }
+
+  /// Determines whether a debug-only OTP preview may be shown in the UI.
+  ///
+  /// Strictly returns `false` in production/release builds (`!kDebugMode`) or
+  /// when [isDebugMode] is `false`, or when [otp] is null/blank.
+  static bool shouldShowOtpInUi(
+    String? otp, {
+    bool isDebugMode = kDebugMode,
+  }) {
+    if (!kDebugMode || !isDebugMode) return false;
+    final String? cleanOtp = otp?.trim();
+    return cleanOtp != null && cleanOtp.isNotEmpty;
+  }
+
+  /// Whether this provider instance is running in debug mode.
+  bool get isDebugMode => _isDebugMode;
+
+  /// Whether this provider instance is permitted to display a debug OTP SnackBar.
+  bool shouldShowOtpSnackBar(String? otp) {
+    return shouldShowOtpInUi(otp, isDebugMode: _isDebugMode);
+  }
+
+  void _safeListenForCode() {
+    try {
+      listenForCode();
+    } catch (e) {
+      if (_isDebugMode) {
+        debugPrint('Error starting SMS code listener: $e');
+      }
+    }
+  }
+
+  void _safeUnregisterListener() {
+    try {
+      unregisterListener().catchError((Object e) {
+        if (_isDebugMode) {
+          debugPrint('Error unregistering listener: $e');
+        }
+      });
+    } catch (e) {
+      if (_isDebugMode) {
+        debugPrint('Error unregistering listener: $e');
+      }
+    }
+  }
 
   @override
   void codeUpdated() {
@@ -112,6 +239,10 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
 
   String get phoneNumber => _phoneNumber;
   String get countryCode => _countryCode;
+  String get fullPhoneNumber => '$_countryCode$_phoneNumber';
+  int get minPhoneLength => minPhoneDigitsForCountry(_countryCode);
+  int get maxPhoneLength => maxPhoneDigitsForCountry(_countryCode);
+  bool get isPhoneValid => isValidPhoneForCountry(_phoneNumber, _countryCode);
   bool get agreedToTerms => _agreedToTerms;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
@@ -129,7 +260,8 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
   }
 
   void setCountryCode(String code) {
-    _countryCode = code;
+    _countryCode = normalizeCountryCode(code);
+    _errorMessage = null;
     notifyListeners();
   }
 
@@ -143,9 +275,39 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
     notifyListeners();
   }
 
+  /// Builds the request payload for `/api/auth/send-otp`.
+  /// Includes both `'phone'` (local subscriber digits) and `'countryCode'`
+  /// (`+<dialCode>`) for backend compatibility.
+  Map<String, dynamic> buildSendOtpPayload() {
+    return <String, dynamic>{
+      'phone': _phoneNumber,
+      'countryCode': _countryCode,
+    };
+  }
+
+  /// Builds the request payload for `/api/auth/verify-otp`.
+  /// Includes `'phone'`, `'countryCode'`, and `'otp'`.
+  Map<String, dynamic> buildVerifyOtpPayload(String otp) {
+    return <String, dynamic>{
+      'phone': _phoneNumber,
+      'countryCode': _countryCode,
+      'otp': otp,
+    };
+  }
+
   Future<void> sendOtp(BuildContext context) async {
-    if (_phoneNumber.length < 10) {
-      _errorMessage = 'Please enter a valid 10-digit mobile number.';
+    if (_isLoading) return;
+    if (!isPhoneValid) {
+      final int minLen = minPhoneLength;
+      final int maxLen = maxPhoneLength;
+      if (minLen == 10 && maxLen == 10) {
+        _errorMessage = 'Please enter a valid 10-digit mobile number.';
+      } else if (minLen == 9 && maxLen == 10) {
+        _errorMessage = 'Please enter a valid 9 to 10-digit mobile number.';
+      } else {
+        _errorMessage =
+            'Please enter a valid mobile number ($minLen-$maxLen digits).';
+      }
       notifyListeners();
       return;
     }
@@ -156,12 +318,13 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
       return;
     }
 
+    final bool wasAlreadyOnOtpStep = _step == AuthStep.otp;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      final data = {'phone': _phoneNumber};
+      final data = buildSendOtpPayload();
       final response = await _authRepository.sendOtp(data);
 
       _isLoading = false;
@@ -170,12 +333,12 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
         _otpSent = true;
         _startResendTimer();
         _step = AuthStep.otp;
-        listenForCode();
+        _safeListenForCode();
 
-        if (response.otp != null) {
+        if (shouldShowOtpSnackBar(response.otp) && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Your OTP is: ${response.otp}'),
+              content: Text('Your OTP is: ${response.otp!.trim()}'),
               backgroundColor: Colors.green,
               duration: const Duration(seconds: 10),
               behavior: SnackBarBehavior.floating,
@@ -183,10 +346,20 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
           );
         }
 
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const OtpScreen()),
-        );
+        if (context.mounted && !wasAlreadyOnOtpStep) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              settings: const RouteSettings(name: '/auth/otp'),
+              builder: (context) => const OtpScreen(),
+            ),
+          ).then((_) {
+            if (_step == AuthStep.otp) {
+              _step = AuthStep.login;
+              notifyListeners();
+            }
+          });
+        }
       } else {
         _errorMessage = response.message ?? 'Failed to send OTP';
       }
@@ -216,6 +389,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
 
   void setOtpDigit(int index, String value) {
     if (index < 0 || index >= 6) return;
+    if (_otpDigits[index] == value && _otpError == null) return;
     _otpDigits[index] = value;
     _otpError = null;
     notifyListeners();
@@ -251,19 +425,21 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
     notifyListeners();
 
     try {
-      final data = {'phone': _phoneNumber};
+      final data = buildSendOtpPayload();
       final response = await _authRepository.sendOtp(data);
 
       _isLoading = false;
       if (response.success == true) {
         clearOtp();
         _startResendTimer();
-        listenForCode();
+        _safeListenForCode();
 
-        if (response.otp != null && context != null) {
+        if (shouldShowOtpSnackBar(response.otp) &&
+            context != null &&
+            context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Your OTP is: ${response.otp}'),
+              content: Text('Your OTP is: ${response.otp!.trim()}'),
               backgroundColor: Colors.green,
               duration: const Duration(seconds: 10),
               behavior: SnackBarBehavior.floating,
@@ -271,7 +447,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
           );
         }
       } else {
-        if (context != null) {
+        if (context != null && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(response.message ?? 'Failed to resend OTP')),
           );
@@ -279,7 +455,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
       }
     } catch (e) {
       _isLoading = false;
-      if (context != null) {
+      if (context != null && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(e.toString())),
         );
@@ -288,7 +464,41 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
     notifyListeners();
   }
 
+  Future<void> _persistAuthenticatedSession(
+    UserDetails userDetail,
+    ChatProvider? chatProvider,
+  ) async {
+    if (_onSessionPersisted != null) {
+      await _onSessionPersisted(userDetail);
+      return;
+    }
+    await HiveService.saveUser(userDetail);
+    await HiveService.setOnboardingCompleted(true);
+    await NotificationService.syncTokenToServer(); // Sync FCM token
+
+    // Initialize Chat Socket & E2EE
+    if (chatProvider != null) {
+      chatProvider.initSocket();
+      chatProvider.ensureReady();
+    }
+  }
+
+  ChatProvider? _tryReadChatProvider(BuildContext context) {
+    if (!context.mounted) return null;
+    try {
+      return Provider.of<ChatProvider>(context, listen: false);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> verifyOtp(BuildContext context) async {
+    if (_otpVerifying) return;
+    if (_step == AuthStep.categories ||
+        _step == AuthStep.profile ||
+        _step == AuthStep.done) {
+      return;
+    }
     final code = otpCode;
     if (code.length < 6) {
       _otpError = 'Please enter all 6 digits.';
@@ -301,20 +511,28 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
     notifyListeners();
 
     try {
-      final data = {
-        'phone': _phoneNumber,
-        'otp': code,
-      };
+      final data = buildVerifyOtpPayload(code);
       final response = await _authRepository.verifyOtp(data);
 
       if (response.success == true) {
         if (response.isNewUser == true) {
           _otpVerifying = false;
+          resetOtpState();
           _step = AuthStep.categories;
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const CategoriesScreen()),
-          );
+          if (context.mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                settings: const RouteSettings(name: '/signup/categories'),
+                builder: (context) => const CategoriesScreen(),
+              ),
+            ).then((_) {
+              if (_step == AuthStep.categories) {
+                _step = AuthStep.otp;
+                notifyListeners();
+              }
+            });
+          }
         } else {
           // Existing user, save details and go to Home
           if (response.token != null) {
@@ -326,25 +544,25 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
               sId: response.user?.id,
               isNewUser: false,
             );
-            await HiveService.saveUser(userDetail);
-            await HiveService.setOnboardingCompleted(true);
-            await NotificationService.syncTokenToServer(); // Sync FCM token after login
-            
-            // Initialize Chat Socket & E2EE
+            ChatProvider? chatProvider;
             if (context.mounted) {
-              final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-              chatProvider.initSocket();
-              chatProvider.ensureReady();
+              chatProvider = _tryReadChatProvider(context);
             }
-
+            await _persistAuthenticatedSession(userDetail, chatProvider);
           }
           _otpVerifying = false;
+          _step = AuthStep.done;
           resetOtpState();
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (context) => const MyHomePage()),
-            (route) => false,
-          );
+          if (context.mounted) {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(
+                settings: const RouteSettings(name: '/home'),
+                builder: _homeScreenBuilder,
+              ),
+              (route) => false,
+            );
+          }
         }
       } else {
         _otpVerifying = false;
@@ -367,11 +585,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
     _otpError = null;
     _otpSent = false;
     _otpVerifying = false;
-    try {
-      unregisterListener();
-    } catch (e) {
-      debugPrint('Error unregistering listener: $e');
-    }
+    _safeUnregisterListener();
     notifyListeners();
   }
 
@@ -382,15 +596,25 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
     resetOtpState();
   }
 
-  /// Completely resets all authentication provider state (phone, OTP, terms, errors)
+  /// Completely resets all authentication provider state (phone, OTP, terms, errors, signup fields)
   /// Used upon logout and account deletion
   void resetAuthState({bool clearPhone = true}) {
     if (clearPhone) {
       _phoneNumber = '';
+      _countryCode = '+91';
     }
     _errorMessage = null;
     _agreedToTerms = false;
     _isLoading = false;
+    _selectedGenres.clear();
+    _categoriesError = null;
+    _name = '';
+    _username = '';
+    _avatarPath = null;
+    _profileSaving = false;
+    _profileError = null;
+    _nameError = null;
+    _usernameError = null;
     _step = AuthStep.login;
     resetOtpState();
   }
@@ -439,17 +663,37 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
       notifyListeners();
       return;
     }
+    if (_step == AuthStep.profile || _profileSaving) {
+      return;
+    }
+    _categoriesError = null;
     _step = AuthStep.profile;
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const ProfileSetupScreen()),
-    );
     notifyListeners();
+    if (context.mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          settings: const RouteSettings(name: '/signup/profile'),
+          builder: (context) => const ProfileSetupScreen(),
+        ),
+      ).then((_) {
+        if (_step == AuthStep.profile) {
+          _step = AuthStep.categories;
+          notifyListeners();
+        }
+      });
+    }
   }
 
-  void goBackToOtp() {
+  void goBackToOtp([BuildContext? context]) {
     _step = AuthStep.otp;
+    _categoriesError = null;
     notifyListeners();
+    if (context != null &&
+        context.mounted &&
+        Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 
   // ─── Profile State ─────────────────────────────────────────
@@ -519,6 +763,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
   }
 
   Future<void> saveProfile(BuildContext context) async {
+    if (_profileSaving) return;
     if (!_validateProfile()) return;
 
     _profileSaving = true;
@@ -530,6 +775,7 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
         'name': _name,
         'username': _username,
         'phone': _phoneNumber,
+        'countryCode': _countryCode,
         'genres': _selectedGenres.toList(),
         'bio': '',
       });
@@ -554,25 +800,25 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
           sId: response.user?.id,
           isNewUser: false,
         );
-        await HiveService.saveUser(userDetail);
-        await HiveService.setOnboardingCompleted(true);
-        await NotificationService.syncTokenToServer(); // Sync FCM token after profile complete
-        
-        // Initialize Chat Socket & E2EE
+        ChatProvider? chatProvider;
         if (context.mounted) {
-          final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-          chatProvider.initSocket();
-          chatProvider.ensureReady();
+          chatProvider = _tryReadChatProvider(context);
         }
-
+        await _persistAuthenticatedSession(userDetail, chatProvider);
 
         _profileSaving = false;
         _step = AuthStep.done;
         resetOtpState();
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const MyHomePage()),
-        );
+        if (context.mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              settings: const RouteSettings(name: '/home'),
+              builder: _homeScreenBuilder,
+            ),
+            (route) => false,
+          );
+        }
       } else {
         _profileSaving = false;
         _profileError = response.message ?? 'Failed to complete profile';
@@ -584,16 +830,22 @@ class AuthProvider extends ChangeNotifier with CodeAutoFill {
     notifyListeners();
   }
 
-  void goBackToCategories() {
+  void goBackToCategories([BuildContext? context]) {
     _step = AuthStep.categories;
+    _profileError = null;
     notifyListeners();
+    if (context != null &&
+        context.mounted &&
+        Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 
   // ─── Cleanup ───────────────────────────────────────────────
   @override
   void dispose() {
     _resendTimer?.cancel();
-    unregisterListener();
+    _safeUnregisterListener();
     super.dispose();
   }
 }

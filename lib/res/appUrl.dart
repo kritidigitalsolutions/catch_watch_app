@@ -1,9 +1,88 @@
+import 'package:flutter/foundation.dart';
+
 class AppUrl {
   // static const String serverUrl = 'http://192.168.1.9:5000';
   static const String serverUrl = 'https://api.catchandwatch.com';
   // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
   // static const String baseUrl = "https://api.catchandwatch.com/api";
+
+  /// Returns the normalized `x-platform` header value (`'ios'` on iOS,
+  /// `'android'` on Android, or lowercase platform name).
+  static String platformHeaderValue({bool? isIOS}) {
+    if (isIOS != null) {
+      return isIOS ? 'ios' : 'android';
+    }
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      return 'ios';
+    }
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return 'android';
+    }
+    return defaultTargetPlatform.name.toLowerCase();
+  }
+
+  /// Returns `true` only if [url] targets the trusted Catch & Watch API server
+  /// ([serverUrl]) with matching scheme, host, and port, and no userInfo.
+  static bool isTrustedApiUrl(String? url) {
+    if (url == null) return false;
+    final String trimmed = url.trim();
+    if (trimmed.isEmpty) return false;
+
+    final Uri? uri = Uri.tryParse(trimmed);
+    final Uri? trustedServerUri = Uri.tryParse(serverUrl);
+    if (uri == null || trustedServerUri == null) return false;
+    if (!uri.hasScheme || !uri.hasAuthority) return false;
+    if (uri.userInfo.isNotEmpty) return false;
+
+    final String scheme = uri.scheme.toLowerCase();
+    final String trustedScheme = trustedServerUri.scheme.toLowerCase();
+    if (scheme != trustedScheme) return false;
+
+    final String host = uri.host.toLowerCase();
+    final String trustedHost = trustedServerUri.host.toLowerCase();
+    if (host.isEmpty || host != trustedHost) return false;
+
+    if (uri.port != trustedServerUri.port) return false;
+
+    return true;
+  }
+
+  /// Returns `true` if [url] belongs to Catch & Watch first-party domains or CDN storage.
+  static bool isTrustedMediaUrl(String? url) {
+    if (url == null) return false;
+    final String trimmed = url.trim();
+    if (trimmed.isEmpty) return false;
+    final Uri? uri = Uri.tryParse(trimmed);
+    if (uri == null || !uri.hasScheme || !uri.hasAuthority) return false;
+    final String host = uri.host.toLowerCase();
+    return host == 'api.catchandwatch.com' ||
+        host == 'catchandwatch.com' ||
+        host.endsWith('.catchandwatch.com') ||
+        host == 'catchandwatchzone.b-cdn.net' ||
+        host.endsWith('.b-cdn.net');
+  }
+
+  /// Builds HTTP headers for video/media playback requests.
+  ///
+  /// Always includes `'Referer': 'https://catchandwatch.com'` (plus any [extraHeaders]),
+  /// and attaches `'Authorization': 'Bearer <token>'` ONLY when [url] is verified
+  /// as a trusted Catch & Watch API URL via [isTrustedApiUrl] and [token] is non-empty.
+  static Map<String, String> buildVideoRequestHeaders(
+    String? url, {
+    String? token,
+    Map<String, String>? extraHeaders,
+  }) {
+    final Map<String, String> headers = <String, String>{
+      'Referer': 'https://catchandwatch.com',
+      ...?extraHeaders,
+    };
+    final String? cleanToken = token?.trim();
+    if (cleanToken != null && cleanToken.isNotEmpty && isTrustedApiUrl(url)) {
+      headers['Authorization'] = 'Bearer $cleanToken';
+    }
+    return headers;
+  }
 
   // Auth Endpoints
   static const String sendOtp = '$baseUrl/auth/send-otp';

@@ -4,7 +4,10 @@ import 'package:catch_watch/models/report_model.dart';
 import 'package:catch_watch/res/appUrl.dart';
 
 class ReportRepository {
-  final BaseApiService _apiService = NetworkApiService();
+  final BaseApiService _apiService;
+
+  ReportRepository({BaseApiService? apiService})
+      : _apiService = apiService ?? NetworkApiService();
 
   /// Submits a UGC report for a reel, comment, or user profile.
   ///

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../res/app_colors.dart';
+import '../../../utils/empty_state_widget.dart';
+import '../../../utils/error_state_widget.dart';
 import '../../../utils/text_style.dart';
 import '../../../view_model/after_login_provider/wallet_provider.dart';
 import 'package:intl/intl.dart';
@@ -17,6 +19,8 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
   final TextEditingController _redeemController = TextEditingController();
+  // Local guard to block rapid duplicate redeem submissions.
+  bool _submitting = false;
 
   @override
   void initState() {
@@ -41,20 +45,50 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
     super.dispose();
   }
 
-  void _showRedeemDialog(WalletProvider provider) {
+  // --- Redeem form validation -------------------------------------------------
+  // Format rules only. Minimum redeem amount / redemption increments are NOT
+  // enforced here because the backend does not currently expose such a config
+  // (reported as a dependency).
+  static final RegExp _upiRegex = RegExp(r'^[a-zA-Z0-9._-]{2,256}@[a-zA-Z]{2,64}$');
+  static final RegExp _ifscRegex = RegExp(r'^[A-Za-z]{4}0[A-Za-z0-9]{6}$');
+  static final RegExp _accountNumberRegex = RegExp(r'^\d{9,18}$');
+  static final RegExp _holderNameRegex = RegExp(r"^[A-Za-z][A-Za-z .']*$");
+
+  bool _isValidUpiId(String value) => _upiRegex.hasMatch(value.trim());
+
+  bool _isValidIfsc(String value) => _ifscRegex.hasMatch(value.trim().toUpperCase());
+
+  bool _isValidAccountNumber(String value) => _accountNumberRegex.hasMatch(value.trim());
+
+  bool _isValidHolderName(String value) {
+    final v = value.trim();
+    return v.length >= 3 && _holderNameRegex.hasMatch(v);
+  }
+
+  void _showRedeemDialog() {
     String paymentMethod = "UPI";
+    _submitting = false;
     final TextEditingController accountHolderController = TextEditingController();
     final TextEditingController upiIdController = TextEditingController();
     final TextEditingController accountNumberController = TextEditingController();
     final TextEditingController ifscController = TextEditingController();
     final TextEditingController bankNameController = TextEditingController();
 
+    // Inline validation messages (reset each time the sheet opens / re-validates).
+    String? pointsError;
+    String? holderError;
+    String? upiError;
+    String? accountError;
+    String? ifscError;
+    String? bankNameError;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => Padding(
+      builder: (sheetContext) => Consumer<WalletProvider>(
+        builder: (context, provider, _) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
           padding: EdgeInsets.only(
             bottom: MediaQuery.of(context).viewInsets.bottom,
             left: 20,
@@ -76,78 +110,139 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
                 const SizedBox(height: 16),
                 Text("Enter the number of points you want to redeem.", style: text12(color: AppColors.grey600)),
                 const SizedBox(height: 8),
-                _buildTextField(_redeemController, "Enter points", Icons.stars_rounded, isNumber: true),
+                _buildTextField(_redeemController, "Enter points", Icons.stars_rounded, isNumber: true, errorText: pointsError),
                 Text("Available: ${provider.walletSummary?.availablePoints ?? 0} Points", style: text10(color: AppColors.primary, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 20),
+                const SizedBox(height: 14),
+                _buildPayoutRegionNotice(isSheet: true),
+                const SizedBox(height: 16),
                 Text("Select Payment Method", style: text14(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    _buildMethodTab("UPI", paymentMethod == "UPI", () => setState(() => paymentMethod = "UPI")),
+                    _buildMethodTab("UPI", paymentMethod == "UPI", () => setSheetState(() => paymentMethod = "UPI")),
                     const SizedBox(width: 12),
-                    _buildMethodTab("Bank Account", paymentMethod == "BANK", () => setState(() => paymentMethod = "BANK")),
+                    _buildMethodTab("Bank Account", paymentMethod == "BANK", () => setSheetState(() => paymentMethod = "BANK")),
                   ],
                 ),
                 const SizedBox(height: 20),
                 if (paymentMethod == "UPI") ...[
-                  _buildTextField(accountHolderController, "Account Holder Name", Icons.person),
+                  _buildTextField(accountHolderController, "Account Holder Name", Icons.person, errorText: holderError),
                   const SizedBox(height: 12),
-                  _buildTextField(upiIdController, "UPI ID", Icons.account_balance_wallet_rounded),
+                  _buildTextField(upiIdController, "UPI ID", Icons.account_balance_wallet_rounded, errorText: upiError),
                 ] else ...[
-                  _buildTextField(accountHolderController, "Account Holder Name", Icons.person),
+                  _buildTextField(accountHolderController, "Account Holder Name", Icons.person, errorText: holderError),
                   const SizedBox(height: 12),
-                  _buildTextField(accountNumberController, "Account Number", Icons.numbers_rounded, isNumber: true),
+                  _buildTextField(accountNumberController, "Account Number", Icons.numbers_rounded, isNumber: true, errorText: accountError),
                   const SizedBox(height: 12),
-                  _buildTextField(ifscController, "IFSC Code", Icons.code_rounded),
+                  _buildTextField(ifscController, "IFSC Code", Icons.code_rounded, errorText: ifscError),
                   const SizedBox(height: 12),
-                  _buildTextField(bankNameController, "Bank Name", Icons.account_balance_rounded),
+                  _buildTextField(bankNameController, "Bank Name", Icons.account_balance_rounded, errorText: bankNameError),
                 ],
                 const SizedBox(height: 32),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () async {
-                      final points = int.tryParse(_redeemController.text);
-                      if (points == null || points <= 0 || points > (provider.walletSummary?.availablePoints ?? 0)) {
-                        _showSnack("Invalid points entered");
-                        return;
-                      }
+                    onPressed: (provider.isRedeeming || _submitting)
+                        ? null
+                        : () async {
+                      // Second guard: block a duplicate tap that may have queued
+                      // before the button rebuilds into its disabled state.
+                      if (_submitting) return;
+                      setSheetState(() => _submitting = true);
+                      bool didPop = false;
 
-                      if (accountHolderController.text.isEmpty) {
-                         _showSnack("Enter Account Holder Name");
-                         return;
-                      }
+                      // Capture the sheet's Navigator BEFORE the async gap so the
+                      // success path never resolves a navigator from a context that
+                      // may be invalid/unmounted afterwards. This pops only the
+                      // redeem bottom sheet route — never the wallet screen.
+                      final NavigatorState sheetNavigator = Navigator.of(sheetContext);
 
-                      if (paymentMethod == "UPI" && upiIdController.text.isEmpty) {
-                        _showSnack("Enter UPI ID");
-                        return;
-                      }
+                      try {
+                        // Clear any previous inline errors before re-validating.
+                        pointsError = null;
+                        holderError = null;
+                        upiError = null;
+                        accountError = null;
+                        ifscError = null;
+                        bankNameError = null;
 
-                      if (paymentMethod == "BANK") {
-                        if (accountNumberController.text.isEmpty || ifscController.text.isEmpty || bankNameController.text.isEmpty) {
-                          _showSnack("Fill all bank details");
+                        final points = int.tryParse(_redeemController.text.trim());
+                        final availablePoints = provider.walletSummary?.availablePoints ?? 0;
+
+                        // Points: must be a positive number and not exceed the
+                        // available balance. No minimum / increment rule is enforced
+                        // here because the backend does not expose such a config.
+                        if (points == null || points <= 0) {
+                          pointsError = "Enter a valid number of points";
+                        } else if (points > availablePoints) {
+                          pointsError = "Insufficient points. Available: $availablePoints";
+                        }
+
+                        // Account holder name.
+                        if (!_isValidHolderName(accountHolderController.text)) {
+                          holderError = "Enter a valid account holder name";
+                        }
+
+                        if (paymentMethod == "UPI") {
+                          if (!_isValidUpiId(upiIdController.text)) {
+                            upiError = "Enter a valid UPI ID (e.g. name@bank)";
+                          }
+                        } else {
+                          if (!_isValidAccountNumber(accountNumberController.text)) {
+                            accountError = "Enter a valid account number (9-18 digits)";
+                          }
+                          if (!_isValidIfsc(ifscController.text)) {
+                            ifscError = "Enter a valid IFSC (e.g. ABCD0123456)";
+                          }
+                          if (bankNameController.text.trim().isEmpty) {
+                            bankNameError = "Enter bank name";
+                          }
+                        }
+
+                        // Never call the API when validation fails.
+                        final hasValidationError = pointsError != null ||
+                            holderError != null ||
+                            upiError != null ||
+                            accountError != null ||
+                            ifscError != null ||
+                            bankNameError != null;
+                        if (hasValidationError) {
+                          setSheetState(() {});
                           return;
                         }
-                      }
 
-                      final success = await provider.redeemPoints(
-                        points: points,
-                        paymentMethod: paymentMethod == "UPI" ? "UPI" : "BANK_ACCOUNT",
-                        accountHolderName: accountHolderController.text,
-                        upiId: upiIdController.text,
-                        accountNumber: accountNumberController.text,
-                        ifscCode: ifscController.text,
-                        bankName: bankNameController.text,
-                      );
+                        final success = await provider.redeemPoints(
+                          points: points!,
+                          paymentMethod: paymentMethod == "UPI" ? "UPI" : "BANK_ACCOUNT",
+                          accountHolderName: accountHolderController.text,
+                          upiId: upiIdController.text,
+                          accountNumber: accountNumberController.text,
+                          ifscCode: ifscController.text,
+                          bankName: bankNameController.text,
+                        );
 
-                      if (success) {
-                        _redeemController.clear();
                         if (!mounted) return;
-                        Navigator.pop(context);
-                        _showSnack("$points Points redeemed successfully!", isError: false);
-                      } else {
-                        if (!mounted) return;
-                        _showSnack(provider.error ?? "Redeem failed");
+
+                        if (success) {
+                          _redeemController.clear();
+                          // Close ONLY the redeem sheet, and only while it is still
+                          // mounted (the user may have swiped it away mid-request).
+                          // Guarding on the sheet's own context guarantees the pop
+                          // targets the sheet route rather than the screen beneath.
+                          if (sheetContext.mounted) {
+                            sheetNavigator.pop();
+                          }
+                          didPop = true;
+                          _showSnack("$points Points redeemed successfully!", isError: false);
+                        } else {
+                          _showSnack(provider.redeemError ?? "Redeem failed");
+                        }
+                      } finally {
+                        // Always release the guard so the button can be re-enabled.
+                        _submitting = false;
+                        if (!didPop && sheetContext.mounted) {
+                          setSheetState(() {});
+                        }
                       }
                     },
                     style: ElevatedButton.styleFrom(
@@ -155,7 +250,7 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
-                    child: provider.isLoading 
+                    child: (provider.isRedeeming || _submitting)
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
                       : const Text("Redeem Now", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   ),
@@ -166,16 +261,18 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
           ),
         ),
       ),
+      ),
     );
   }
 
-  Widget _buildTextField(TextEditingController controller, String hint, IconData icon, {bool isNumber = false}) {
+  Widget _buildTextField(TextEditingController controller, String hint, IconData icon, {bool isNumber = false, String? errorText}) {
     return TextField(
       controller: controller,
       keyboardType: isNumber ? TextInputType.number : TextInputType.text,
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: text14(color: AppColors.grey400),
+        errorText: errorText,
         filled: true,
         fillColor: AppColors.grey50,
         prefixIcon: Icon(icon, color: AppColors.grey400, size: 20),
@@ -225,42 +322,71 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.black),
       ),
-      body: provider.isLoading && provider.walletSummary == null
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: () async {
-                await provider.fetchWalletSummary();
-                await provider.fetchPointsSummary();
-                await provider.fetchPointHistory();
-              },
-              child: FadeTransition(
-                opacity: _fadeAnimation,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildBalanceCard(provider),
-                      const SizedBox(height: 32),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text("Points History", style: text18(fontWeight: FontWeight.w800)),
-                          GestureDetector(
-                            onTap: () {
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => const RedeemHistoryScreen()));
-                            },
-                            child: Text("Redeem History", style: text12(color: AppColors.primary, fontWeight: FontWeight.bold)),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      _buildTransactionList(provider),
-                    ],
+      body: _buildBody(provider),
+    );
+  }
+
+  Future<void> _refreshWallet() async {
+    final provider = context.read<WalletProvider>();
+    await provider.fetchWalletSummary();
+    await provider.fetchPointsSummary();
+    await provider.fetchPointHistory();
+  }
+
+  Widget _buildBody(WalletProvider provider) {
+    // The balance is only rendered once a valid wallet summary exists, so a
+    // failed request can never be shown as a real ₹0 balance.
+    if (provider.walletSummary == null) {
+      if (provider.walletSummaryError != null) {
+        return RefreshIndicator(
+          onRefresh: _refreshWallet,
+          child: ErrorStateWidget(
+            title: 'Unable to load wallet',
+            message: 'Please check your internet connection and try again.',
+            isLoading: provider.isWalletSummaryLoading,
+            onRetry: () {
+              if (!provider.isWalletSummaryLoading) {
+                _refreshWallet();
+              }
+            },
+          ),
+        );
+      }
+      // Initial load (or the brief pre-fetch frame) — existing loader.
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return RefreshIndicator(
+      onRefresh: _refreshWallet,
+      child: FadeTransition(
+        opacity: _fadeAnimation,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildBalanceCard(provider),
+              const SizedBox(height: 16),
+              _buildPayoutRegionNotice(),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("Points History", style: text18(fontWeight: FontWeight.w800)),
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const RedeemHistoryScreen()));
+                    },
+                    child: Text("Redeem History", style: text12(color: AppColors.primary, fontWeight: FontWeight.bold)),
                   ),
-                ),
+                ],
               ),
-            ),
+              const SizedBox(height: 16),
+              _buildTransactionList(provider),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -303,14 +429,14 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
             children: [
               Expanded(
                 child: ElevatedButton(
-                  onPressed: () => _showRedeemDialog(provider),
+                  onPressed: () => _showRedeemDialog(),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  child: provider.isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text("Redeem Points", style: TextStyle(fontWeight: FontWeight.bold)),
+                  child: provider.isRedeeming ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text("Redeem Points", style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
@@ -322,11 +448,26 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
 
   Widget _buildTransactionList(WalletProvider provider) {
     if (provider.pointHistory.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(40.0),
-          child: Text("No transactions yet", style: text14(color: AppColors.grey400)),
-        ),
+      // Only claim the history is empty when the request actually succeeded;
+      // a failed request must not be misreported as "No transactions yet".
+      if (provider.pointHistoryError != null) {
+        return ErrorStateWidget(
+          title: 'Unable to load transactions',
+          message: 'Please check your internet connection and try again.',
+          isLoading: provider.isPointHistoryLoading,
+          isScrollable: false,
+          onRetry: () {
+            if (!provider.isPointHistoryLoading) {
+              context.read<WalletProvider>().fetchPointHistory();
+            }
+          },
+        );
+      }
+      return const EmptyStateWidget(
+        title: "No transactions yet",
+        message: "Your points activity will appear here once you start earning.",
+        icon: Icons.receipt_long_outlined,
+        isScrollable: false,
       );
     }
     return ListView.separated(
@@ -365,6 +506,45 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
           ),
         );
       },
+    );
+  }
+
+  Widget _buildPayoutRegionNotice({bool isSheet = false}) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(horizontal: 14, vertical: isSheet ? 10 : 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F7FF),
+        borderRadius: BorderRadius.circular(isSheet ? 12 : 14),
+        border: Border.all(color: const Color(0xFFB9DBFF), width: 1),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.info_outline_rounded,
+            color: Color(0xFF0066CC),
+            size: 18,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Payout Region Availability",
+                  style: text12(fontWeight: FontWeight.w700, color: const Color(0xFF004080)),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  "Withdrawals currently support Indian UPI IDs and Indian bank accounts with valid IFSC codes. International payouts are currently not supported.",
+                  style: text11(color: const Color(0xFF004080)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

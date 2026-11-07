@@ -154,7 +154,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             child: TextFormField(
                               controller: _phoneController,
                               keyboardType: TextInputType.phone,
-                              maxLength: 10,
+                              maxLength: auth.maxPhoneLength,
                               inputFormatters: [
                                 FilteringTextInputFormatter.digitsOnly
                               ],
@@ -251,49 +251,48 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showCountryPicker(BuildContext context, AuthProvider auth) {
-    final codes = {
-      '🇮🇳 India': '+91',
-      '🇺🇸 USA': '+1',
-      '🇬🇧 UK': '+44',
-      '🇦🇪 UAE': '+971',
-      '🇦🇺 Australia': '+61',
-    };
+    const codes = AuthProvider.supportedCountries;
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 12),
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppColors.grey300,
-              borderRadius: BorderRadius.circular(2),
-            ),
+      builder: (_) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.grey300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('Select Country Code',
+                  style: text16(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              ...codes.entries.map(
+                    (e) => ListTile(
+                  title: Text(e.key, style: text14()),
+                  trailing: Text(e.value,
+                      style: text14(
+                          fontWeight: FontWeight.w600, color: AppColors.primary)),
+                  onTap: () {
+                    context.read<AuthProvider>().setCountryCode(e.value);
+                    Navigator.pop(context);
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
           ),
-          const SizedBox(height: 16),
-          Text('Select Country Code',
-              style: text16(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          ...codes.entries.map(
-                (e) => ListTile(
-              title: Text(e.key, style: text14()),
-              trailing: Text(e.value,
-                  style: text14(
-                      fontWeight: FontWeight.w600, color: AppColors.primary)),
-              onTap: () {
-                context.read<AuthProvider>().setCountryCode(e.value);
-                Navigator.pop(context);
-              },
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
+        ),
       ),
     );
   }

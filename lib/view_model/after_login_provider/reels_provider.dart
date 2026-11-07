@@ -1,15 +1,192 @@
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/repository/reels_repository.dart';
 import 'package:catch_watch/repository/interaction_repository.dart';
+import 'package:catch_watch/res/appUrl.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 class ReelsProvider extends ChangeNotifier {
-  final ReelsRepository _reelsRepository = ReelsRepository();
-  final InteractionRepository _interactionRepository = InteractionRepository();
+  final ReelsRepository _reelsRepository;
+  final InteractionRepository _interactionRepository;
+  final bool? _isIOSOverride;
 
-  ReelsProvider() {
-    _fetchInitialInteractions();
+  static const List<String> _imageExtensions = <String>[
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.webp',
+    '.gif',
+    '.bmp',
+    '.svg',
+    '.avif',
+  ];
+
+  ReelsProvider({
+    ReelsRepository? reelsRepository,
+    InteractionRepository? interactionRepository,
+    bool? isIOSOverride,
+    bool fetchInitialInteractions = true,
+  })  : _reelsRepository = reelsRepository ?? ReelsRepository(),
+        _interactionRepository = interactionRepository ?? InteractionRepository(),
+        _isIOSOverride = isIOSOverride {
+    if (fetchInitialInteractions) {
+      _fetchInitialInteractions();
+    } else {
+      _hasFetchedInitialInteractions = true;
+    }
+  }
+
+  /// Whether the current target platform is iOS.
+  static bool get isIOSPlatform =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
+  /// Returns `true` if [url] is a YouTube link (`youtube.com`, `youtu.be`, `youtube-nocookie.com`).
+  static bool isYoutubeUrl(String? url) {
+    if (url == null) return false;
+    final String trimmed = url.trim();
+    if (trimmed.isEmpty) return false;
+    final String lower = trimmed.toLowerCase();
+
+    final Uri? uri = Uri.tryParse(trimmed);
+    final String host = uri?.host.toLowerCase() ?? '';
+    if (host.isNotEmpty) {
+      if (host == 'youtube.com' ||
+          host.endsWith('.youtube.com') ||
+          host == 'youtu.be' ||
+          host.endsWith('.youtu.be') ||
+          host == 'youtube-nocookie.com' ||
+          host.endsWith('.youtube-nocookie.com')) {
+        return true;
+      }
+    }
+
+    return lower.contains('youtube.com/') ||
+        lower.contains('youtube.com?') ||
+        lower.contains('youtu.be/');
+  }
+
+  /// Returns `true` if [url] points to a known external ad/placeholder domain (such as `magnific.com`).
+  static bool isExternalAdDomainUrl(String? url) {
+    if (url == null) return false;
+    final String trimmed = url.trim();
+    if (trimmed.isEmpty) return false;
+    final String lower = trimmed.toLowerCase();
+
+    final Uri? uri = Uri.tryParse(trimmed);
+    final String host = uri?.host.toLowerCase() ?? '';
+    if (host == 'magnific.com' || host.endsWith('.magnific.com')) {
+      return true;
+    }
+
+    return lower.contains('magnific.com');
+  }
+
+  /// Returns `true` if the URL path (ignoring query strings and fragments) ends with a static image extension.
+  static bool isImageMediaUrl(String? url) {
+    if (url == null) return false;
+    final String trimmed = url.trim();
+    if (trimmed.isEmpty) return false;
+
+    final Uri? uri = Uri.tryParse(trimmed);
+    final String path = (uri != null && uri.path.isNotEmpty)
+        ? uri.path.toLowerCase()
+        : trimmed.split('?').first.split('#').first.toLowerCase();
+
+    for (final String ext in _imageExtensions) {
+      if (path.endsWith(ext)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Returns `true` if [reel] is a static image or banner advertisement.
+  static bool isImageAdReel(ReelModel reel) {
+    final String? adType = reel.adType?.trim().toLowerCase();
+    if (adType == 'image' || adType == 'banner' || adType == 'static') {
+      return true;
+    }
+    return isExternalAdDomainUrl(reel.videoUrl) || isImageMediaUrl(reel.videoUrl);
+  }
+
+  /// Returns `true` if [reel] is an unsupported image-only, placeholder (`magnific.com`),
+  /// or YouTube-hosted item that must be excluded on iOS.
+  ///
+  /// Legitimate `isAd: true` / `isSponsored: true` video ads (`MP4` / `HLS`) are NOT
+  /// excluded by `adId`, `campaignId`, `destinationUrl`, or `isAd: true` alone.
+  static bool isAdOrExternalRedirectReel(ReelModel reel) {
+    if (isImageAdReel(reel)) return true;
+    if (isYoutubeUrl(reel.videoUrl)) return true;
+    return false;
+  }
+
+  /// Returns `true` if [url] points to a known defunct sample/placeholder media source
+  /// (e.g. revoked Google storage sample buckets or missing demo media files).
+  static bool isDefunctSampleMediaUrl(String? url) {
+    if (url == null) return false;
+    final String trimmed = url.trim().toLowerCase();
+    if (trimmed.isEmpty) return false;
+    if (trimmed.contains('commondatastorage.googleapis.com/gtv-videos-bucket') ||
+        trimmed.contains('storage.googleapis.com/gtv-videos-bucket') ||
+        trimmed.endsWith('/demo_reel.mp4')) {
+      return true;
+    }
+    return false;
+  }
+
+  /// Evaluates whether [reel] is eligible to appear as a playable Reel.
+  ///
+  /// - On iOS (`isIOS == true`), YouTube-hosted content and unsupported image-only /
+  ///   placeholder (`magnific.com`) media are excluded for App Store Guideline 4.2.2
+  ///   compliance, while first-party creator MP4/HLS/stream videos and legitimate
+  ///   `isAd: true` / `isSponsored: true` video ads are preserved.
+  /// - Known defunct sample sources (revoked Google sample bucket, missing demo file)
+  ///   are excluded on all platforms to prevent unplayable mock records from breaking the feed.
+  /// - On Android (`isIOS == false`), existing behavior is preserved (only non-ad items
+  ///   whose `videoUrl` is a static image file are excluded since `VideoPlayer` cannot play them).
+  static bool isPlayableCreatorReel(ReelModel reel, {bool? isIOS}) {
+    final String videoUrl = (reel.videoUrl ?? '').trim();
+    if (videoUrl.isEmpty) return false;
+
+    final String normalizedServerUrl = AppUrl.serverUrl.replaceAll(RegExp(r'/+$'), '');
+    final String normalizedVideoUrl = videoUrl.replaceAll(RegExp(r'/+$'), '');
+    if (normalizedVideoUrl.isEmpty || normalizedVideoUrl == normalizedServerUrl) {
+      return false;
+    }
+
+    if (isDefunctSampleMediaUrl(videoUrl)) {
+      return false;
+    }
+
+    final bool enforceIOSCompliance = isIOS ?? isIOSPlatform;
+    if (enforceIOSCompliance) {
+      if (isYoutubeUrl(videoUrl)) {
+        return false;
+      }
+      if (isImageAdReel(reel)) {
+        return false;
+      }
+    } else {
+      if (!reel.isSponsoredAd && isImageMediaUrl(videoUrl)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /// Filters a list of [reels] using [isPlayableCreatorReel].
+  static List<ReelModel> filterPlayableReels(
+    Iterable<ReelModel> reels, {
+    bool? isIOS,
+  }) {
+    return reels
+        .where((reel) => isPlayableCreatorReel(reel, isIOS: isIOS))
+        .toList();
+  }
+
+  bool shouldIncludeReelInFeed(ReelModel reel) {
+    return isPlayableCreatorReel(reel, isIOS: _isIOSOverride);
   }
 
   List<ReelModel> _reels = [];
@@ -120,6 +297,32 @@ class ReelsProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool>? _inFlightRefresh;
+
+  /// Pull-to-refresh entry point. Re-fetches page 1 of the feed (replacing stale
+  /// data, keeping server ordering / sponsored interleaving) and resolves to
+  /// `true` on success or `false` if the refresh failed. Concurrent calls share
+  /// the same in-flight request. Existing feed data is kept if refresh fails.
+  Future<bool> refreshReelsFeed() {
+    final Future<bool>? existing = _inFlightRefresh;
+    if (existing != null) return existing;
+    final Future<bool> future = () async {
+      try {
+        // Wait out a non-refresh load already in flight so we don't silently no-op.
+        int guard = 0;
+        while (_isLoading && guard++ < 200) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        await fetchReelsFeed(forceRefresh: true);
+        return _error == null;
+      } finally {
+        _inFlightRefresh = null;
+      }
+    }();
+    _inFlightRefresh = future;
+    return future;
+  }
+
   Future<void> fetchReelsFeed({bool forceRefresh = false}) async {
     // 1. Guard against concurrent in-flight requests
     if (_isLoading) return;
@@ -201,7 +404,9 @@ class ReelsProvider extends ChangeNotifier {
           _error = null;
         } else {
           final List<ReelModel> fetchedReels = [];
+          final Set<String> seenFeedKeys = <String>{};
           int invalidCount = 0;
+          int filteredCount = 0;
           String? firstError;
 
           for (var item in rawList) {
@@ -209,12 +414,19 @@ class ReelsProvider extends ChangeNotifier {
               try {
                 final Map<String, dynamic> itemMap = Map<String, dynamic>.from(item);
                 // Validate that the item has reel characteristics
-                final bool hasId = itemMap['_id'] != null || itemMap['id'] != null;
+                final bool hasId = itemMap['_id'] != null ||
+                    itemMap['id'] != null ||
+                    itemMap['adId'] != null ||
+                    itemMap['sponsoredAdId'] != null;
                 final bool hasMedia = (itemMap['videoUrl'] != null && itemMap['videoUrl'].toString().isNotEmpty) ||
                     (itemMap['mediaUrl'] != null && itemMap['mediaUrl'].toString().isNotEmpty) ||
+                    (itemMap['adVideoUrl'] != null && itemMap['adVideoUrl'].toString().isNotEmpty) ||
                     (itemMap['video'] != null && itemMap['video'].toString().isNotEmpty) ||
                     (itemMap['url'] != null && itemMap['url'].toString().isNotEmpty);
-                final bool isAd = itemMap['isAd'] == true || itemMap['isAd']?.toString().toLowerCase() == 'true';
+                final bool isAd = itemMap['isAd'] == true ||
+                    itemMap['isAd']?.toString().toLowerCase() == 'true' ||
+                    itemMap['isSponsored'] == true ||
+                    itemMap['isSponsored']?.toString().toLowerCase() == 'true';
 
                 // Skip unrelated nested objects or empty maps
                 if (!hasId && !hasMedia && !isAd) {
@@ -224,6 +436,19 @@ class ReelsProvider extends ChangeNotifier {
 
                 final reel = ReelModel.fromJson(itemMap);
                 if (reel.user?.id != null && _blockedUserIds.contains(reel.user!.id)) {
+                  filteredCount++;
+                  continue;
+                }
+                if (!shouldIncludeReelInFeed(reel)) {
+                  filteredCount++;
+                  continue;
+                }
+                // Guard against duplicate reels (same creator reel or same ad
+                // returned twice) while preserving server ordering/interleaving.
+                final String dedupeKey =
+                    '${reel.isSponsoredAd ? 'ad' : 'reel'}:${reel.id ?? reel.adId ?? reel.videoUrl}';
+                if (!seenFeedKeys.add(dedupeKey)) {
+                  filteredCount++;
                   continue;
                 }
                 fetchedReels.add(reel);
@@ -238,11 +463,19 @@ class ReelsProvider extends ChangeNotifier {
           }
 
           if (fetchedReels.isEmpty) {
-            // All items were invalid or failed to parse - report meaningful error
-            _error = firstError != null
-                ? 'Failed to parse reel data: $firstError'
-                : 'Invalid reels data format received from server';
-            // Do not mark _hasFetchedFeed as true, so it's treated as an error state rather than false empty state
+            if (filteredCount > 0 && invalidCount < rawList.length) {
+              // All valid items were filtered out (e.g. blocked creators or iOS non-compliant items)
+              _feedReels = [];
+              _reels = [];
+              _hasFetchedFeed = true;
+              _error = null;
+            } else {
+              // All items were invalid or failed to parse - report meaningful error
+              _error = firstError != null
+                  ? 'Failed to parse reel data: $firstError'
+                  : 'Invalid reels data format received from server';
+              // Do not mark _hasFetchedFeed as true, so it's treated as an error state rather than false empty state
+            }
           } else {
             // Sync with local sets
             _applyLocalInteractions(fetchedReels);
@@ -252,7 +485,9 @@ class ReelsProvider extends ChangeNotifier {
               if (reel.id != null) {
                 if (reel.userInteraction == 'LIKE') {
                   _likedIds.add(reel.id!);
-                  HiveService.toggleLikeLocal(reel.id!, true);
+                  try {
+                    HiveService.toggleLikeLocal(reel.id!, true);
+                  } catch (_) {}
                 }
                 if (reel.isBookmarked == true) {
                   _bookmarkedIds.add(reel.id!);
@@ -339,6 +574,12 @@ class ReelsProvider extends ChangeNotifier {
         final reelData = response['reel'] ?? response['data'];
         if (reelData is Map) {
           final targetReel = ReelModel.fromJson(Map<String, dynamic>.from(reelData));
+          if (targetReel.user?.id != null && _blockedUserIds.contains(targetReel.user!.id)) {
+            return;
+          }
+          if (!shouldIncludeReelInFeed(targetReel)) {
+            return;
+          }
 
           // Sync with local sets
           if (targetReel.id != null) {
@@ -355,6 +596,53 @@ class ReelsProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error fetching specific reel: $e');
     }
+  }
+
+  /// Re-fetches the latest state for [reelId] from the backend API.
+  /// Updates local reels in place and returns the fresh [ReelModel].
+  Future<ReelModel?> fetchFreshReel(String reelId) async {
+    try {
+      final response = await _reelsRepository.getReelById(reelId);
+      if (response != null &&
+          (response['success'] == true ||
+              response['reel'] != null ||
+              response['data'] != null)) {
+        final reelData = response['reel'] ?? response['data'];
+        if (reelData is Map) {
+          final targetReel =
+              ReelModel.fromJson(Map<String, dynamic>.from(reelData));
+          if (targetReel.user?.id != null &&
+              _blockedUserIds.contains(targetReel.user!.id)) {
+            return null;
+          }
+          if (!shouldIncludeReelInFeed(targetReel)) {
+            return null;
+          }
+          if (targetReel.id != null) {
+            if (_likedIds.contains(targetReel.id)) {
+              targetReel.userInteraction = 'LIKE';
+            }
+            if (_bookmarkedIds.contains(targetReel.id)) {
+              targetReel.isBookmarked = true;
+            }
+          }
+
+          final int index = _reels.indexWhere((r) => r.id == reelId);
+          if (index != -1) {
+            _reels[index] = targetReel;
+          }
+          final int feedIndex = _feedReels.indexWhere((r) => r.id == reelId);
+          if (feedIndex != -1) {
+            _feedReels[feedIndex] = targetReel;
+          }
+          notifyListeners();
+          return targetReel;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching fresh reel $reelId: $e');
+    }
+    return null;
   }
 
   Future<void> searchReels(String query) async {
@@ -409,17 +697,27 @@ class ReelsProvider extends ChangeNotifier {
           if (item is Map) {
             try {
               final Map<String, dynamic> itemMap = Map<String, dynamic>.from(item);
-              final bool hasId = itemMap['_id'] != null || itemMap['id'] != null;
+              final bool hasId = itemMap['_id'] != null ||
+                  itemMap['id'] != null ||
+                  itemMap['adId'] != null ||
+                  itemMap['sponsoredAdId'] != null;
               final bool hasMedia = (itemMap['videoUrl'] != null && itemMap['videoUrl'].toString().isNotEmpty) ||
                   (itemMap['mediaUrl'] != null && itemMap['mediaUrl'].toString().isNotEmpty) ||
+                  (itemMap['adVideoUrl'] != null && itemMap['adVideoUrl'].toString().isNotEmpty) ||
                   (itemMap['video'] != null && itemMap['video'].toString().isNotEmpty) ||
                   (itemMap['url'] != null && itemMap['url'].toString().isNotEmpty);
-              final bool isAd = itemMap['isAd'] == true || itemMap['isAd']?.toString().toLowerCase() == 'true';
+              final bool isAd = itemMap['isAd'] == true ||
+                  itemMap['isAd']?.toString().toLowerCase() == 'true' ||
+                  itemMap['isSponsored'] == true ||
+                  itemMap['isSponsored']?.toString().toLowerCase() == 'true';
 
               if (!hasId && !hasMedia && !isAd) continue;
 
               final reel = ReelModel.fromJson(itemMap);
               if (reel.user?.id != null && _blockedUserIds.contains(reel.user!.id)) {
+                continue;
+              }
+              if (!shouldIncludeReelInFeed(reel)) {
                 continue;
               }
               fetchedReels.add(reel);
@@ -537,10 +835,14 @@ class ReelsProvider extends ChangeNotifier {
     // Optimistic UI update
     if (currentlyBookmarked) {
       _bookmarkedIds.remove(reelId);
-      for (var r in targetReels) r.isBookmarked = false;
+      for (var r in targetReels) {
+        r.isBookmarked = false;
+      }
     } else {
       _bookmarkedIds.add(reelId);
-      for (var r in targetReels) r.isBookmarked = true;
+      for (var r in targetReels) {
+        r.isBookmarked = true;
+      }
     }
 
     _reels = List.from(_reels);
@@ -558,10 +860,14 @@ class ReelsProvider extends ChangeNotifier {
         // Rollback
         if (currentlyBookmarked) {
           _bookmarkedIds.add(reelId);
-          for (var r in targetReels) r.isBookmarked = true;
+          for (var r in targetReels) {
+            r.isBookmarked = true;
+          }
         } else {
           _bookmarkedIds.remove(reelId);
-          for (var r in targetReels) r.isBookmarked = false;
+          for (var r in targetReels) {
+            r.isBookmarked = false;
+          }
         }
         _reels = List.from(_reels);
         notifyListeners();
@@ -570,10 +876,14 @@ class ReelsProvider extends ChangeNotifier {
       // Rollback
       if (currentlyBookmarked) {
         _bookmarkedIds.add(reelId);
-        for (var r in targetReels) r.isBookmarked = true;
+        for (var r in targetReels) {
+          r.isBookmarked = true;
+        }
       } else {
         _bookmarkedIds.remove(reelId);
-        for (var r in targetReels) r.isBookmarked = false;
+        for (var r in targetReels) {
+          r.isBookmarked = false;
+        }
       }
       _reels = List.from(_reels);
       notifyListeners();
@@ -733,21 +1043,57 @@ class ReelsProvider extends ChangeNotifier {
     }
   }
 
+  final Set<String> _recordedAdImpressionKeys = <String>{};
+
+  String _buildImpressionKey(String adId, String? campaignId) {
+    final String cleanAdId = adId.trim();
+    final String cleanCampaignId = (campaignId ?? '').trim();
+    return cleanCampaignId.isEmpty ? cleanAdId : '$cleanAdId:$cleanCampaignId';
+  }
+
+  /// Returns `true` if an `IMPRESSION` event has already been recorded for [adId] in this session.
+  bool hasRecordedAdImpression(String adId, {String? campaignId}) {
+    final String cleanAdId = adId.trim();
+    if (cleanAdId.isEmpty) return false;
+    return _recordedAdImpressionKeys.contains(cleanAdId) ||
+        _recordedAdImpressionKeys.contains(_buildImpressionKey(cleanAdId, campaignId));
+  }
+
+  /// Resets the in-memory set of recorded ad impressions.
+  void clearRecordedAdImpressions() {
+    _recordedAdImpressionKeys.clear();
+  }
+
   Future<void> recordAdEvent({
     required String adId,
     required String campaignId,
     required String eventType,
     int? watchDuration,
   }) async {
+    final String cleanAdId = adId.trim();
+    final String cleanCampaignId = campaignId.trim();
+    final String normalizedEventType = eventType.trim().toUpperCase();
+    if (cleanAdId.isEmpty || normalizedEventType.isEmpty) {
+      return;
+    }
+
+    if (normalizedEventType == 'IMPRESSION') {
+      if (hasRecordedAdImpression(cleanAdId, campaignId: cleanCampaignId)) {
+        return;
+      }
+      _recordedAdImpressionKeys.add(cleanAdId);
+      _recordedAdImpressionKeys.add(_buildImpressionKey(cleanAdId, cleanCampaignId));
+    }
+
     try {
       await _reelsRepository.recordAdEvent(
-        adId: adId,
-        campaignId: campaignId,
-        eventType: eventType,
+        adId: cleanAdId,
+        campaignId: cleanCampaignId,
+        eventType: normalizedEventType,
         watchDuration: watchDuration,
       );
     } catch (e) {
-      debugPrint('Error recording ad event ($eventType): $e');
+      debugPrint('Error recording ad event ($normalizedEventType): $e');
     }
   }
 

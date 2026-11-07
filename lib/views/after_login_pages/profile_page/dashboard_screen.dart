@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 // import 'package:fl_chart/fl_chart.dart'; // Commented out as it might not be used or causing issues if not in pubspec, but it was there
 import 'dart:ui';
 import '../../../res/app_colors.dart';
+import '../../../utils/error_state_widget.dart';
 import '../../../utils/text_style.dart';
 import '../../../view_model/after_login_provider/profile_provider.dart';
 import '../../../view_model/after_login_provider/verification_provider.dart';
@@ -59,38 +60,63 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: walletProvider.isLoading && walletProvider.dashboardData == null
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: () async {
-                await walletProvider.fetchDashboardData();
-              },
-              child: CustomScrollView(
-                slivers: [
-                  _buildSliverHeader(profileProvider, walletProvider),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildTimeFilter(walletProvider),
-                          const SizedBox(height: 24),
-                          _buildPerformanceScore(walletProvider),
-                          const SizedBox(height: 24),
-                          _buildLeaderboardCard(),
-                          const SizedBox(height: 32),
-                          _buildSectionTitle("Performance Summary"),
-                          const SizedBox(height: 16),
-                        ],
-                      ),
-                    ),
-                  ),
-                  _buildStatsGrid(walletProvider),
-                  const SliverToBoxAdapter(child: SizedBox(height: 40)),
+      body: _buildBody(profileProvider, walletProvider),
+    );
+  }
+
+  Widget _buildBody(ProfileProvider profileProvider, WalletProvider walletProvider) {
+    // Metrics are only rendered once a valid dashboard payload exists, so a
+    // failed request can never be mistaken for a real all-zero dashboard.
+    if (walletProvider.dashboardData == null) {
+      if (walletProvider.dashboardError != null) {
+        return RefreshIndicator(
+          onRefresh: walletProvider.fetchDashboardData,
+          child: ErrorStateWidget(
+            title: 'Unable to load dashboard',
+            message: 'Please check your internet connection and try again.',
+            isLoading: walletProvider.isDashboardLoading,
+            onRetry: () {
+              if (!walletProvider.isDashboardLoading) {
+                // Re-uses the currently selected time filter (held in the provider).
+                walletProvider.fetchDashboardData();
+              }
+            },
+          ),
+        );
+      }
+      // Initial load (or the brief pre-fetch frame) — existing loader.
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        await walletProvider.fetchDashboardData();
+      },
+      child: CustomScrollView(
+        slivers: [
+          _buildSliverHeader(profileProvider, walletProvider),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildTimeFilter(walletProvider),
+                  const SizedBox(height: 24),
+                  _buildPerformanceScore(walletProvider),
+                  const SizedBox(height: 24),
+                  _buildLeaderboardCard(),
+                  const SizedBox(height: 32),
+                  _buildSectionTitle("Performance Summary"),
+                  const SizedBox(height: 16),
                 ],
               ),
             ),
+          ),
+          _buildStatsGrid(walletProvider),
+          const SliverToBoxAdapter(child: SizedBox(height: 40)),
+        ],
+      ),
     );
   }
 
@@ -243,20 +269,28 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
           ),
           Row(
             children: TimeFilter.values.map((filter) {
+              // Year is disabled until the backend provides year-scoped data
+              // (see WalletProvider.setTimeFilter) — shown greyed & non-tappable
+              // so all-time values are never presented under the Year filter.
+              final isYear = filter == TimeFilter.year;
               final isSelected = provider.selectedTimeFilter == filter;
               return Expanded(
                 child: GestureDetector(
-                  onTap: () {
-                    HapticFeedback.lightImpact();
-                    provider.setTimeFilter(filter);
-                  },
+                  onTap: isYear
+                      ? null
+                      : () {
+                          HapticFeedback.lightImpact();
+                          provider.setTimeFilter(filter);
+                        },
                   child: Container(
                     color: Colors.transparent,
                     child: Center(
                       child: Text(
                         _capitalize(filter.name),
                         style: text12(
-                          color: isSelected ? AppColors.primary : AppColors.grey600,
+                          color: isYear
+                              ? AppColors.grey400
+                              : (isSelected ? AppColors.primary : AppColors.grey600),
                           fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                         ),
                       ),
@@ -347,17 +381,25 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
 
   Widget _buildStatsGrid(WalletProvider provider) {
     final data = provider.dashboardData;
-    final filter = provider.selectedTimeFilter;
-    final isTotal = filter == TimeFilter.year;
-    
+
+    // NOTE: the API does not provide previous-period comparison / growth data,
+    // so no growth indicator is rendered (previously a hardcoded 0.0 with a
+    // misleading green up-arrow).
+    // NOTE: the "Total ..." labels were previously bound to the Year filter,
+    // which relabelled all-time values as Year. Year is now disabled (see
+    // setTimeFilter), so metrics use plain period labels.
     final stats = [
-      ("Points Earned", provider.periodPoints.toString(), 0.0, Icons.stars_rounded, AppColors.yellow),
-      (isTotal ? "Total Views" : "Views", provider.currentViews.toString(), 0.0, Icons.play_circle_fill_rounded, const Color(0xFF6366F1)),
-      ("Watch Minutes", (data?.watchMinutes ?? 0).toString(), 0.0, Icons.remove_red_eye_rounded, const Color(0xFFEC4899)),
-      (isTotal ? "Total Likes" : "Likes", provider.currentLikes.toString(), 0.0, Icons.favorite_rounded, const Color(0xFFEF4444)),
-      (isTotal ? "Total Comments" : "Comments", provider.currentComments.toString(), 0.0, Icons.comment_rounded, const Color(0xFFF59E0B)),
-      (isTotal ? "Total Shares" : "Shares", provider.currentShares.toString(), 0.0, Icons.share_rounded, const Color(0xFF10B981)),
-      (isTotal ? "Total Saves" : "Saves", provider.currentSaves.toString(), 0.0, Icons.bookmark_rounded, const Color(0xFF8B5CF6)),
+      ("Points Earned", provider.periodPoints.toString(), Icons.stars_rounded, AppColors.yellow),
+      ("Views", provider.currentViews.toString(), Icons.play_circle_fill_rounded, const Color(0xFF6366F1)),
+      // NOTE: the API exposes only a single aggregate watch-minutes value
+      // (CreatorDashboardData.watchMinutes); it is NOT part of the per-filter
+      // timeStats, so it cannot follow the selected time filter. Labelled
+      // "Total" to avoid implying a filtered value.
+      ("Total Watch Minutes", (data?.watchMinutes ?? 0).toString(), Icons.remove_red_eye_rounded, const Color(0xFFEC4899)),
+      ("Likes", provider.currentLikes.toString(), Icons.favorite_rounded, const Color(0xFFEF4444)),
+      ("Comments", provider.currentComments.toString(), Icons.comment_rounded, const Color(0xFFF59E0B)),
+      ("Shares", provider.currentShares.toString(), Icons.share_rounded, const Color(0xFF10B981)),
+      ("Saves", provider.currentSaves.toString(), Icons.bookmark_rounded, const Color(0xFF8B5CF6)),
     ];
 
     return SliverPadding(
@@ -372,7 +414,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         delegate: SliverChildBuilderDelegate(
           (context, index) {
             final s = stats[index];
-            return _buildStatCard(s.$1, s.$2, s.$3, s.$4, s.$5, index);
+            return _buildStatCard(s.$1, s.$2, s.$3, s.$4, index);
           },
           childCount: stats.length,
         ),
@@ -380,7 +422,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     );
   }
 
-  Widget _buildStatCard(String label, String value, double growth, IconData icon, Color color, int index) {
+  Widget _buildStatCard(String label, String value, IconData icon, Color color, int index) {
     // Ensure animation interval is within [0, 1] bounds
     final double start = (index * 0.1).clamp(0.0, 0.5);
     final double end = (start + 0.5).clamp(0.0, 1.0);
@@ -391,7 +433,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
       ),
       child: FadeTransition(
         opacity: CurvedAnimation(parent: _contentController, curve: Interval(start, end, curve: Curves.easeIn)),
-        child: _StatCard(label: label, value: value, growth: growth, icon: icon, color: color),
+        child: _StatCard(label: label, value: value, icon: icon, color: color),
       ),
     );
   }
@@ -463,14 +505,12 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
 class _StatCard extends StatefulWidget {
   final String label;
   final String value;
-  final double growth;
   final IconData icon;
   final Color color;
 
   const _StatCard({
     required this.label,
     required this.value,
-    required this.growth,
     required this.icon,
     required this.color,
   });
@@ -527,27 +567,9 @@ class _StatCardState extends State<_StatCard> {
                   const Spacer(),
                   _AnimatedCounter(value: int.tryParse(widget.value.replaceAll(',', '')) ?? 0),
                   const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Text(
-                        widget.label,
-                        style: text10(color: AppColors.grey600, fontWeight: FontWeight.w500),
-                      ),
-                      const Spacer(),
-                      Icon(
-                        widget.growth >= 0 ? Icons.trending_up_rounded : Icons.trending_down_rounded,
-                        color: widget.growth >= 0 ? Colors.green : Colors.red,
-                        size: 14,
-                      ),
-                      const SizedBox(width: 2),
-                      Text(
-                        "${widget.growth.abs()}%",
-                        style: text10(
-                          color: widget.growth >= 0 ? Colors.green : Colors.red,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
+                  Text(
+                    widget.label,
+                    style: text10(color: AppColors.grey600, fontWeight: FontWeight.w500),
                   ),
                 ],
               ),

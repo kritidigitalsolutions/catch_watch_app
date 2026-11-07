@@ -88,6 +88,14 @@ class NotificationService {
   static const Duration incomingCallDuration =
   Duration(seconds: 30);
 
+  /// Short window used to suppress duplicate CallKit rings for the same call.
+  static const Duration _callKitDuplicateWindow =
+  Duration(seconds: 8);
+
+  /// callId -> last time CallKit was shown for it (per-isolate, TTL bounded).
+  static final Map<String, DateTime> _recentCallKitShown =
+  <String, DateTime>{};
+
   // ============================================================
   // UUID
   // ============================================================
@@ -232,15 +240,28 @@ class NotificationService {
             .toUpperCase() ??
         '';
 
-    final String callType = (data['callType'] ?? '')?.toString().toUpperCase() ?? '';
+    // NOTE: this previously shadowed the `callType` constant, so `type == callType`
+    // never matched the intended literal 'CALL'. Compare against the constant honestly.
+    final String payloadCallType =
+        (data['callType'] ?? '').toString().toUpperCase();
     final bool hasCallId = _extractCallId(data) != null;
 
-    return type == callType ||
+    final bool isCallLikeType = type == callType ||
         type == incomingCallType ||
         type == 'CALL_INCOMING' ||
         type == 'VIDEO_CALL' ||
         type == 'AUDIO_CALL' ||
-        (hasCallId && (type == 'VIDEO' || type == 'AUDIO' || callType == 'VIDEO' || callType == 'AUDIO'));
+        payloadCallType == 'CALL' ||
+        payloadCallType == 'VIDEO_CALL' ||
+        payloadCallType == 'AUDIO_CALL';
+
+    final bool isMediaCallType = hasCallId &&
+        (type == 'VIDEO' ||
+            type == 'AUDIO' ||
+            payloadCallType == 'VIDEO' ||
+            payloadCallType == 'AUDIO');
+
+    return isCallLikeType || isMediaCallType;
   }
 
   static bool _isCallEndType(
@@ -253,7 +274,98 @@ class NotificationService {
         type == endedType ||
         type == 'CALL_REJECTED' ||
         type == 'CALL_BUSY' ||
-        type == 'BUSY';
+        type == 'BUSY' ||
+        type == 'CALL_MISSED' ||
+        type == 'MISSED';
+  }
+
+  /// Whether an FCM/socket payload represents an incoming audio/video call.
+  ///
+  /// Exposed so CallProvider applies exactly the same detection rules as this
+  /// service, preventing drift where one layer rings and the other ignores a
+  /// payload (e.g. `type == 'VIDEO_CALL'`).
+  static bool isIncomingCallPayload(Map<String, dynamic> data) =>
+      _isIncomingCall(data);
+
+  /// Whether a payload represents call termination
+  /// (cancelled / ended / rejected / busy / missed).
+  static bool isCallEndPayload(Map<String, dynamic> data) {
+    final String type =
+        (data['type'] ?? data['notificationType'] ?? data['event'])
+                ?.toString()
+                .toUpperCase() ??
+            '';
+    return _isCallEndType(type);
+  }
+
+  /// Resolves the nested call object when a backend nests call fields.
+  static Map<String, dynamic>? _nestedCallPayload(
+      Map<String, dynamic> data,
+      ) {
+    final dynamic call = data['call'];
+    if (call is Map) {
+      return Map<String, dynamic>.from(call);
+    }
+    final dynamic inner = data['data'];
+    if (inner is Map) {
+      final Map<String, dynamic> innerMap = Map<String, dynamic>.from(inner);
+      if (innerMap['callerId'] != null ||
+          innerMap['callerName'] != null ||
+          innerMap['callType'] != null) {
+        return innerMap;
+      }
+    }
+    return null;
+  }
+
+  /// Caller display name, falling back across top-level and nested fields.
+  static String _resolveCallerName(
+      Map<String, dynamic> data,
+      ) {
+    final Map<String, dynamic> nested =
+        _nestedCallPayload(data) ?? const <String, dynamic>{};
+    final String? name = (data['callerName'] ??
+            data['senderName'] ??
+            nested['callerName'] ??
+            nested['senderName'] ??
+            nested['name'])
+        ?.toString()
+        .trim();
+    return (name != null && name.isNotEmpty) ? name : 'Unknown Caller';
+  }
+
+  /// Caller identifier, falling back across top-level and nested fields.
+  static String? _resolveCallerId(
+      Map<String, dynamic> data,
+      ) {
+    final Map<String, dynamic> nested =
+        _nestedCallPayload(data) ?? const <String, dynamic>{};
+    final String? id = (data['callerId'] ??
+            data['senderId'] ??
+            nested['callerId'] ??
+            nested['senderId'] ??
+            nested['_id'])
+        ?.toString()
+        .trim();
+    return (id != null && id.isNotEmpty) ? id : null;
+  }
+
+  /// Normalizes the call type to 'video' or 'audio' regardless of whether the
+  /// backend labels it `video`, `VIDEO_CALL`, `callType` or `type`.
+  static String _resolveCallType(
+      Map<String, dynamic> data,
+      ) {
+    final Map<String, dynamic> nested =
+        _nestedCallPayload(data) ?? const <String, dynamic>{};
+    final String raw = (data['callType'] ??
+                nested['callType'] ??
+                nested['call_type'] ??
+                data['type'] ??
+                nested['type'] ??
+                '')
+            .toString()
+            .toLowerCase();
+    return raw.contains('video') ? 'video' : 'audio';
   }
 
   // ============================================================
@@ -265,6 +377,10 @@ class NotificationService {
       ) async {
     try {
       if (callId != null) {
+        // Allow a future, genuinely new ring for this call without the
+        // duplicate-suppression window blocking it.
+        _recentCallKitShown.remove(callId);
+
         final String uuid =
         _getUuidFromCallId(callId);
 
@@ -290,9 +406,8 @@ class NotificationService {
   // ============================================================
 
   static Future<void> _showIncomingCallKit(
-      Map<String, dynamic> data, {
-        bool isForeground = false,
-      }) async {
+      Map<String, dynamic> data,
+      ) async {
     try {
       final String? extractedCallId =
       _extractCallId(data);
@@ -308,12 +423,13 @@ class NotificationService {
       final String callId =
           extractedCallId;
 
+      final Map<String, dynamic> nestedCall =
+          _nestedCallPayload(data) ?? const <String, dynamic>{};
+
       // ----------------------------------------------------------
       // SELF-NOTIFICATION FILTERING
       // ----------------------------------------------------------
-      final String? callerId =
-          data['callerId']?.toString() ??
-              data['senderId']?.toString();
+      final String? callerId = _resolveCallerId(data);
 
       if (callerId != null &&
           callerId == HiveService.userId) {
@@ -324,39 +440,48 @@ class NotificationService {
         return;
       }
 
+      // ----------------------------------------------------------
+      // DUPLICATE CALLKIT GUARD
+      // ----------------------------------------------------------
+      //
+      // One incoming call can be delivered through more than one FCM push
+      // (retries, or parity between data and notification payloads). Suppress
+      // re-showing the native ringing screen for the same call within a short
+      // window so the user never sees two concurrent rings.
+      final DateTime now = DateTime.now();
+      _recentCallKitShown.removeWhere(
+            (_, shownAt) =>
+                now.difference(shownAt) > _callKitDuplicateWindow,
+      );
+      final DateTime? lastShown = _recentCallKitShown[callId];
+      if (lastShown != null &&
+          now.difference(lastShown) <= _callKitDuplicateWindow) {
+        debugPrint(
+          '🚫 CallKit already shown for $callId; skipping duplicate',
+        );
+
+        return;
+      }
+      _recentCallKitShown[callId] = now;
+
       final String uuid =
       _getUuidFromCallId(callId);
 
       final String callerName =
-      data['callerName']
-          ?.toString()
-          .trim()
-          .isNotEmpty ==
-          true
-          ? data['callerName'].toString()
-          : data['senderName']
-          ?.toString()
-          .trim()
-          .isNotEmpty ==
-          true
-          ? data['senderName'].toString()
-          : 'Unknown Caller';
+      _resolveCallerName(data);
 
       final String callType =
-          data['callType']
-              ?.toString()
-              .toLowerCase() ??
-              data['type']
-                  ?.toString()
-                  .toLowerCase() ??
-              'audio';
+      _resolveCallType(data);
 
       final String? callerImage =
           data['callerImage']?.toString() ??
-              data['senderImage']?.toString();
+              data['senderImage']?.toString() ??
+              nestedCall['callerImage']?.toString() ??
+              nestedCall['senderImage']?.toString();
 
       final String? callerPhone =
-      data['callerPhone']?.toString();
+      data['callerPhone']?.toString() ??
+          nestedCall['callerPhone']?.toString();
 
       // ----------------------------------------------------------
       // IMPORTANT
@@ -380,19 +505,18 @@ class NotificationService {
         'callerName': callerName,
         'callerImage': callerImage,
         'callerPhone': callerPhone,
+        'callerId': callerId,
         'callType': callType,
 
         // Preserve values from backend if they exist.
         'channelName':
-        data['channelName'],
+        data['channelName'] ?? nestedCall['channelName'],
         'agoraToken':
-        data['agoraToken'],
+        data['agoraToken'] ?? nestedCall['agoraToken'],
         'agoraUid':
-        data['agoraUid'],
+        data['agoraUid'] ?? nestedCall['agoraUid'],
         'receiverId':
-        data['receiverId'],
-        'callerId':
-        data['callerId'],
+        data['receiverId'] ?? nestedCall['receiverId'],
       };
 
       final CallKitParams params =
@@ -403,6 +527,7 @@ class NotificationService {
         avatar: callerImage,
         handle:
         callerPhone ??
+            callerId ??
             'Incoming call',
         type: callType == 'video'
             ? 1
@@ -806,12 +931,6 @@ class NotificationService {
             'Data: ${message.data}',
           );
 
-          final String type =
-              message.data['type']
-                  ?.toString()
-                  .toUpperCase() ??
-                  '';
-
           // Don't route incoming call through normal
           // notification navigation.
           if (_isIncomingCall(
@@ -1081,6 +1200,19 @@ class NotificationService {
       final RemoteNotification? notification =
           message.notification;
 
+      // On iOS the system already presents notification-payload messages
+      // (see _messaging.setForegroundNotificationPresentationOptions and the
+      // AppDelegate willPresent override). Showing a local notification as
+      // well would duplicate the banner. Data-only messages (notification ==
+      // null) still fall through and use the local fallback.
+      if (Platform.isIOS && notification != null) {
+        debugPrint(
+          'ℹ️ [iOS] Skipping local notification; system already presented it',
+        );
+
+        return;
+      }
+
       final String title =
           notification?.title ??
               message.data['title'] ??
@@ -1116,6 +1248,38 @@ class NotificationService {
         );
 
         return;
+      }
+
+      // --------------------------------------------------------
+      // FCM / SOCKET.IO DEDUPLICATION
+      // --------------------------------------------------------
+      //
+      // The same chat message can arrive through Socket.IO (shown via
+      // showLocalChatNotification) and FCM. Reuse the shared id set so the
+      // user only ever sees one notification.
+      final String? fcmMessageId =
+      (message.data['messageId'] ??
+          message.data['message_id'] ??
+          message.data['_id'] ??
+          message.data['id'])
+          ?.toString();
+
+      if (conversationId != null &&
+          fcmMessageId != null &&
+          fcmMessageId.isNotEmpty) {
+        if (_notifiedChatMsgIds.contains(fcmMessageId)) {
+          debugPrint(
+            '🚫 Suppressed duplicate notification for message $fcmMessageId',
+          );
+
+          return;
+        }
+
+        _notifiedChatMsgIds.add(fcmMessageId);
+
+        if (_notifiedChatMsgIds.length > 500) {
+          _notifiedChatMsgIds.remove(_notifiedChatMsgIds.first);
+        }
       }
 
       if (title.isEmpty && body.isEmpty) {

@@ -2,9 +2,12 @@ import 'dart:io';
 
 import 'package:catch_watch/res/app_colors.dart';
 import 'package:catch_watch/utils/text_style.dart';
+import 'package:catch_watch/view_model/after_login_provider/reels_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/video_upload_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:video_trimmer/video_trimmer.dart';
 
 /// When navigated from UploadScreen, the provider is injected via
 /// ChangeNotifierProvider.value — no local provider needed.
@@ -44,7 +47,9 @@ class _VideoDetailView extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _UploadProgressCard(),
+            _TrimEditorCard(),
+            const SizedBox(height: 20),
+            _UploadStatusCard(),
             const SizedBox(height: 24),
             _ThumbnailPicker(),
             const SizedBox(height: 24),
@@ -54,6 +59,7 @@ class _VideoDetailView extends StatelessWidget {
             const SizedBox(height: 20),
             _HashtagsField(),
             const SizedBox(height: 20),
+            _VisibilitySection(),
             const SizedBox(height: 32),
             _PublishButton(),
             const SizedBox(height: 24),
@@ -64,12 +70,257 @@ class _VideoDetailView extends StatelessWidget {
   }
 }
 
-// ─── Upload Progress Card ─────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-class _UploadProgressCard extends StatelessWidget {
+String _fmtDuration(Duration d) {
+  final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+  return '$minutes:$seconds';
+}
+
+// ─── Preview + Trim editor ────────────────────────────────────────────────────
+
+class _TrimEditorCard extends StatefulWidget {
+  @override
+  State<_TrimEditorCard> createState() => _TrimEditorCardState();
+}
+
+class _TrimEditorCardState extends State<_TrimEditorCard> {
+  final Trimmer _trimmer = Trimmer();
+  bool _initialized = false;
+  bool _showTrimmer = false;
+  bool _isApplying = false;
+  bool _isPlaying = false;
+  double _startMs = 0;
+  double _endMs = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _trimmer.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    if (!mounted) return;
+    final provider = context.read<VideoUploadProvider>();
+    final file = provider.pickedFile;
+    if (file == null) return;
+    try {
+      await _trimmer.loadVideo(videoPath: file.path);
+      if (!mounted) return;
+      final duration =
+          _trimmer.videoPlayerController?.value.duration ?? provider.videoDuration ?? Duration.zero;
+      setState(() {
+        _initialized = true;
+        _startMs = provider.trimStart.inMilliseconds.toDouble();
+        _endMs = provider.trimEnd.inMilliseconds > 0
+            ? provider.trimEnd.inMilliseconds.toDouble()
+            : duration.inMilliseconds.toDouble();
+      });
+    } catch (e) {
+      debugPrint('Trim editor load failed: $e');
+      if (mounted) setState(() => _initialized = true);
+    }
+  }
+
+  Future<void> _togglePlay() async {
+    if (!_initialized || _trimmer.videoPlayerController == null) return;
+    try {
+      final playing = await _trimmer.videoPlaybackControl(
+        startValue: _startMs,
+        endValue: _endMs,
+      );
+      if (mounted) setState(() => _isPlaying = playing);
+    } catch (e) {
+      debugPrint('Playback toggle failed: $e');
+    }
+  }
+
+  Future<void> _applyTrim() async {
+    final provider = context.read<VideoUploadProvider>();
+    setState(() => _isApplying = true);
+    provider.setTrimming(true);
+    try {
+      await _trimmer.saveTrimmedVideo(
+        startValue: _startMs,
+        endValue: _endMs,
+        storageDir: StorageDir.temporaryDirectory,
+        onSave: (path) {
+          if (path != null) provider.setTrimmedFile(XFile(path));
+        },
+      );
+    } catch (e) {
+      debugPrint('Trim failed: $e');
+    } finally {
+      provider.setTrimming(false);
+      if (mounted) setState(() => _isApplying = false);
+    }
+  }
+
+  void _resetTrim() {
+    final duration = _trimmer.videoPlayerController?.value.duration ?? Duration.zero;
+    setState(() {
+      _startMs = 0;
+      _endMs = duration.inMilliseconds.toDouble();
+    });
+    context.read<VideoUploadProvider>().clearTrim();
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<VideoUploadProvider>();
+    final duration = _trimmer.videoPlayerController?.value.duration ?? provider.videoDuration;
+    final selectedMs = (_endMs - _startMs).clamp(0, double.infinity);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Video preview ────────────────────────────────────────────────
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            height: 220,
+            width: double.infinity,
+            color: Colors.black,
+            child: !_initialized
+                ? const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  )
+                : Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      VideoViewer(trimmer: _trimmer),
+                      GestureDetector(
+                        onTap: _togglePlay,
+                        child: Icon(
+                          _isPlaying
+                              ? Icons.pause_circle_filled
+                              : Icons.play_circle_filled,
+                          size: 56,
+                          color: Colors.white.withValues(alpha: 0.8),
+                        ),
+                      ),
+                      if (duration != null)
+                        Positioned(
+                          bottom: 8,
+                          right: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              _fmtDuration(duration),
+                              style: text11(color: AppColors.white),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        // ── Trim toggle + state ──────────────────────────────────────────
+        Row(
+          children: [
+            Text('Preview', style: text13(color: AppColors.textSecondary)),
+            const Spacer(),
+            if (provider.hasTrim)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  'Trimmed clip ready',
+                  style: text11(
+                    color: AppColors.success,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            TextButton.icon(
+              onPressed: _initialized
+                  ? () => setState(() => _showTrimmer = !_showTrimmer)
+                  : null,
+              icon: const Icon(Icons.content_cut, size: 18),
+              label: Text(_showTrimmer ? 'Hide trim' : 'Trim'),
+              style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+            ),
+          ],
+        ),
+
+        // ── Trim strip ───────────────────────────────────────────────────
+        if (_showTrimmer && _initialized) ...[
+          const SizedBox(height: 8),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              return TrimViewer(
+                trimmer: _trimmer,
+                maxVideoLength: VideoUploadProvider.maxReelDuration,
+                viewerWidth: constraints.maxWidth,
+                viewerHeight: 56,
+                onChangeStart: (v) => setState(() => _startMs = v),
+                onChangeEnd: (v) => setState(() => _endMs = v),
+              );
+            },
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text(
+                'Selected: ${_fmtDuration(Duration(milliseconds: selectedMs.toInt()))}',
+                style: text12(color: AppColors.textSecondary),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: _isApplying ? null : _resetTrim,
+                child: const Text('Reset'),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: _isApplying ? null : _applyTrim,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: _isApplying
+                    ? const SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Text('Apply Trim'),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ─── Upload Status Card ───────────────────────────────────────────────────────
+
+class _UploadStatusCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<VideoUploadProvider>();
+    final cover = provider.thumbnailFile;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -80,7 +331,7 @@ class _UploadProgressCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Video thumbnail
+          // Real cover frame (auto-generated or chosen)
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: Container(
@@ -88,31 +339,43 @@ class _UploadProgressCard extends StatelessWidget {
               height: 56,
               color: AppColors.grey800,
               child: Stack(
-                alignment: Alignment.center,
+                fit: StackFit.expand,
                 children: [
-                  const Icon(
-                    Icons.play_circle_fill,
-                    color: Colors.white54,
-                    size: 28,
-                  ),
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 2,
+                  if (cover != null)
+                    Image.file(
+                      File(cover.path),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const Icon(
+                        Icons.videocam_rounded,
+                        color: Colors.white54,
+                        size: 28,
                       ),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        '00:35',
-                        style: text8(color: AppColors.white),
+                    )
+                  else
+                    const Icon(
+                      Icons.play_circle_fill,
+                      color: Colors.white54,
+                      size: 28,
+                    ),
+                  if (provider.videoDuration != null)
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          _fmtDuration(provider.videoDuration!),
+                          style: text8(color: AppColors.white),
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -235,11 +498,13 @@ class _ThumbnailPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<VideoUploadProvider>();
+    final cover = provider.thumbnailFile;
+    final isManual = provider.manualThumbnail != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Reel Thumbnail (Optional)', style: text14(fontWeight: FontWeight.w600)),
+        Text('Reel Thumbnail', style: text14(fontWeight: FontWeight.w600)),
         const SizedBox(height: 10),
         GestureDetector(
           onTap: provider.isUploading ? null : () => provider.pickThumbnail(),
@@ -251,26 +516,39 @@ class _ThumbnailPicker extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.grey300),
             ),
-            child: provider.thumbnailFile != null
+            child: cover != null
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Image.file(
-                      File(provider.thumbnailFile!.path),
+                      File(cover.path),
                       fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) =>
+                          _addCoverPlaceholder(isManual: false),
                     ),
                   )
-                : const Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.add_photo_alternate_outlined, color: AppColors.grey600),
-                      SizedBox(height: 8),
-                      Text(
-                        'Add Cover',
-                        style: TextStyle(fontSize: 12, color: AppColors.grey600),
-                      ),
-                    ],
-                  ),
+                : _addCoverPlaceholder(isManual: false),
           ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          isManual
+              ? 'Custom cover selected · Tap to change'
+              : 'Auto-generated from your video · Tap to change',
+          style: text11(color: AppColors.textSecondary),
+        ),
+      ],
+    );
+  }
+
+  Widget _addCoverPlaceholder({required bool isManual}) {
+    return const Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.add_photo_alternate_outlined, color: AppColors.grey600),
+        SizedBox(height: 8),
+        Text(
+          'Add Cover',
+          style: TextStyle(fontSize: 12, color: AppColors.grey600),
         ),
       ],
     );
@@ -314,28 +592,6 @@ class _CaptionField extends StatelessWidget {
           style: text13(),
           maxLines: 4,
           decoration: _inputDecoration(hint: 'Write a caption..'),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Comments Field ────────────────────────────────────────────────────────────
-
-class _CommentsField extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final provider = context.read<VideoUploadProvider>();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Comments', style: text14(fontWeight: FontWeight.w600)),
-        const SizedBox(height: 8),
-        TextField(
-          controller: provider.commentController,
-          style: text13(),
-          maxLines: 4,
-          decoration: _inputDecoration(hint: 'Write a Comments..'),
         ),
       ],
     );
@@ -444,48 +700,70 @@ class _PublishButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<VideoUploadProvider>();
-    return SizedBox(
-      width: double.infinity,
-      height: 52,
-      child: ElevatedButton(
-        onPressed: (provider.isFormValid && !provider.isUploading)
-            ? () async {
-                final success = await provider.publish();
-                if (success && context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Reel uploaded successfully!')),
-                  );
-                  provider.reset();
-                  Navigator.of(context).pop();
-                } else if (provider.uploadError != null && context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(provider.uploadError!)),
-                  );
-                }
-              }
-            : null,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primary,
-          disabledBackgroundColor: AppColors.grey300,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          elevation: 0,
-        ),
-        child: provider.isUploading
-            ? const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 2,
-                ),
-              )
-            : Text(
-                'Publish',
-                style: text16(fontWeight: FontWeight.w600, color: AppColors.white),
+    final hasError = provider.uploadError != null;
+
+    return Column(
+      children: [
+        SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: ElevatedButton(
+            onPressed: (provider.isFormValid && !provider.isUploading)
+                ? () async {
+                    final success = await provider.publish();
+                    if (!context.mounted) return;
+                    if (success) {
+                      // Refresh the reels feed so the new reel is visible immediately.
+                      context
+                          .read<ReelsProvider>()
+                          .fetchReelsFeed(forceRefresh: true);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Reel uploaded successfully!')),
+                      );
+                      provider.reset();
+                      Navigator.of(context).pop();
+                    } else if (provider.uploadError != null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(provider.uploadError!)),
+                      );
+                    }
+                  }
+                : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              disabledBackgroundColor: AppColors.grey300,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
               ),
-      ),
+              elevation: 0,
+            ),
+            child: provider.isUploading
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
+                  )
+                : Text(
+                    hasError ? 'Retry' : 'Publish',
+                    style: text16(
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.white,
+                    ),
+                  ),
+          ),
+        ),
+        if (provider.isUploading) ...[
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: provider.cancelUpload,
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Cancel upload'),
+          ),
+        ],
+      ],
     );
   }
 }

@@ -26,8 +26,15 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsForMedia</key>
+		<true/>
+	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>We need camera access for video calls and capturing photos.</string>
+	<string>Catch &amp; Watch needs camera access to record videos for your reels and to make video calls.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>We need microphone access for audio and video calls.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

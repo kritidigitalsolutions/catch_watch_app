@@ -14,6 +14,7 @@ import 'package:provider/provider.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'chat_details_screen.dart';
 import 'media_preview_screen.dart';
+import '../report/report_bottom_sheet.dart';
 
 class ChatScreen extends StatefulWidget {
   final String conversationId;
@@ -44,6 +45,13 @@ class _ChatScreenState extends State<ChatScreen> {
   List<MessageModel> _searchResults = [];
   int _searchIndex = -1;
   bool _isSearchNavActive = false;
+  ChatProvider? _chatProvider;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _chatProvider = Provider.of<ChatProvider>(context, listen: false);
+  }
 
   @override
   void initState() {
@@ -63,11 +71,13 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     NotificationService.activeChatId = null;
-    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      chatProvider.setActiveConversation(null);
-      chatProvider.clearReplyingMessage();
-    });
+    final chatProvider = _chatProvider;
+    if (chatProvider != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        chatProvider.setActiveConversation(null);
+        chatProvider.clearReplyingMessage();
+      });
+    }
     _messageController.dispose();
     super.dispose();
   }
@@ -322,6 +332,21 @@ class _ChatScreenState extends State<ChatScreen> {
                       chatProvider.unsendMessage(widget.conversationId, message.sId!);
                       Navigator.pop(context);
                     }, color: Colors.red),
+                  if (!isMe)
+                    _actionTile(
+                      Icons.flag_outlined,
+                      "Report Message",
+                      () {
+                        Navigator.pop(context);
+                        showReportBottomSheet(
+                          this.context,
+                          targetType: 'user',
+                          targetId: widget.partnerId,
+                          targetTitle: 'Report ${widget.name}',
+                        );
+                      },
+                      color: Colors.redAccent,
+                    ),
                 ],
               ),
             ),
@@ -657,6 +682,20 @@ class _ChatScreenState extends State<ChatScreen> {
                     },
                     color: Colors.red,
                   ),
+                _actionTile(
+                  Icons.flag_outlined,
+                  "Report User",
+                  () {
+                    Navigator.pop(context);
+                    showReportBottomSheet(
+                      this.context,
+                      targetType: 'user',
+                      targetId: widget.partnerId,
+                      targetTitle: 'Report ${widget.name}',
+                    );
+                  },
+                  color: Colors.redAccent,
+                ),
                 const SizedBox(height: 20),
               ],
             ),
@@ -780,10 +819,13 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _actionTile(IconData icon, String label, VoidCallback onTap, {Color? color}) {
-    return ListTile(
-      leading: Icon(icon, color: color ?? Colors.black),
-      title: Text(label, style: TextStyle(color: color ?? Colors.black)),
-      onTap: onTap,
+    return Material(
+      color: Colors.transparent,
+      child: ListTile(
+        leading: Icon(icon, color: color ?? Colors.black),
+        title: Text(label, style: TextStyle(color: color ?? Colors.black)),
+        onTap: onTap,
+      ),
     );
   }
 
