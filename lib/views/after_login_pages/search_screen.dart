@@ -244,7 +244,7 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
           if (user.isVerified == true || user.blueTick == true) ...[
             const SizedBox(width: 4),
-            const Icon(Icons.verified, color: Colors.blue, size: 16),
+            const Icon(Icons.verified, color: AppColors.primary, size: 16),
           ],
         ],
       ),

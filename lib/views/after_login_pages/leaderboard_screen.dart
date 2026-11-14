@@ -376,7 +376,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
               ),
               if (user.blueTick == true) ...[
                 const SizedBox(width: 4),
-                const Icon(Icons.verified_rounded, color: Colors.blue, size: 12),
+                const Icon(Icons.verified_rounded, color: AppColors.primary, size: 12),
               ],
             ],
           ),
@@ -426,7 +426,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                     ),
                     if (user.blueTick == true) ...[
                       const SizedBox(width: 4),
-                      const Icon(Icons.verified_rounded, color: Colors.blue, size: 14),
+                      const Icon(Icons.verified_rounded, color: AppColors.primary, size: 14),
                     ],
                   ],
                 ),

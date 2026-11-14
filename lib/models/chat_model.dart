@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:catch_watch/res/appUrl.dart';
 
 class ConversationResponse {

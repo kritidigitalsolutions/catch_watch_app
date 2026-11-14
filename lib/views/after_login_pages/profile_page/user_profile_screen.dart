@@ -334,7 +334,7 @@ class _ExpandedHeader extends StatelessWidget {
                               if (user.isVerified == true || user.blueTick == true) ...[
                                 const SizedBox(width: 6),
                                 const Icon(Icons.verified_rounded, 
-                                    color: Colors.blue, size: 20),
+                                    color: AppColors.primary, size: 20),
                               ],
                             ],
                           ),
@@ -570,7 +570,7 @@ class _CollapsedBar extends StatelessWidget {
                     if (user.isVerified == true || user.blueTick == true) ...[
                       const SizedBox(width: 4),
                       const Icon(Icons.verified_rounded, 
-                          color: Colors.blue, size: 14),
+                          color: AppColors.primary, size: 14),
                     ],
                   ],
                 ),

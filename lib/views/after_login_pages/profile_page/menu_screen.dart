@@ -47,7 +47,7 @@ class MenuScreen extends StatelessWidget {
                   if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.isVerified != true && provider.user?.blueTick != true) ...[
                     _menuItem(
                       Icons.verified_user_outlined,
-                      'Get Blue Tick',
+                      'Get Orange Tick',
                       onTap: () {
                         Navigator.push(
                           context,
@@ -236,7 +236,7 @@ class MenuScreen extends StatelessWidget {
                           if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
                             const SizedBox(width: 4),
                             const Icon(Icons.verified_rounded, 
-                                color: Colors.blue, size: 16),
+                                color: AppColors.primary, size: 16),
                           ],
                         ],
                       ),

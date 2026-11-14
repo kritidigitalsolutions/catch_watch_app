@@ -343,7 +343,7 @@ class _ExpandedHeader extends StatelessWidget {
                           if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
                             const SizedBox(width: 6),
                             const Icon(Icons.verified_rounded, 
-                                color: Colors.blue, size: 18),
+                                color: AppColors.primary, size: 18),
                           ],
                         ],
                       ),
@@ -365,8 +365,8 @@ class _ExpandedHeader extends StatelessWidget {
                           if (context.watch<VerificationProvider>().currentApplication?.status != 'approved' && provider.user?.isVerified != true && provider.user?.blueTick != true) ...[
                             _actionPill(
                               context,
-                              const Icon(Icons.verified_rounded, color: Colors.blue, size: 12),
-                              "Get Blue Tick",
+                              const Icon(Icons.verified_rounded, color: AppColors.primary, size: 12),
+                              "Get Orange Tick",
                               () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VerificationMainScreen())),
                               isPrimary: true,
                             ),
@@ -540,7 +540,7 @@ class _CollapsedBar extends StatelessWidget {
                     if (context.watch<VerificationProvider>().currentApplication?.status == 'approved' || provider.user?.isVerified == true || provider.user?.blueTick == true) ...[
                       const SizedBox(width: 4),
                       const Icon(Icons.verified_rounded, 
-                          color: Colors.blue, size: 14),
+                          color: AppColors.primary, size: 14),
                     ],
                   ],
                 ),

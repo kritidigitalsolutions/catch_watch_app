@@ -1100,7 +1100,7 @@ class _ShortInfo extends StatelessWidget {
               ),
               if (reel.user?.isVerified == true || reel.user?.blueTick == true) ...[
                 const SizedBox(width: 4),
-                const Icon(Icons.verified_rounded, color: Colors.blue, size: 14),
+                const Icon(Icons.verified_rounded, color: AppColors.primary, size: 14),
               ],
               if (!isSelf && reel.user?.id != null) ...[
                 const SizedBox(width: 12),

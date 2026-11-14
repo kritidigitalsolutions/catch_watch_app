@@ -225,13 +225,13 @@ class ChatProvider extends ChangeNotifier {
 
     try {
       bool restoredFromBackup = false;
+      Map<String, dynamic>? backupData;
 
       // STEP 1: Always check server for account backup first to ensure parity with Web & other devices
       try {
         final backupResponse = await _chatRepository.getE2EEBackup();
         debugPrint('E2EE: Backup API Response: $backupResponse');
 
-        Map<String, dynamic>? backupData;
         if (backupResponse is Map) {
           if (backupResponse['data'] is Map) {
             backupData = Map<String, dynamic>.from(backupResponse['data']);

@@ -129,7 +129,7 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      'Get Your Blue Tick',
+                      'Get Your Orange Tick',
                       style: text26(color: Colors.white, fontWeight: FontWeight.w900),
                     ),
                   ],
@@ -154,7 +154,7 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'The blue tick helps others know that your profile is authentic and verified by our team.',
+            'The orange tick helps others know that your profile is authentic and verified by our team.',
             style: text13(color: AppColors.textSecondary),
           ),
         ],
@@ -279,7 +279,7 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
                         padding: const EdgeInsets.only(bottom: 12),
                         child: Row(
                           children: [
-                            const Icon(Icons.verified_rounded, color: Colors.blue, size: 18),
+                            const Icon(Icons.verified_rounded, color: AppColors.primary, size: 18),
                             const SizedBox(width: 12),
                             Expanded(child: Text(f, style: text14(fontWeight: FontWeight.w600))),
                           ],
