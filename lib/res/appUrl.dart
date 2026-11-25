@@ -1,5 +1,5 @@
 class AppUrl {
-  // static const String serverUrl = 'http://192.168.1.19:5000';
+  // static const String serverUrl = 'http://192.168.1.17:5000';
   static const String serverUrl = 'https://api.catchandwatch.com';
   // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
@@ -139,4 +139,17 @@ class AppUrl {
   static const String vipTickets = '$baseUrl/support/vip';
   static String vipTicketDetail(String ticketId) => '$baseUrl/support/vip/$ticketId';
   static String vipReplyTicket(String ticketId) => '$baseUrl/support/vip/reply/$ticketId';
+
+  /// Live Cricket APIs
+  static const String liveMatches = '$baseUrl/live-matches';
+  static const String featuredLiveMatch = '$baseUrl/live-matches/featured';
+  static const String liveNowMatches = '$baseUrl/live-matches/live-now';
+  static const String upcomingMatches = '$baseUrl/live-matches/upcoming';
+  static const String completedMatches = '$baseUrl/live-matches/completed';
+  static String matchDetails(String matchId) => '$baseUrl/live-matches/$matchId';
+  static String matchViewHeartbeat(String matchId) => '$baseUrl/live-matches/$matchId/view';
+  static String matchLiveActivity(String matchId) => '$baseUrl/live-matches/$matchId/live-activity';
+  static String matchScorecard(String matchId) => '$baseUrl/live-matches/$matchId/scorecard';
+  static String matchCommentary(String matchId) => '$baseUrl/live-matches/$matchId/commentary';
+  static String matchSquads(String matchId) => '$baseUrl/live-matches/$matchId/squads';
 }
