@@ -15,7 +15,9 @@ class NetworkApiService extends BaseApiService {
       BaseOptions(
         connectTimeout: const Duration(seconds: 120),
         receiveTimeout: const Duration(seconds: 120),
-        sendTimeout: const Duration(seconds: 600), // Increased send timeout for large uploads
+        sendTimeout: const Duration(
+          seconds: 600,
+        ), // Increased send timeout for large uploads
       ),
     );
 
@@ -75,14 +77,18 @@ class NetworkApiService extends BaseApiService {
           if (kDebugMode) {
             final reqId = e.requestOptions.extra['reqId'] ?? 'REQ-???';
             final timeStr = _formatTimestamp(DateTime.now());
-            final safeHeaders = e.response != null ? _sanitizeHeaders(e.response!.headers.map) : {};
+            final safeHeaders = e.response != null
+                ? _sanitizeHeaders(e.response!.headers.map)
+                : {};
             final bodyString = _prettyPrintJson(e.response?.data ?? e.message);
 
             debugPrint('[API_DEBUG] ═══════════════════════════════════════');
             debugPrint('[API_DEBUG][$reqId][$timeStr] ❌ ERROR RESPONSE');
             debugPrint('[API_DEBUG] Method: ${e.requestOptions.method}');
             debugPrint('[API_DEBUG] URL: ${e.requestOptions.uri}');
-            debugPrint('[API_DEBUG] Status Code: ${e.response?.statusCode ?? 'N/A'}');
+            debugPrint(
+              '[API_DEBUG] Status Code: ${e.response?.statusCode ?? 'N/A'}',
+            );
             debugPrint('[API_DEBUG] Response Headers: $safeHeaders');
             debugPrint('[API_DEBUG] Response Body:\n$bodyString');
             debugPrint('[API_DEBUG] ═══════════════════════════════════════');
@@ -125,11 +131,7 @@ class NetworkApiService extends BaseApiService {
       final lowerKey = keyStr.toLowerCase();
       if (lowerKey == 'authorization') {
         safe[keyStr] = 'Bearer [REDACTED]';
-      } else if (lowerKey.contains('cookie') ||
-          lowerKey.contains('token') ||
-          lowerKey.contains('secret') ||
-          lowerKey.contains('password') ||
-          lowerKey.contains('key')) {
+      } else if (_isSensitiveLogKey(lowerKey) || lowerKey.contains('cookie')) {
         safe[keyStr] = '[REDACTED]';
       } else {
         safe[keyStr] = value;
@@ -142,12 +144,19 @@ class NetworkApiService extends BaseApiService {
     if (data == null) return '[API_DEBUG]   null';
     if (data is FormData) {
       final lines = <String>[];
-      lines.add('[API_DEBUG]   FormData (fields: ${data.fields.length}, files: ${data.files.length}):');
+      lines.add(
+        '[API_DEBUG]   FormData (fields: ${data.fields.length}, files: ${data.files.length}):',
+      );
       for (final field in data.fields) {
         final lowerKey = field.key.toLowerCase();
         String val = field.value;
-        if (lowerKey.contains('idnumber') || lowerKey.contains('governmentid')) {
-          val = val.length > 4 ? '********${val.substring(val.length - 4)}' : '****';
+        if (_isSensitiveLogKey(lowerKey)) {
+          val = '[REDACTED]';
+        } else if (lowerKey.contains('idnumber') ||
+            lowerKey.contains('governmentid')) {
+          val = val.length > 4
+              ? '********${val.substring(val.length - 4)}'
+              : '****';
         } else if (lowerKey.contains('password') ||
             lowerKey.contains('token') ||
             lowerKey.contains('secret') ||
@@ -159,7 +168,9 @@ class NetworkApiService extends BaseApiService {
         lines.add('[API_DEBUG]   - ${field.key}: $val');
       }
       for (final file in data.files) {
-        lines.add('[API_DEBUG]   - ${file.key}: ${file.value.filename} (${file.value.length} bytes)');
+        lines.add(
+          '[API_DEBUG]   - ${file.key}: [FILE REDACTED] (${file.value.length} bytes)',
+        );
       }
       return lines.join('\n');
     }
@@ -187,6 +198,34 @@ class NetworkApiService extends BaseApiService {
   static bool _isPayoutKey(String lowerKey) =>
       _payoutKeyFragments.any((fragment) => lowerKey.contains(fragment));
 
+  static const List<String> _sensitiveLogKeyFragments = [
+    'phone',
+    'mobile',
+    'email',
+    'token',
+    'jwt',
+    'authorization',
+    'password',
+    'secret',
+    'private',
+    'backup',
+    'encrypted',
+    'transactionid',
+    'originaltransaction',
+    'paymentid',
+    'receipt',
+    'verificationdata',
+    'jws',
+    'purchaseid',
+    'orderid',
+    'cookie',
+    'otp',
+  ];
+
+  static bool _isSensitiveLogKey(String lowerKey) =>
+      _sensitiveLogKeyFragments.any(lowerKey.contains) ||
+      _isPayoutKey(lowerKey);
+
   @visibleForTesting
   static dynamic sanitizeDataForLogs(dynamic obj) => _sanitizeData(obj);
 
@@ -195,17 +234,16 @@ class NetworkApiService extends BaseApiService {
       final sanitized = <String, dynamic>{};
       obj.forEach((k, v) {
         final keyLower = k.toString().toLowerCase();
-        if (keyLower.contains('password') ||
-            keyLower.contains('token') ||
-            keyLower.contains('secret') ||
-            keyLower.contains('refreshtoken') ||
-            keyLower == 'otp') {
+        if (_isSensitiveLogKey(keyLower)) {
           sanitized[k.toString()] = '[REDACTED]';
         } else if (_isPayoutKey(keyLower)) {
           sanitized[k.toString()] = '[REDACTED]';
-        } else if (keyLower.contains('governmentid') || keyLower.contains('idnumber')) {
+        } else if (keyLower.contains('governmentid') ||
+            keyLower.contains('idnumber')) {
           final str = v.toString();
-          sanitized[k.toString()] = str.length > 4 ? '********${str.substring(str.length - 4)}' : '****';
+          sanitized[k.toString()] = str.length > 4
+              ? '********${str.substring(str.length - 4)}'
+              : '****';
         } else {
           sanitized[k.toString()] = _sanitizeData(v);
         }
@@ -224,7 +262,7 @@ class NetworkApiService extends BaseApiService {
       final jsonStr = const JsonEncoder.withIndent('  ').convert(sanitized);
       return jsonStr.split('\n').map((l) => '[API_DEBUG]   $l').join('\n');
     } catch (_) {
-      return '[API_DEBUG]   ${data.toString()}';
+      return '[API_DEBUG]   [UNSERIALIZABLE DATA REDACTED]';
     }
   }
 
@@ -315,11 +353,7 @@ class NetworkApiService extends BaseApiService {
       final response = await _dio.delete(
         url,
         data: data,
-        options: Options(
-          headers: {
-            "Content-Type": "application/json",
-          },
-        ),
+        options: Options(headers: {"Content-Type": "application/json"}),
       );
       return returnResponse(response);
     } on DioException catch (e) {
@@ -353,15 +387,42 @@ class NetworkApiService extends BaseApiService {
         final headers = error.response?.headers.map;
 
         if (statusCode == 400) {
-          return BadRequestException(message != "Unknown error" ? message : "Invalid request", data, statusCode, headers);
+          return BadRequestException(
+            message != "Unknown error" ? message : "Invalid request",
+            data,
+            statusCode,
+            headers,
+          );
         } else if (statusCode == 401 || statusCode == 403) {
-          return UnauthorizedException(message != "Unknown error" ? message : "Unauthorized access", data, statusCode, headers);
+          return UnauthorizedException(
+            message != "Unknown error" ? message : "Unauthorized access",
+            data,
+            statusCode,
+            headers,
+          );
         } else if (statusCode == 404) {
-          return BadRequestException(message != "Unknown error" ? message : "Resource not found", data, statusCode, headers);
+          return BadRequestException(
+            message != "Unknown error" ? message : "Resource not found",
+            data,
+            statusCode,
+            headers,
+          );
         } else if (statusCode == 409) {
-          return FetchDataException(message != "Unknown error" ? message : "Conflict occurred", data, statusCode, headers);
+          return FetchDataException(
+            message != "Unknown error" ? message : "Conflict occurred",
+            data,
+            statusCode,
+            headers,
+          );
         } else if (statusCode >= 500) {
-          return FetchDataException(message != "Unknown error" && message != "Server Error" ? message : "Server Error", data, statusCode, headers);
+          return FetchDataException(
+            message != "Unknown error" && message != "Server Error"
+                ? message
+                : "Server Error",
+            data,
+            statusCode,
+            headers,
+          );
         } else {
           return FetchDataException(message, data, statusCode, headers);
         }
@@ -373,9 +434,11 @@ class NetworkApiService extends BaseApiService {
       default:
         final message = error.message ?? "";
         if (message.contains("SocketException")) {
-           return FetchDataException("No Internet Connection");
+          return FetchDataException("No Internet Connection");
         }
-        return FetchDataException("Something went wrong: ${error.error ?? 'Unknown error'}");
+        return FetchDataException(
+          "Something went wrong: ${error.error ?? 'Unknown error'}",
+        );
     }
   }
 }
@@ -396,7 +459,9 @@ dynamic returnResponse(Response response) {
       throw UnauthorizedException(response.data?.toString());
 
     case 404:
-      throw BadRequestException(response.data?.toString() ?? "Resource not found");
+      throw BadRequestException(
+        response.data?.toString() ?? "Resource not found",
+      );
 
     case 500:
     default:

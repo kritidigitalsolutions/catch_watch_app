@@ -13,8 +13,13 @@ import 'package:catch_watch/views/after_login_pages/search_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/content_model.dart';
+import '../../models/live_match_model.dart';
 import '../../res/app_colors.dart';
 import '../../utils/text_style.dart';
+import '../../view_model/after_login_provider/live_cricket_provider.dart';
+import 'cricket/live_match_list_screen.dart';
+import 'cricket/widgets/featured_match_card.dart';
+import 'cricket/widgets/live_match_card.dart';
 
 Future<void> _openShortFilm(BuildContext context, Content content) async {
   await EntitlementHelper.openContent(context, content);
@@ -47,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context.read<WatchlistProvider>().fetchWatchlist();
       context.read<HomeScreenProvider>().fetchAllContent();
       context.read<NotificationProvider>().fetchNotifications();
+      context.read<LiveCricketProvider>().fetchAllCricketData();
     });
   }
 
@@ -180,12 +186,36 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         _buildCarousel(provider, context),
         _buildDotIndicator(provider),
-        const SizedBox(height: 24),
+        const SizedBox(height: 12),
 
-        // First Category
+        // Featured Live Cricket Match
+        Consumer<LiveCricketProvider>(
+          builder: (context, cricketProvider, _) {
+            final featured = cricketProvider.featuredMatch;
+            if (featured == null) return const SizedBox.shrink();
+            return FeaturedMatchCard(match: featured);
+          },
+        ),
+
+        const SizedBox(height: 12),
+
+        // First Category (e.g. Trending)
         if (categories.isNotEmpty) ...[
           _buildCategorySection(provider, categories[0]),
         ],
+
+        // Live Cricket Horizontal Tray Section
+        Consumer<LiveCricketProvider>(
+          builder: (context, cricketProvider, _) {
+            final allMatches = <LiveMatchModel>[
+              ...cricketProvider.liveMatches,
+              ...cricketProvider.upcomingMatches,
+              ...cricketProvider.completedMatches,
+            ];
+            if (allMatches.isEmpty) return const SizedBox.shrink();
+            return _buildLiveCricketSection(context, cricketProvider, allMatches);
+          },
+        ),
 
         // Continue Watching - Only if requested and not empty
         if (showContinueWatching && provider.continueWatching.isNotEmpty) ...[
@@ -378,13 +408,56 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildTabBar(HomeScreenProvider provider) {
+    final int totalCount = provider.tabs.length + 1;
     return SizedBox(
       height: 40,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: provider.tabs.length,
+        itemCount: totalCount,
         itemBuilder: (context, index) {
+          if (index == provider.tabs.length) {
+            // Live Cricket Pill Button
+            return GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LiveMatchListScreen()),
+                );
+              },
+              child: Container(
+                margin: const EdgeInsets.only(right: 12, bottom: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF0E8),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.35)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFE50914),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Live Cricket',
+                      style: text13(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
           final isActive = provider.selectedTabIndex == index;
           return GestureDetector(
             onTap: () => provider.selectTab(index),
@@ -411,6 +484,82 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         },
       ),
+    );
+  }
+
+  Widget _buildLiveCricketSection(
+    BuildContext context,
+    LiveCricketProvider provider,
+    List<LiveMatchModel> matches,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'Live Cricket',
+                    style: text16(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE50914),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      'LIVE',
+                      style: text10(color: Colors.white, fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ],
+              ),
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const LiveMatchListScreen()),
+                  );
+                },
+                child: Row(
+                  children: [
+                    Text(
+                      'More',
+                      style: text12(color: AppColors.primary, fontWeight: FontWeight.w700),
+                    ),
+                    const Icon(Icons.arrow_forward_ios_rounded, color: AppColors.primary, size: 12),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 160,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: matches.length,
+            itemBuilder: (context, index) {
+              return LiveMatchCard(
+                match: matches[index],
+                width: 270,
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 24),
+      ],
     );
   }
 

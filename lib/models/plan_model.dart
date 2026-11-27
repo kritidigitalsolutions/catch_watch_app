@@ -72,7 +72,8 @@ class Plan {
     // Normalize misconfigured planType (e.g. backend returning 'monthly' for a 365-day Yearly plan)
     final lowerPlanName = (name ?? '').toLowerCase();
     final isYearlyIdentity = duration == 365 ||
-        appleProductId == 'com.app.catchWatch.sub.premium.yearly' ||
+        appleProductId == ottYearlyProductId ||
+        appleProductId == legacyOttYearlyProductId ||
         lowerPlanName.contains('yearly') ||
         lowerPlanName.contains('annual');
     if (isYearlyIdentity && (planType == null || planType == 'monthly')) {
@@ -93,9 +94,9 @@ class Plan {
     if (isOrangeTickPlan || isBlueTickPlan) return 'creator_verification';
 
     final prodId = effectiveAppleProductId;
-    if (prodId == ottWeeklyProductId) return 'weekly';
-    if (prodId == ottYearlyProductId) return 'yearly';
-    if (prodId == ottMonthlyProductId) return 'monthly';
+    if (isOttWeeklyProduct(prodId)) return 'weekly';
+    if (isOttYearlyProduct(prodId)) return 'yearly';
+    if (isOttMonthlyProduct(prodId)) return 'monthly';
 
     if (duration == 365 || (name?.toLowerCase().contains('year') ?? false)) {
       return 'yearly';
@@ -134,6 +135,7 @@ class Plan {
   /// Returns true if this plan is classified as an Orange Tick / Creator Verification plan
   bool get isOrangeTickPlan {
     if (isBlueTickPlan) return false;
+    if (isOrangeTickProduct(appleProductId)) return true;
 
     final cat = (category ?? planCategory ?? '').toLowerCase().trim();
     if (cat.contains('orange') ||
@@ -171,6 +173,19 @@ class Plan {
         appleProductId == ottMonthlyProductId ||
         appleProductId == ottYearlyProductId) {
       return appleProductId!;
+    }
+    // Backward compatibility for legacy product IDs
+    if (appleProductId == legacyOrangeTickProductId) {
+      return orangeTickProductId;
+    }
+    if (appleProductId == legacyOttWeeklyProductId) {
+      return ottWeeklyProductId;
+    }
+    if (appleProductId == legacyOttMonthlyProductId) {
+      return ottMonthlyProductId;
+    }
+    if (appleProductId == legacyOttYearlyProductId) {
+      return ottYearlyProductId;
     }
 
     final lowerName = name?.toLowerCase() ?? '';
@@ -217,7 +232,7 @@ class Plan {
       return ottYearlyProductId;
     }
 
-    // Monthly: default core recurring plan
+    // Monthly: default core plan when backend duration metadata is absent
     return ottMonthlyProductId;
   }
 
@@ -226,12 +241,14 @@ class Plan {
   int get effectiveLevel {
     if (level != null && level! > 0) return level!;
 
-    if (isOrangeTickPlan || isBlueTickPlan) return 10;
-
     final prodId = effectiveAppleProductId;
-    if (prodId == ottWeeklyProductId) return 1;
-    if (prodId == ottMonthlyProductId) return 2;
-    if (prodId == ottYearlyProductId) return 3;
+    if (isOrangeTickPlan || isBlueTickPlan || isOrangeTickProduct(prodId)) {
+      return 10;
+    }
+
+    if (isOttWeeklyProduct(prodId)) return 1;
+    if (isOttMonthlyProduct(prodId)) return 2;
+    if (isOttYearlyProduct(prodId)) return 3;
 
     final lowerName = (name ?? '').toLowerCase();
     final lowerType = (planType ?? '').toLowerCase();
@@ -535,7 +552,7 @@ class SubscriptionData {
 
 /// Classification of a user's subscription entitlement
 enum EntitlementClassification {
-  /// Active, auto-renewing or ongoing paid subscription
+  /// Active or otherwise currently entitled paid purchase
   activeEntitlement,
 
   /// Cancelled at store/provider level, but remaining paid period is still valid

@@ -3,20 +3,54 @@ import 'dart:io';
 
 import 'package:catch_watch/models/plan_model.dart';
 import 'package:catch_watch/services/iap_service.dart';
+import 'package:catch_watch/utils/apple_purchase_button_policy.dart';
 import 'package:catch_watch/view_model/after_login_provider/profile_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/views/after_login_pages/profile_page/policy_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:in_app_purchase_storekit/in_app_purchase_storekit.dart';
 import 'package:provider/provider.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../../res/app_colors.dart';
+import '../../../utils/subscription_expiry_formatter.dart';
+import '../../../utils/restore_purchase_policy.dart';
 import '../../../utils/text_style.dart';
 
 class SubscriptionScreen extends StatefulWidget {
   const SubscriptionScreen({super.key});
+
+  /// Formats the user-facing downgrade restriction message for Non-Renewing subscriptions.
+  static String formatDowngradeRestrictionMessage({
+    required SubscriptionData? subscription,
+    required List<Plan> availablePlans,
+  }) {
+    String rawName = subscription?.getEffectivePlanName(availablePlans) ??
+        subscription?.planName ??
+        'Premium';
+    if (rawName.isEmpty) rawName = 'Premium';
+
+    final planDisplay = rawName.toLowerCase().endsWith('plan')
+        ? rawName
+        : '$rawName plan';
+
+    String? formattedExpiry;
+    final rawEndDate = subscription?.endDate;
+    if (rawEndDate != null && rawEndDate.trim().isNotEmpty) {
+      try {
+        final dt = DateTime.parse(rawEndDate).toLocal();
+        formattedExpiry = DateFormat('dd MMM yyyy').format(dt);
+      } catch (_) {
+        formattedExpiry = null;
+      }
+    }
+
+    if (formattedExpiry != null && formattedExpiry.trim().isNotEmpty) {
+      return 'You already have an active $planDisplay. You cannot switch to a lower plan until your current plan validity ends on $formattedExpiry.';
+    }
+    return 'You already have an active $planDisplay. You cannot switch to a lower plan until your current plan validity ends.';
+  }
 
   @override
   State<SubscriptionScreen> createState() => _SubscriptionScreenState();
@@ -24,6 +58,7 @@ class SubscriptionScreen extends StatefulWidget {
 
 class _SubscriptionScreenState extends State<SubscriptionScreen>
     with WidgetsBindingObserver {
+  late final SubscriptionProvider _iapSubscriptionProvider;
   String? _expandedPlanId;
 
   // Android Razorpay instance
@@ -56,6 +91,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
   @override
   void initState() {
     super.initState();
+    _iapSubscriptionProvider = context.read<SubscriptionProvider>();
     WidgetsBinding.instance.addObserver(this);
 
     if (!Platform.isIOS) {
@@ -75,7 +111,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && Platform.isIOS) {
-      debugPrint('[SUBSCRIPTION] App resumed from background. Refreshing subscription status...');
+      debugPrint(
+        '[SUBSCRIPTION] App resumed from background. Refreshing subscription status...',
+      );
       _loadPlansAndStatus();
     }
   }
@@ -86,6 +124,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       onVerifyPurchase: _verifyApplePurchase,
       onPurchaseSuccess: _onApplePurchaseSuccess,
       onError: (message) {
+        _iapSubscriptionProvider.setPurchaseInitiating(false);
         if (mounted) {
           final bool wasUserInitiated =
               _isPurchasing || _pendingApplePlanId != null || _isRestoring;
@@ -109,13 +148,15 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
             return;
           }
 
-          final isCrossAccount = lower.contains('another catch & watch account') ||
+          final isCrossAccount =
+              lower.contains('another catch & watch account') ||
               lower.contains('cross-account') ||
               lower.contains('another account');
           _showErrorPopup(message, !isCrossAccount && wasUserInitiated);
         }
       },
       onPending: (isPending) {
+        _iapSubscriptionProvider.setPurchaseInitiating(isPending);
         if (mounted && _isPurchasing != isPending) {
           setState(() {
             _isPurchasing = isPending;
@@ -123,6 +164,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         }
       },
       onCanceled: () {
+        _iapSubscriptionProvider.setPurchaseInitiating(false);
         if (mounted) {
           setState(() {
             _isPurchasing = false;
@@ -136,19 +178,33 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
   /// Fetches plans and subscription status, querying StoreKit details on iOS
   Future<void> _loadPlansAndStatus() async {
     final provider = context.read<SubscriptionProvider>();
-    await provider.fetchPlans();
-    await provider.fetchSubscriptionStatus();
-
     if (Platform.isIOS) {
-      final Set<String> productIds = {
-        'com.app.catchWatch.sub.premium.weekly',
-        'com.app.catchWatch.sub.premium.monthly',
-        'com.app.catchWatch.sub.premium.yearly',
+      // Start StoreKit lookup immediately so backend status latency does not
+      // delay product prices or determine whether a product can be purchased.
+      final productLoad = IapService.instance.loadProducts({
+        ottWeeklyProductId,
+        ottMonthlyProductId,
+        ottYearlyProductId,
+      });
+      await provider.fetchPlans();
+      final backendIds = provider.plans
+          .map((p) => p.effectiveAppleProductId)
+          .toSet();
+      const expectedOttIds = {
+        ottWeeklyProductId,
+        ottMonthlyProductId,
+        ottYearlyProductId,
       };
-      if (provider.plans.isNotEmpty) {
-        productIds.addAll(provider.plans.map((p) => p.effectiveAppleProductId));
+      final invalidIds = backendIds.difference(expectedOttIds);
+      debugPrint(
+        '[IAP] Backend OTT product mappings: ${provider.plans.map((p) => '${p.id} -> ${p.effectiveAppleProductId}').toList()}',
+      );
+      if (invalidIds.isNotEmpty) {
+        debugPrint(
+          '[IAP] Ignoring unexpected backend Apple product IDs: ${invalidIds.toList()}',
+        );
       }
-      await IapService.instance.loadProducts(productIds);
+      await productLoad;
       if (mounted) {
         if (_expandedPlanId == null) {
           final plans = _getEffectivePlans(provider.plans);
@@ -162,7 +218,11 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         }
         setState(() {});
       }
+    } else {
+      await provider.fetchPlans();
     }
+    await provider.fetchSubscriptionStatus();
+    if (mounted) setState(() {});
   }
 
   @override
@@ -171,8 +231,6 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     WidgetsBinding.instance.removeObserver(this);
     if (!Platform.isIOS) {
       _razorpay.clear();
-    } else {
-      IapService.instance.dispose();
     }
     super.dispose();
   }
@@ -247,6 +305,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       return;
     }
 
+    final provider = context.read<SubscriptionProvider>();
     final productId = plan.effectiveAppleProductId;
     var product = IapService.instance.getProduct(productId);
 
@@ -259,6 +318,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         );
         return;
       }
+      provider.setPurchaseInitiating(true);
       setState(() {
         _isPurchasing = true;
         _pendingApplePlanId = plan.id;
@@ -272,6 +332,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     }
 
     if (product == null) {
+      provider.setPurchaseInitiating(false);
       if (mounted) {
         setState(() {
           _isPurchasing = false;
@@ -287,6 +348,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       return;
     }
 
+    provider.setPurchaseInitiating(true);
     setState(() {
       _isPurchasing = true;
       _pendingApplePlanId = plan.id;
@@ -294,14 +356,28 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       _pendingAppleCurrentSubscriptionId = currentSubscriptionId;
     });
 
-    final launched = await IapService.instance.buyProduct(product);
-    if (!launched && mounted) {
-      setState(() {
-        _isPurchasing = false;
-        _pendingApplePlanId = null;
-        _pendingAppleIsUpgrade = false;
-        _pendingAppleCurrentSubscriptionId = null;
-      });
+    var launched = false;
+    try {
+      launched = await IapService.instance.buyProduct(product);
+    } catch (error) {
+      debugPrint(
+        '[SUBSCRIPTION] Purchase initiation failed (${error.runtimeType}).',
+      );
+      if (mounted) {
+        _showErrorPopup('Unable to start purchase. Please try again.', false);
+      }
+    } finally {
+      if (!launched) {
+        provider.setPurchaseInitiating(false);
+        if (mounted) {
+          setState(() {
+            _isPurchasing = false;
+            _pendingApplePlanId = null;
+            _pendingAppleIsUpgrade = false;
+            _pendingAppleCurrentSubscriptionId = null;
+          });
+        }
+      }
     }
   }
 
@@ -312,7 +388,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     // 1. StoreKit 1 (AppStorePurchaseDetails)
     if (purchaseDetails is AppStorePurchaseDetails) {
       final sk1OriginalId = purchaseDetails
-          .skPaymentTransaction.originalTransaction?.transactionIdentifier;
+          .skPaymentTransaction
+          .originalTransaction
+          ?.transactionIdentifier;
       if (sk1OriginalId != null && sk1OriginalId.isNotEmpty) {
         return sk1OriginalId;
       }
@@ -331,14 +409,18 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
           final payloadJson = utf8.decode(decodedBytes);
           final dynamic data = jsonDecode(payloadJson);
           if (data is Map<String, dynamic>) {
-            final originalId = data['originalTransactionId'] ?? data['original_transaction_id'];
+            final originalId =
+                data['originalTransactionId'] ??
+                data['original_transaction_id'];
             if (originalId != null && originalId.toString().isNotEmpty) {
               return originalId.toString();
             }
           }
         }
       } catch (e) {
-        debugPrint('[IAP] Error extracting originalTransactionId from JWS: $e');
+        debugPrint(
+          '[IAP] Error extracting originalTransactionId from JWS payload',
+        );
       }
     }
 
@@ -349,7 +431,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
   Future<bool> _verifyApplePurchase(PurchaseDetails purchaseDetails) async {
     _inFlightVerificationCount++;
     try {
-      final provider = context.read<SubscriptionProvider>();
+      final provider = _iapSubscriptionProvider;
 
       // Ensure plans are loaded so matching works reliably
       if (provider.plans.isEmpty) {
@@ -369,7 +451,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       }
       if (matchedPlan == null || matchedPlan.id == null) {
         final matchingPlans = allPlans
-            .where((p) => p.effectiveAppleProductId == purchaseDetails.productID)
+            .where(
+              (p) => p.effectiveAppleProductId == purchaseDetails.productID,
+            )
             .toList();
         if (matchingPlans.length == 1) {
           matchedPlan = matchingPlans.first;
@@ -405,9 +489,13 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         return false;
       }
 
-      final String? originalTxId = _extractOriginalTransactionId(purchaseDetails);
+      final String? originalTxId = _extractOriginalTransactionId(
+        purchaseDetails,
+      );
       if (originalTxId == null || originalTxId.isEmpty) {
-        debugPrint('[IAP] Verification aborted: Unable to obtain valid originalTransactionId for ${purchaseDetails.productID}');
+        debugPrint(
+          '[IAP] Verification aborted: Unable to obtain valid originalTransactionId for ${purchaseDetails.productID}',
+        );
         if (mounted) {
           _showErrorPopup(
             'Unable to verify transaction authenticity. Please contact support.',
@@ -417,13 +505,18 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         return false;
       }
 
-      final bool isUpgrade = _pendingAppleIsUpgrade ||
+      final bool isUpgrade =
+          _pendingAppleIsUpgrade ||
           (provider.currentSubscription != null &&
-              provider.currentSubscription!.isCurrentlyValid(remainingDays: provider.remainingDays) &&
+              provider.currentSubscription!.isCurrentlyValid(
+                remainingDays: provider.remainingDays,
+              ) &&
               matchedPlan != null &&
-              matchedPlan.effectiveLevel > provider.currentSubscription!.getEffectiveLevel(allPlans));
+              matchedPlan.effectiveLevel >
+                  provider.currentSubscription!.getEffectiveLevel(allPlans));
 
-      final String? currentSubId = _pendingAppleCurrentSubscriptionId ??
+      final String? currentSubId =
+          _pendingAppleCurrentSubscriptionId ??
           (isUpgrade ? provider.currentSubscription?.id : null);
 
       final payload = {
@@ -437,7 +530,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         "currentSubscriptionId": ?currentSubId,
       };
 
-      final env = IapService.instance.extractEnvironment(purchaseDetails) ?? 'Unknown';
+      final env =
+          IapService.instance.extractEnvironment(purchaseDetails) ?? 'Unknown';
       debugPrint(
         '[IAP] Verifying Apple purchase: Product=${purchaseDetails.productID}, PlanId=$resolvedPlanId, IsUpgrade=$isUpgrade, Env=$env',
       );
@@ -448,17 +542,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         if (serverError != null && serverError.isNotEmpty) {
           IapService.instance.lastVerificationErrorMessage = serverError;
         }
-        final lower = (serverError ?? '').toLowerCase();
-        if (lower.contains('expired') ||
-            IapService.instance.isTransactionExpired(purchaseDetails)) {
-          debugPrint(
-            '[IAP] Transaction ${purchaseDetails.purchaseID} confirmed expired by backend ($serverError). Marking terminal and completing in StoreKit.',
-          );
-          await IapService.instance.resolveAndCompleteTerminalTransaction(
-            purchaseDetails,
-            reason: 'expired',
-          );
-        }
+        // A failed verify response, including a 400 expiry response, is not
+        // authoritative enough to finish this StoreKit transaction. Keep it
+        // unfinished so a later event/Restore can be verified again.
       }
       if (success && _isRestoring) {
         _restoredSuccessCount++;
@@ -471,6 +557,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
 
   void _onApplePurchaseSuccess(PurchaseDetails purchaseDetails) {
     if (!mounted) return;
+    _iapSubscriptionProvider.setPurchaseInitiating(false);
     if (!_isRestoring) {
       final provider = context.read<SubscriptionProvider>();
       final allPlans = _getEffectivePlans(provider.plans);
@@ -511,6 +598,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       _isRestoring = true;
       _restoredSuccessCount = 0;
     });
+    _iapSubscriptionProvider.setPurchaseInitiating(true);
+    IapService.instance.isOttRestoring = true;
+    IapService.instance.allowFailedTransactionRetries();
 
     try {
       final provider = context.read<SubscriptionProvider>();
@@ -522,13 +612,15 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
 
       // Wait for any in-flight transaction verifications dispatched by purchaseStream
       final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
-      while (_inFlightVerificationCount > 0 && DateTime.now().isBefore(deadline)) {
+      while (_inFlightVerificationCount > 0 &&
+          DateTime.now().isBefore(deadline)) {
         await Future.delayed(const Duration(milliseconds: 100));
       }
 
       // Brief debounce pause to ensure any queued stream events are delivered
       await Future.delayed(const Duration(milliseconds: 500));
-      while (_inFlightVerificationCount > 0 && DateTime.now().isBefore(deadline)) {
+      while (_inFlightVerificationCount > 0 &&
+          DateTime.now().isBefore(deadline)) {
         await Future.delayed(const Duration(milliseconds: 100));
       }
 
@@ -538,7 +630,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       await provider.fetchSubscriptionStatus();
       if (!mounted) return;
 
-      if (_restoredSuccessCount > 0 || provider.currentSubscription != null) {
+      if (hasVerifiedRestoreTransaction(_restoredSuccessCount)) {
         context.read<ProfileProvider>().fetchProfile();
         _showSuccessPopup();
       } else {
@@ -549,49 +641,19 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         );
       }
     } catch (e) {
-      debugPrint('[IAP] Restore error: $e');
+      debugPrint('[IAP] Restore error (${e.runtimeType}).');
       if (mounted) {
         _showErrorPopup('Restore failed: $e', false);
       }
     } finally {
+      IapService.instance.isOttRestoring = false;
+      _iapSubscriptionProvider.setPurchaseInitiating(false);
       if (mounted) {
         setState(() {
           _isPurchasing = false;
           _isRestoring = false;
         });
       }
-    }
-  }
-
-  Future<void> _manageAppleSubscription() async {
-    final provider = context.read<SubscriptionProvider>();
-    final activeSub = provider.currentSubscription;
-    final activePlan = activeSub?.planObject;
-    final String prodId = activePlan?.effectiveAppleProductId ??
-        activeSub?.planId ??
-        'unknown';
-    debugPrint(
-      '[IAP] Managing Apple subscription: URL=https://apps.apple.com/account/subscriptions, Product=$prodId',
-    );
-
-    const url = 'https://apps.apple.com/account/subscriptions';
-    final uri = Uri.parse(url);
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Please open Settings > Apple ID > Subscriptions to manage your subscription. (For Sandbox accounts: Settings > App Store > Sandbox Account)',
-              ),
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('[IAP] Error opening subscription URL: $e');
     }
   }
 
@@ -628,7 +690,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       barrierDismissible: true,
       builder: (dialogCtx) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
           contentPadding: const EdgeInsets.symmetric(horizontal: 20),
           actionsPadding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
@@ -642,14 +706,21 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                   color: AppColors.primary.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.upgrade_rounded, color: AppColors.primary, size: 24),
+                child: const Icon(
+                  Icons.upgrade_rounded,
+                  color: AppColors.primary,
+                  size: 24,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Upgrade Plan', style: text18(fontWeight: FontWeight.w800)),
+                    Text(
+                      'Upgrade Plan',
+                      style: text18(fontWeight: FontWeight.w800),
+                    ),
                     Text(
                       'Upgrade to ${targetPlan.name ?? 'New Plan'}',
                       style: text12(color: AppColors.grey500),
@@ -709,9 +780,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                                 color: AppColors.textSecondary,
                               ),
                             ),
-                            Flexible(
-                              child: _buildPriceText(targetPlan),
-                            ),
+                            Flexible(child: _buildPriceText(targetPlan)),
                           ],
                         ),
                       ],
@@ -736,7 +805,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Apple StoreKit switches your subscription immediately. Apple automatically issues a prorated refund for the unused time of your current plan directly to your Apple ID payment method.',
+                            'This is a one-time purchase for the selected plan validity and does not renew automatically. Any remaining access from your current plan and refund eligibility are subject to Catch & Watch and Apple policies; no automatic prorated refund is promised.',
                             style: appTextStyle(
                               fontSize: 11,
                               color: const Color(0xFF1E40AF),
@@ -853,13 +922,20 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
               ),
               child: Text(
                 Platform.isIOS
                     ? 'Upgrade via App Store'
-                    : (quote.payableAmount == 0 ? 'Confirm Free Upgrade' : 'Pay ₹${quote.payableAmount} & Upgrade'),
+                    : (quote.payableAmount == 0
+                          ? 'Confirm Free Upgrade'
+                          : 'Pay ₹${quote.payableAmount} & Upgrade'),
                 style: text13(color: Colors.white, fontWeight: FontWeight.w700),
               ),
             ),
@@ -870,9 +946,16 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
   }
 
   Future<void> _startPayment(Plan plan, {bool isUpgrade = false}) async {
+    final subscriptionProvider = context.read<SubscriptionProvider>();
     // 1. Rapid repeated tap debounce protection
-    if (_isProcessingPayment || _isPurchasing || context.read<SubscriptionProvider>().isLoading) {
-      debugPrint('[SUBSCRIPTION] Purchase tap ignored: another operation is in progress');
+    if (_isProcessingPayment ||
+        _isPurchasing ||
+        subscriptionProvider.isPlanLoading ||
+        subscriptionProvider.isPurchaseLoading ||
+        subscriptionProvider.isLoading) {
+      debugPrint(
+        '[SUBSCRIPTION] Purchase tap ignored: another operation is in progress',
+      );
       return;
     }
     _isProcessingPayment = true;
@@ -890,9 +973,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
 
     if (actionType == PlanActionType.downgrade) {
       _isProcessingPayment = false;
-      final currentName = provider.currentSubscription?.planName ?? 'Premium';
       _showErrorPopup(
-        'You already have an active $currentName plan. You cannot switch to a lower plan until your current subscription expires.',
+        _getDowngradeRestrictionMessage(provider),
         false,
       );
       return;
@@ -913,7 +995,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         await _startApplePurchase(
           plan,
           isUpgrade: isUpgrade,
-          currentSubscriptionId: isUpgrade ? provider.currentSubscription?.id : null,
+          currentSubscriptionId: isUpgrade
+              ? provider.currentSubscription?.id
+              : null,
         );
       } finally {
         _isProcessingPayment = false;
@@ -925,7 +1009,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     final user = context.read<ProfileProvider>().user;
     _pendingPlanId = plan.id;
     _pendingIsUpgrade = isUpgrade;
-    _pendingCurrentSubscriptionId = isUpgrade ? provider.currentSubscription?.id : null;
+    _pendingCurrentSubscriptionId = isUpgrade
+        ? provider.currentSubscription?.id
+        : null;
 
     try {
       final response = await provider.createOrder(
@@ -965,7 +1051,10 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
             context.read<ProfileProvider>().fetchProfile();
             _showSuccessPopup();
           } else if (mounted) {
-            _showErrorPopup(provider.error ?? 'Upgrade activation failed', true);
+            _showErrorPopup(
+              provider.error ?? 'Upgrade activation failed',
+              true,
+            );
           }
           _pendingPlanId = null;
           _pendingIsUpgrade = false;
@@ -974,8 +1063,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         }
 
         final rawKey = response['key'];
-        final razorpayKey =
-            (rawKey is String && rawKey.trim().isNotEmpty) ? rawKey.trim() : null;
+        final razorpayKey = (rawKey is String && rawKey.trim().isNotEmpty)
+            ? rawKey.trim()
+            : null;
 
         if (razorpayKey == null) {
           debugPrint(
@@ -1001,13 +1091,10 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
           'description': isUpgrade
               ? 'Upgrade to ${plan.name}'
               : (plan.name ?? 'Subscription'),
-          'prefill': {
-            'contact': user?.phone ?? '',
-            'email': '',
-          },
+          'prefill': {'contact': user?.phone ?? '', 'email': ''},
           'external': {
-            'wallets': ['paytm']
-          }
+            'wallets': ['paytm'],
+          },
         };
 
         try {
@@ -1066,17 +1153,27 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       return validPlans;
     }
 
+    const ottProductIds = {
+      ottWeeklyProductId,
+      ottMonthlyProductId,
+      ottYearlyProductId,
+    };
+    final recognizedPlans = validPlans
+        .where((p) => ottProductIds.contains(p.effectiveAppleProductId))
+        .toList();
+    if (recognizedPlans.isEmpty) return const <Plan>[];
+
     Plan? weeklyPlan;
     Plan? monthlyPlan;
     Plan? yearlyPlan;
 
-    for (final p in validPlans) {
+    for (final p in recognizedPlans) {
       final prodId = p.effectiveAppleProductId;
-      if (prodId == 'com.app.catchWatch.sub.premium.weekly' && weeklyPlan == null) {
+      if (isOttWeeklyProduct(prodId) && weeklyPlan == null) {
         weeklyPlan = p;
-      } else if (prodId == 'com.app.catchWatch.sub.premium.yearly' && yearlyPlan == null) {
+      } else if (isOttYearlyProduct(prodId) && yearlyPlan == null) {
         yearlyPlan = p;
-      } else if (prodId == 'com.app.catchWatch.sub.premium.monthly' && monthlyPlan == null) {
+      } else if (isOttMonthlyProduct(prodId) && monthlyPlan == null) {
         monthlyPlan = p;
       }
     }
@@ -1086,33 +1183,46 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     if (monthlyPlan != null) effective.add(monthlyPlan);
     if (yearlyPlan != null) effective.add(yearlyPlan);
 
-    // If backend plans didn't match the standard 3 tier product IDs, use all valid plans
-    if (effective.isEmpty) {
-      return validPlans;
-    }
     return effective;
   }
 
   String _getPlanSubtitle(Plan plan) {
     final prodId = plan.effectiveAppleProductId;
-    if (prodId == 'com.app.catchWatch.sub.premium.weekly') {
-      return '7-day access';
+    final duration = plan.duration;
+    if (duration != null && duration > 0) {
+      if (duration == 365 || duration == 12) return '12-month fixed access';
+      if (duration == 1 && plan.effectivePlanType == 'monthly') {
+        return '1-month fixed access';
+      }
+      if (duration == 30) return '30-day fixed access';
+      if (duration == 7) return '7-day fixed access';
+      return '$duration-day fixed access';
     }
-    if (prodId == 'com.app.catchWatch.sub.premium.yearly') {
-      return '12-month access';
+    if (isOttWeeklyProduct(prodId)) {
+      return '7-day fixed access';
     }
-    return 'Monthly access';
+    if (isOttYearlyProduct(prodId)) {
+      return '12-month fixed access';
+    }
+    return 'Fixed monthly access';
   }
 
   String _getPlanDescription(Plan plan) {
     final prodId = plan.effectiveAppleProductId;
-    if (prodId == 'com.app.catchWatch.sub.premium.weekly') {
+    if (isOttWeeklyProduct(prodId)) {
       return 'Entry plan for users who want short-term access.';
     }
-    if (prodId == 'com.app.catchWatch.sub.premium.yearly') {
+    if (isOttYearlyProduct(prodId)) {
       return 'Highest-value plan for long-term members.';
     }
-    return 'Core recurring plan for regular Catch & Watch viewers.';
+    return 'Core fixed-validity plan for regular Catch & Watch viewers.';
+  }
+
+  String _getDowngradeRestrictionMessage(SubscriptionProvider provider) {
+    return SubscriptionScreen.formatDowngradeRestrictionMessage(
+      subscription: provider.currentSubscription,
+      availablePlans: _getEffectivePlans(provider.plans),
+    );
   }
 
   // ─── Dialogs ────────────────────────────────────────────────────────────────
@@ -1130,12 +1240,19 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 64),
+            const Icon(
+              Icons.check_circle_rounded,
+              color: AppColors.success,
+              size: 64,
+            ),
             const SizedBox(height: 16),
-            Text('Payment Successful!', style: text18(fontWeight: FontWeight.w800)),
+            Text(
+              'Payment Successful!',
+              style: text18(fontWeight: FontWeight.w800),
+            ),
             const SizedBox(height: 12),
             Text(
-              'Your Premium subscription is now active.',
+              'Your Premium access is active for the fixed validity shown on your plan. This purchase does not automatically renew.',
               textAlign: TextAlign.center,
               style: text14(color: AppColors.textSecondary),
             ),
@@ -1152,9 +1269,17 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
-                child: Text('Done', style: text14(color: Colors.white, fontWeight: FontWeight.w700)),
+                child: Text(
+                  'Done',
+                  style: text14(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ),
           ],
@@ -1165,7 +1290,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
 
   void _showErrorPopup(String message, bool showTryAgain) {
     if (!mounted || _isErrorDialogShowing) {
-      debugPrint('[SUBSCRIPTION] Suppressed duplicate/overlapping Payment Status dialog: $message');
+      debugPrint(
+        '[SUBSCRIPTION] Suppressed duplicate/overlapping Payment Status dialog: $message',
+      );
       return;
     }
 
@@ -1173,7 +1300,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     if (_lastShownErrorMessage == message &&
         _lastShownErrorTime != null &&
         now.difference(_lastShownErrorTime!).inMilliseconds < 1500) {
-      debugPrint('[SUBSCRIPTION] Debounced identical Payment Status dialog: $message');
+      debugPrint(
+        '[SUBSCRIPTION] Debounced identical Payment Status dialog: $message',
+      );
       return;
     }
 
@@ -1182,25 +1311,33 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     _lastShownErrorTime = now;
 
     final pendingId = Platform.isIOS ? _pendingApplePlanId : _pendingPlanId;
-    final allPlans = _getEffectivePlans(context.read<SubscriptionProvider>().plans);
+    final allPlans = _getEffectivePlans(
+      context.read<SubscriptionProvider>().plans,
+    );
     final plan = allPlans.firstWhere(
-          (p) => p.id == pendingId,
-          orElse: () => Plan(),
-        );
+      (p) => p.id == pendingId,
+      orElse: () => Plan(),
+    );
 
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Payment Status', style: text18(fontWeight: FontWeight.w800)),
+        title: Text(
+          'Payment Status',
+          style: text18(fontWeight: FontWeight.w800),
+        ),
         content: Text(message, style: text14(color: AppColors.textSecondary)),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(dialogContext).pop();
             },
-            child: Text('Cancel', style: text14(color: AppColors.textSecondary)),
+            child: Text(
+              'Cancel',
+              style: text14(color: AppColors.textSecondary),
+            ),
           ),
           if (showTryAgain && plan.id != null)
             ElevatedButton(
@@ -1210,7 +1347,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
               child: Text('Try Again', style: text14(color: Colors.white)),
             ),
@@ -1247,101 +1386,112 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       },
       child: Scaffold(
         backgroundColor: Colors.white,
-      body: Column(
-        children: [
-          _buildTopBar(context),
-          _buildActiveSubscription(provider),
-          Expanded(
-            child: provider.isLoading && provider.plans.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : provider.error != null && displayPlans.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.error_outline_rounded,
-                                size: 48,
-                                color: AppColors.error,
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                provider.error!,
-                                textAlign: TextAlign.center,
-                                style: text14(color: AppColors.textSecondary),
-                              ),
-                              const SizedBox(height: 16),
-                              ElevatedButton(
-                                onPressed: _loadPlansAndStatus,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.primary,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
+        body: Column(
+          children: [
+            _buildTopBar(context),
+            _buildActiveSubscription(provider),
+            if (provider.isStatusLoading &&
+                provider.currentSubscription != null)
+              const LinearProgressIndicator(minHeight: 2),
+            Expanded(
+              child: provider.isPlanLoading && provider.plans.isEmpty
+                  ? const Center(child: CircularProgressIndicator())
+                  : provider.error != null && displayPlans.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.error_outline_rounded,
+                              size: 48,
+                              color: AppColors.error,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              provider.error!,
+                              textAlign: TextAlign.center,
+                              style: text14(color: AppColors.textSecondary),
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton(
+                              onPressed: _loadPlansAndStatus,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primary,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
-                                child: Text('Retry', style: text14(color: Colors.white)),
                               ),
-                            ],
-                          ),
+                              child: Text(
+                                'Retry',
+                                style: text14(color: Colors.white),
+                              ),
+                            ),
+                          ],
                         ),
-                      )
-                    : displayPlans.isEmpty
-                        ? RefreshIndicator(
-                            onRefresh: () async {
-                              await _loadPlansAndStatus();
-                            },
-                            child: LayoutBuilder(
-                              builder: (context, constraints) => SingleChildScrollView(
-                                physics: const AlwaysScrollableScrollPhysics(),
-                                child: ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    minHeight: constraints.maxHeight,
-                                  ),
-                                  child: Center(
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.info_outline_rounded,
-                                            size: 48,
-                                            color: AppColors.grey400,
-                                          ),
-                                          const SizedBox(height: 12),
-                                          Text(
-                                            'No subscription plans available at this time.',
-                                            textAlign: TextAlign.center,
-                                            style: text14(color: AppColors.textSecondary),
-                                          ),
-                                        ],
+                      ),
+                    )
+                  : displayPlans.isEmpty
+                  ? RefreshIndicator(
+                      onRefresh: () async {
+                        await _loadPlansAndStatus();
+                      },
+                      child: LayoutBuilder(
+                        builder: (context, constraints) => SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              minHeight: constraints.maxHeight,
+                            ),
+                            child: Center(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.info_outline_rounded,
+                                      size: 48,
+                                      color: AppColors.grey400,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      'No subscription plans available at this time.',
+                                      textAlign: TextAlign.center,
+                                      style: text14(
+                                        color: AppColors.textSecondary,
                                       ),
                                     ),
-                                  ),
+                                  ],
                                 ),
                               ),
                             ),
-                          )
-                        : RefreshIndicator(
-                            onRefresh: () async {
-                              await _loadPlansAndStatus();
-                            },
-                            child: ListView.builder(
-                              padding: const EdgeInsets.only(top: 14, bottom: 8),
-                              itemCount: displayPlans.length + (Platform.isIOS ? 1 : 0),
-                              itemBuilder: (_, i) {
-                                if (i < displayPlans.length) {
-                                  return _buildPlanCard(displayPlans[i], provider);
-                                }
-                                return _buildAppleSubscriptionDisclosures();
-                              },
-                            ),
                           ),
-          ),
-        ],
-      ),
+                        ),
+                      ),
+                    )
+                  : RefreshIndicator(
+                      onRefresh: () async {
+                        await _loadPlansAndStatus();
+                      },
+                      child: ListView.builder(
+                        padding: const EdgeInsets.only(top: 14, bottom: 8),
+                        itemCount:
+                            displayPlans.length + (Platform.isIOS ? 1 : 0),
+                        itemBuilder: (_, i) {
+                          if (i < displayPlans.length) {
+                            return _buildPlanCard(displayPlans[i], provider);
+                          }
+                          return _buildAppleSubscriptionDisclosures();
+                        },
+                      ),
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1381,11 +1531,16 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
             TextButton(
               onPressed: _isPurchasing ? null : _restorePurchases,
               style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 backgroundColor: Colors.white.withValues(alpha: 0.18),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
               child: Text(
                 'Restore',
@@ -1421,24 +1576,46 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     final int level = sub.getEffectiveLevel(_getEffectivePlans(provider.plans));
     final String levelLabel = level == 1
         ? 'Tier 1 • Weekly'
-        : (level == 2 ? 'Tier 2 • Monthly' : (level == 3 ? 'Tier 3 • Yearly' : 'Tier $level'));
+        : (level == 2
+              ? 'Tier 2 • Monthly'
+              : (level == 3 ? 'Tier 3 • Yearly' : 'Tier $level'));
 
-    final String expiryText = provider.remainingDays != null && provider.remainingDays! > 0
-        ? 'Expires in ${provider.remainingDays} days'
-        : 'Expired';
+    DateTime? expiry;
+    if (sub.endDate != null && sub.endDate!.isNotEmpty) {
+      expiry = DateTime.tryParse(sub.endDate!);
+    }
+    final String expiryText = formatSubscriptionExpiry(
+      expiry,
+      fallbackRemainingDays: provider.remainingDays,
+    );
 
     String? formattedEndDate;
     if (sub.endDate != null && sub.endDate!.isNotEmpty) {
       try {
         final dt = DateTime.parse(sub.endDate!).toLocal();
-        final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        final months = [
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
+        ];
         formattedEndDate = '${dt.day} ${months[dt.month - 1]} ${dt.year}';
       } catch (_) {
         formattedEndDate = sub.endDate;
       }
     }
 
-    final bool isStillValid = sub.isCurrentlyValid(remainingDays: provider.remainingDays);
+    final bool isStillValid = sub.isCurrentlyValid(
+      remainingDays: provider.remainingDays,
+    );
 
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 14, 20, 2),
@@ -1447,7 +1624,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         color: isStillValid ? const Color(0xFFFFF0E8) : const Color(0xFFF9F9F9),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isStillValid ? AppColors.primary.withValues(alpha: 0.3) : AppColors.grey300,
+          color: isStillValid
+              ? AppColors.primary.withValues(alpha: 0.3)
+              : AppColors.grey300,
         ),
       ),
       child: Column(
@@ -1458,18 +1637,29 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
             children: [
               Row(
                 children: [
-                  Text('ACTIVE PLAN',
-                      style: text12(color: AppColors.primary, fontWeight: FontWeight.w800)),
+                  Text(
+                    'ACTIVE PLAN',
+                    style: text12(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.primary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       levelLabel,
-                      style: text10(color: AppColors.primary, fontWeight: FontWeight.w700),
+                      style: text10(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -1493,49 +1683,80 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
             ],
           ),
           const SizedBox(height: 8),
-          Text(planName, style: text18(fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
+          Text(
+            planName,
+            style: text18(
+              fontWeight: FontWeight.w900,
+              color: AppColors.textPrimary,
+            ),
+          ),
           const SizedBox(height: 4),
           Row(
             children: [
-              Text(expiryText, style: text13(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+              Text(
+                expiryText,
+                style: text13(
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               if (formattedEndDate != null) ...[
-                Text(' • Ends on $formattedEndDate',
-                    style: text12(color: AppColors.grey500)),
+                Text(
+                  ' • Ends on $formattedEndDate',
+                  style: text12(color: AppColors.grey500),
+                ),
               ],
             ],
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 36,
-            child: OutlinedButton(
+          if (Platform.isIOS)
+            Text(
+              'This purchase does not renew automatically.',
+              style: text12(color: AppColors.textSecondary),
+            )
+          else
+            SizedBox(
+              width: double.infinity,
+              height: 36,
+              child: OutlinedButton(
               onPressed: provider.isLoading
                   ? null
                   : () async {
-                      if (Platform.isIOS) {
-                        await _manageAppleSubscription();
-                      } else {
-                        final success = await provider.cancelSubscription();
-                        if (success && mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Subscription Cancelled Successfully')));
-                        } else if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(provider.error ?? 'Failed to cancel subscription')));
-                        }
+                      final success = await provider.cancelSubscription();
+                      if (success && mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Plan cancelled successfully'),
+                          ),
+                        );
+                      } else if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              provider.error ?? 'Failed to cancel plan',
+                            ),
+                          ),
+                        );
                       }
                     },
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: AppColors.error),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
-              child: provider.isLoading
-                  ? const SizedBox(
-                      width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text(Platform.isIOS ? 'Manage Subscription' : 'Cancel Plan',
-                      style: text12(color: AppColors.error)),
+                child: provider.isLoading
+                    ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                    : Text(
+                        'Cancel Plan',
+                        style: text12(color: AppColors.error),
+                      ),
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -1568,7 +1789,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                   color: AppColors.primary.withValues(alpha: 0.08),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
-                )
+                ),
               ]
             : null,
       ),
@@ -1606,40 +1827,59 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                               if (actionType == PlanActionType.current) ...[
                                 const SizedBox(width: 8),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 2,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: AppColors.grey500,
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Text(
                                     'CURRENT PLAN',
-                                    style: text10(color: Colors.white, fontWeight: FontWeight.w800),
+                                    style: text10(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                 ),
-                              ] else if (actionType == PlanActionType.upgrade) ...[
+                              ] else if (actionType ==
+                                  PlanActionType.upgrade) ...[
                                 const SizedBox(width: 8),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 2,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: const Color(0xFF1B873F),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Text(
                                     'UPGRADE',
-                                    style: text10(color: Colors.white, fontWeight: FontWeight.w800),
+                                    style: text10(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                 ),
                               ] else if (plan.isRecommended == true) ...[
                                 const SizedBox(width: 8),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 2,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: AppColors.primary,
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Text(
                                     'RECOMMENDED',
-                                    style: text10(color: Colors.white, fontWeight: FontWeight.w800),
+                                    style: text10(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -1648,7 +1888,10 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                           const SizedBox(height: 3),
                           Text(
                             _getPlanSubtitle(plan),
-                            style: text11(color: AppColors.grey500, fontWeight: FontWeight.w500),
+                            style: text11(
+                              color: AppColors.grey500,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ],
                       ),
@@ -1674,7 +1917,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
             AnimatedCrossFade(
               firstChild: const SizedBox(width: double.infinity),
               secondChild: _buildPlanBody(plan, provider, actionType),
-              crossFadeState: isOpen ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+              crossFadeState: isOpen
+                  ? CrossFadeState.showSecond
+                  : CrossFadeState.showFirst,
               duration: const Duration(milliseconds: 250),
             ),
           ],
@@ -1690,42 +1935,34 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       if (product != null && product.price.isNotEmpty) {
         return Text(
           product.price,
-          style: text16(
-            color: AppColors.primary,
-            fontWeight: FontWeight.w900,
-          ),
+          style: text16(color: AppColors.primary, fontWeight: FontWeight.w900),
           textAlign: TextAlign.end,
         );
       }
-      // If product has been queried and was not found or is unavailable, show stable Unavailable
-      if (IapService.instance.isProductNotFound(productId) ||
-          (IapService.instance.isProductQueried(productId) && product == null)) {
+      final productState = IapService.instance.productState(productId);
+      if (productState == IapProductState.productNotFound) {
         return Text(
           'Unavailable',
-          style: text13(
-            color: AppColors.grey500,
-            fontWeight: FontWeight.w600,
-          ),
+          style: text13(color: AppColors.grey500, fontWeight: FontWeight.w600),
           textAlign: TextAlign.end,
         );
       }
-      // On iOS, never fall back to backend/website price (₹).
-      // Display neutral loading state while StoreKit query is actively in progress.
+      if (productState == IapProductState.queryError ||
+          productState == IapProductState.storeKitUnavailable) {
+        return Text(
+          'Tap Retry below',
+          style: text13(color: AppColors.grey500, fontWeight: FontWeight.w600),
+        );
+      }
       return Text(
         'Loading...',
-        style: text13(
-          color: AppColors.grey500,
-          fontWeight: FontWeight.w600,
-        ),
+        style: text13(color: AppColors.grey500, fontWeight: FontWeight.w600),
         textAlign: TextAlign.end,
       );
     }
     return Text(
       '₹ ${plan.price}',
-      style: text16(
-        color: AppColors.primary,
-        fontWeight: FontWeight.w900,
-      ),
+      style: text16(color: AppColors.primary, fontWeight: FontWeight.w900),
       textAlign: TextAlign.end,
     );
   }
@@ -1741,33 +1978,58 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     final ProductDetails? appleProduct = Platform.isIOS
         ? IapService.instance.getProduct(plan.effectiveAppleProductId)
         : null;
-    final bool isProductLoading = Platform.isIOS &&
-        !IapService.instance.isProductQueried(plan.effectiveAppleProductId);
-    final bool isProductUnavailable = Platform.isIOS &&
-        !isProductLoading &&
-        (IapService.instance.isProductNotFound(plan.effectiveAppleProductId) ||
-         appleProduct == null);
+    final productState = IapService.instance.productState(
+      plan.effectiveAppleProductId,
+    );
+    final bool isProductLoading =
+        Platform.isIOS &&
+        (productState == IapProductState.notStarted ||
+            productState == IapProductState.loading) &&
+        appleProduct == null;
+    final bool isProductUnavailable =
+        Platform.isIOS && productState == IapProductState.productNotFound;
+    final bool isProductQueryError =
+        Platform.isIOS &&
+        (productState == IapProductState.queryError ||
+            productState == IapProductState.storeKitUnavailable);
 
     final bool isDowngrade = actionType == PlanActionType.downgrade;
     final bool isCurrent = actionType == PlanActionType.current;
     final bool isUpgrade = actionType == PlanActionType.upgrade;
 
-    final bool isButtonDisabled = isCurrent ||
-        isDowngrade ||
-        provider.isLoading ||
-        _isPurchasing ||
-        _isProcessingPayment ||
-        isProductUnavailable ||
-        isProductLoading;
+    final bool isButtonDisabled = Platform.isIOS
+        ? !canStartApplePlanPurchase(
+            hasLoadedProduct: appleProduct != null,
+            isPlanValid:
+                plan.id != null &&
+                plan.id!.isNotEmpty &&
+                plan.id != 'weekly' &&
+                plan.id != 'monthly' &&
+                plan.id != 'yearly',
+            isPlanLoading: provider.isPlanLoading,
+            isPurchaseLoading:
+                provider.isPurchaseLoading ||
+                _isPurchasing ||
+                _isRestoring ||
+                _isProcessingPayment,
+            isProductLoading: isProductLoading,
+            isProductUnavailable: isProductUnavailable,
+            isCurrentPlan: isCurrent,
+            isDowngrade: isDowngrade,
+          )
+        : isCurrent ||
+              isDowngrade ||
+              provider.isPlanLoading ||
+              provider.isLoading ||
+              provider.isPurchaseLoading ||
+              _isPurchasing ||
+              _isProcessingPayment;
     final String description = _getPlanDescription(plan);
-    final currentPlanName = provider.currentSubscription?.planName ?? 'Premium';
 
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFFFFF5F0),
-        border: Border(
-          top: BorderSide(color: Color(0xFFFFE0D1), width: 0.8),
-        ),
+        border: Border(top: BorderSide(color: Color(0xFFFFE0D1), width: 0.8)),
       ),
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
       child: Column(
@@ -1785,12 +2047,19 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.info_outline_rounded, color: Color(0xFF856404), size: 18),
+                  const Icon(
+                    Icons.info_outline_rounded,
+                    color: Color(0xFF856404),
+                    size: 18,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'You already have an active $currentPlanName plan. You cannot switch to a lower plan until your current subscription expires.',
-                      style: text12(color: const Color(0xFF856404), fontWeight: FontWeight.w600),
+                      _getDowngradeRestrictionMessage(provider),
+                      style: text12(
+                        color: const Color(0xFF856404),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -1817,31 +2086,50 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
               crossAxisSpacing: 8,
               mainAxisSpacing: 8,
               children: plan.features!
-                  .map((f) => Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 16),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              f,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: text12(
-                                color: const Color(0xFF993C1D),
-                                fontWeight: FontWeight.w700,
-                              ),
+                  .map(
+                    (f) => Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.check_circle_rounded,
+                          color: AppColors.primary,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            f,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: text12(
+                              color: const Color(0xFF993C1D),
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                        ],
-                      ))
+                        ),
+                      ],
+                    ),
+                  )
                   .toList(),
             ),
           const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: isButtonDisabled
+              onPressed:
+                  isProductQueryError &&
+                      appleProduct == null &&
+                      !provider.isPlanLoading &&
+                      !provider.isPurchaseLoading &&
+                      !_isPurchasing &&
+                      !_isProcessingPayment
+                  ? () async {
+                      await IapService.instance.loadProducts({
+                        plan.effectiveAppleProductId,
+                      });
+                      if (mounted) setState(() {});
+                    }
+                  : isButtonDisabled
                   ? null
                   : () {
                       if (isUpgrade) {
@@ -1851,28 +2139,45 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                       }
                     },
               style: ElevatedButton.styleFrom(
-                backgroundColor: isCurrent || isDowngrade || isProductUnavailable
+                backgroundColor:
+                    isCurrent || isDowngrade || isProductUnavailable
                     ? AppColors.grey400
                     : (isUpgrade ? const Color(0xFF1B873F) : AppColors.primary),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 elevation: 0,
               ),
               child: isThisPlanPurchasing
                   ? const SizedBox(
-                      width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
                   : Text(
                       isCurrent
                           ? 'Current Plan'
                           : (isDowngrade
-                              ? 'Downgrade Not Allowed'
-                              : (isUpgrade
-                                  ? 'Upgrade Plan'
-                                  : (isProductLoading
-                                      ? 'Loading...'
-                                      : (isProductUnavailable ? 'Unavailable' : 'Subscribe Now')))),
-                      style: text14(color: Colors.white, fontWeight: FontWeight.w800)),
+                                ? 'Downgrade Not Allowed'
+                                : (isUpgrade
+                                      ? 'Upgrade Plan'
+                                      : (isProductLoading
+                                            ? 'Loading...'
+                                            : (isProductUnavailable
+                                                  ? 'Unavailable'
+                                                  : (isProductQueryError
+                                                        ? 'Retry'
+                                                        : 'Subscribe Now'))))),
+                      style: text14(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
             ),
           ),
         ],
@@ -1882,8 +2187,14 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
 
   /// Apple App Store required subscription disclosures and legal links
   Widget _buildAppleSubscriptionDisclosures() {
-    final linkStyle = text12(color: AppColors.primary, fontWeight: FontWeight.w600);
-    final dotStyle = text12(color: AppColors.grey400, fontWeight: FontWeight.w600);
+    final linkStyle = text12(
+      color: AppColors.primary,
+      fontWeight: FontWeight.w600,
+    );
+    final dotStyle = text12(
+      color: AppColors.grey400,
+      fontWeight: FontWeight.w600,
+    );
     final btnStyle = TextButton.styleFrom(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       minimumSize: Size.zero,
@@ -1891,11 +2202,16 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     );
 
     return Padding(
-      padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).padding.bottom + 20),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        16,
+        20,
+        MediaQuery.of(context).padding.bottom + 20,
+      ),
       child: Column(
         children: [
           Text(
-            'Payment will be charged to your Apple Account at confirmation of purchase. Subscription automatically renews unless canceled at least 24 hours before the end of the current period. You can manage or cancel your subscription in your Apple Account settings.',
+            'Payment will be charged to your Apple Account when you confirm. This is a one-time purchase for the validity shown on the selected plan and does not automatically renew. Premium access ends on the displayed expiry date; purchase again manually to continue. Restore can recover only the remaining validity of an eligible unexpired purchase. Expired purchases do not restore access.',
             textAlign: TextAlign.center,
             style: text11(color: AppColors.grey500),
           ),
@@ -1911,7 +2227,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => const PolicyScreen(type: 'terms-conditions'),
+                            builder: (_) =>
+                                const PolicyScreen(type: 'terms-conditions'),
                           ),
                         );
                       },
@@ -1927,7 +2244,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => const PolicyScreen(type: 'privacy-policy'),
+                            builder: (_) =>
+                                const PolicyScreen(type: 'privacy-policy'),
                           ),
                         );
                       },
@@ -1959,7 +2277,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => const PolicyScreen(type: 'terms-conditions'),
+                              builder: (_) =>
+                                  const PolicyScreen(type: 'terms-conditions'),
                             ),
                           );
                         },
@@ -1975,7 +2294,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => const PolicyScreen(type: 'privacy-policy'),
+                              builder: (_) =>
+                                  const PolicyScreen(type: 'privacy-policy'),
                             ),
                           );
                         },

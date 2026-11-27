@@ -19,7 +19,9 @@ class VerificationRepository {
     if (kDebugMode) {
       final token = HiveService.getToken();
       final Map<String, dynamic> safeHeaders = {
-        'Authorization': token != null && token.isNotEmpty ? '[REDACTED]' : '[REDACTED]',
+        'Authorization': token != null && token.isNotEmpty
+            ? '[REDACTED]'
+            : '[REDACTED]',
       };
       debugPrint('$marker ════════════════════════════════════');
       debugPrint('$marker 📡 BLUE TICK PLAN API REQUEST');
@@ -59,7 +61,9 @@ class VerificationRepository {
         if (e is DioException && e.response?.statusCode != null) {
           statusCode = e.response!.statusCode.toString();
         } else {
-          final match = RegExp(r'status code\s*:\s*(\d+)').firstMatch(e.toString());
+          final match = RegExp(
+            r'status code\s*:\s*(\d+)',
+          ).firstMatch(e.toString());
           if (match != null) {
             statusCode = match.group(1)!;
           }
@@ -68,7 +72,9 @@ class VerificationRepository {
         String prettyError;
         try {
           if (e is DioException && e.response?.data != null) {
-            prettyError = const JsonEncoder.withIndent('  ').convert(e.response!.data);
+            prettyError = const JsonEncoder.withIndent(
+              '  ',
+            ).convert(e.response!.data);
           } else {
             prettyError = e.toString();
           }
@@ -98,7 +104,9 @@ class VerificationRepository {
     if (kDebugMode) {
       final token = HiveService.getToken();
       final Map<String, dynamic> safeHeaders = {
-        'Authorization': token != null && token.isNotEmpty ? 'Bearer [REDACTED]' : '[REDACTED]',
+        'Authorization': token != null && token.isNotEmpty
+            ? 'Bearer [REDACTED]'
+            : '[REDACTED]',
       };
       debugPrint('$marker ════════════════════════════════════');
       debugPrint('$marker 📡 ORANGE TICK PLAN API REQUEST');
@@ -138,7 +146,9 @@ class VerificationRepository {
         if (e is DioException && e.response?.statusCode != null) {
           statusCode = e.response!.statusCode.toString();
         } else {
-          final match = RegExp(r'status code\s*:\s*(\d+)').firstMatch(e.toString());
+          final match = RegExp(
+            r'status code\s*:\s*(\d+)',
+          ).firstMatch(e.toString());
           if (match != null) {
             statusCode = match.group(1)!;
           }
@@ -147,7 +157,9 @@ class VerificationRepository {
         String prettyError;
         try {
           if (e is DioException && e.response?.data != null) {
-            prettyError = const JsonEncoder.withIndent('  ').convert(e.response!.data);
+            prettyError = const JsonEncoder.withIndent(
+              '  ',
+            ).convert(e.response!.data);
           } else {
             prettyError = e.toString();
           }
@@ -176,7 +188,9 @@ class VerificationRepository {
     if (kDebugMode) {
       final token = HiveService.getToken();
       final Map<String, dynamic> safeHeaders = {
-        'Authorization': token != null && token.isNotEmpty ? 'Bearer [REDACTED]' : '[REDACTED]',
+        'Authorization': token != null && token.isNotEmpty
+            ? 'Bearer [REDACTED]'
+            : '[REDACTED]',
       };
 
       final Map<String, String> fieldMap = {
@@ -195,31 +209,30 @@ class VerificationRepository {
       debugPrint('$marker URL: $url');
       debugPrint('$marker Headers: $safeHeaders');
       debugPrint('$marker Body fields:');
-      debugPrint('$marker - fullName: ${fieldMap['fullName'] ?? '-'}');
-      debugPrint('$marker - username: ${fieldMap['username'] ?? '-'}');
-      debugPrint('$marker - governmentIdType: ${fieldMap['governmentIdType'] ?? '-'}');
-      debugPrint('$marker - governmentIdNumber: ${maskIdNumber(fieldMap['governmentIdNumber'])}');
+      debugPrint('$marker - fullName: [REDACTED]');
+      debugPrint('$marker - username: [REDACTED]');
+      debugPrint(
+        '$marker - governmentIdType: ${fieldMap['governmentIdType'] ?? '-'}',
+      );
+      debugPrint(
+        '$marker - governmentIdNumber: ${maskIdNumber(fieldMap['governmentIdNumber'])}',
+      );
       debugPrint('$marker - planId: ${fieldMap['planId'] ?? '-'}');
-      debugPrint('$marker - website: ${fieldMap['website'] ?? '-'}');
-      debugPrint('$marker - instagram: ${fieldMap['instagram'] ?? '-'}');
-      debugPrint('$marker - facebook: ${fieldMap['facebook'] ?? '-'}');
-      debugPrint('$marker - youtube: ${fieldMap['youtube'] ?? '-'}');
-      debugPrint('$marker - twitter: ${fieldMap['twitter'] ?? '-'}');
-      debugPrint('$marker - linkedin: ${fieldMap['linkedin'] ?? '-'}');
-      debugPrint('$marker - reason: ${fieldMap['reason'] ?? '-'}');
+      debugPrint('$marker - website/social links: [REDACTED]');
+      debugPrint('$marker - reason: [REDACTED]');
       debugPrint('$marker - confirmation: ${fieldMap['confirmation'] ?? '-'}');
-      if (fieldMap.containsKey('paymentId')) {
-        debugPrint('$marker - paymentId: ${fieldMap['paymentId']}');
-      }
-      if (fieldMap.containsKey('transactionId')) {
-        debugPrint('$marker - transactionId: ${fieldMap['transactionId']}');
-      }
-      if (fieldMap.containsKey('orderId')) {
-        debugPrint('$marker - orderId: ${fieldMap['orderId']}');
+      if (fieldMap.containsKey('paymentId') ||
+          fieldMap.containsKey('transactionId') ||
+          fieldMap.containsKey('orderId')) {
+        debugPrint(
+          '$marker - payment/transaction/order identifiers: [REDACTED]',
+        );
       }
       debugPrint('$marker Files:');
       for (final file in data.files) {
-        debugPrint('$marker - ${file.key} (${file.value.filename})');
+        debugPrint(
+          '$marker - ${file.key} ([FILENAME REDACTED], ${file.value.length} bytes)',
+        );
       }
       debugPrint('$marker ════════════════════════════════════');
     }
@@ -267,7 +280,9 @@ class VerificationRepository {
         String prettyBody;
         try {
           if (responseData != null) {
-            prettyBody = const JsonEncoder.withIndent('  ').convert(responseData);
+            prettyBody = const JsonEncoder.withIndent(
+              '  ',
+            ).convert(responseData);
           } else {
             prettyBody = e.toString();
           }
@@ -276,10 +291,11 @@ class VerificationRepository {
         }
 
         final safeRespHeaders = responseHeaders != null
-            ? (Map<String, dynamic>.from(responseHeaders)
-              ..removeWhere((k, _) {
+            ? (Map<String, dynamic>.from(responseHeaders)..removeWhere((k, _) {
                 final lower = k.toLowerCase();
-                return lower.contains('auth') || lower.contains('cookie') || lower.contains('token');
+                return lower.contains('auth') ||
+                    lower.contains('cookie') ||
+                    lower.contains('token');
               }))
             : null;
 
@@ -311,7 +327,10 @@ class VerificationRepository {
 
   Future<dynamic> updateVerification(FormData data) async {
     try {
-      dynamic response = await _apiService.putApi(AppUrl.updateVerification, data);
+      dynamic response = await _apiService.putApi(
+        AppUrl.updateVerification,
+        data,
+      );
       return response;
     } catch (e) {
       rethrow;

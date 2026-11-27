@@ -48,6 +48,62 @@ class VerificationProvider extends ChangeNotifier {
   bool get isAlreadyPending => _isAlreadyPending;
   dynamic get lastErrorData => _lastErrorData;
 
+  /// Checks if a verification status string represents an active pending / under-review state.
+  static bool isPendingStatus(String? status) {
+    if (status == null || status.trim().isEmpty) return false;
+    final upper = status.trim().toUpperCase();
+    return upper == 'PENDING' ||
+        upper == 'UNDER_REVIEW' ||
+        upper == 'IN_REVIEW' ||
+        upper == 'PROCESSING';
+  }
+
+  /// Verifies that an application has a valid server-assigned ID and is in an eligible pending status for editing.
+  static bool isEligibleForEdit(VerificationApplication? app) {
+    if (app == null) return false;
+    final id = app.id?.trim();
+    if (id == null || id.isEmpty) return false;
+    return isPendingStatus(app.status);
+  }
+
+  /// Checks whether an error represents a 404 or missing pending request error.
+  static bool isNoPendingRequestError(dynamic error) {
+    if (error == null) return false;
+    final String msg = (error is AppException
+            ? error.message
+            : error is DioException
+                ? (error.response?.data is Map
+                    ? error.response?.data['message']?.toString()
+                    : error.message)
+                : error is Map
+                    ? (error['message'] ?? error['error'])?.toString()
+                    : error.toString()) ??
+        '';
+    final lower = msg.toLowerCase();
+    return lower.contains('no pending verification') ||
+        lower.contains('no pending request') ||
+        (lower.contains('pending') && lower.contains('not found')) ||
+        (lower.contains('no') && lower.contains('verification request') && lower.contains('update'));
+  }
+
+  /// Explicitly resets application state.
+  void clearApplication() {
+    _currentApplication = null;
+    _rawStatus = null;
+    _isVerified = null;
+    _error = null;
+    _statusError = null;
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  void setCurrentApplicationForTesting(VerificationApplication? app) {
+    _currentApplication = app;
+    _rawStatus = app?.status;
+    _isInitialStatusLoaded = true;
+    notifyListeners();
+  }
+
   String get effectiveStatus {
     // 1. If backend explicitly reports isVerified == true
     if (_isVerified == true) return 'VERIFIED';
@@ -255,9 +311,9 @@ class VerificationProvider extends ChangeNotifier {
         } else {
           _currentApplication = response.application;
         }
-      } else if (_currentApplication != null && response.status != null) {
-        // Status endpoint omitted application details: update status on existing application
-        _currentApplication = _currentApplication!.copyWith(status: response.status);
+      } else {
+        // Explicitly clear stale application when server has no application record.
+        _currentApplication = null;
       }
 
       _rawStatus = response.status ?? _currentApplication?.status;
@@ -506,7 +562,36 @@ class VerificationProvider extends ChangeNotifier {
         return false;
       }
     } catch (e) {
-      _error = e.toString();
+      int? statusCode;
+      dynamic errorData;
+      String errorMsg = e.toString();
+
+      if (e is AppException) {
+        statusCode = e.statusCode;
+        errorData = e.data;
+        errorMsg = e.message;
+      } else if (e is DioException) {
+        statusCode = e.response?.statusCode;
+        errorData = e.response?.data;
+        errorMsg = e.message ?? e.toString();
+      }
+
+      _lastErrorData = errorData;
+      final bool is404NoPending =
+          statusCode == 404 || isNoPendingRequestError(errorData ?? e);
+
+      if (is404NoPending) {
+        debugPrint(
+          '[ORANGE_TICK_FLOW] Update returned 404/No pending request. Refreshing verification status.',
+        );
+        _error =
+            'No pending verification request was found to update. Your application status may have changed.';
+        try {
+          await fetchVerificationStatus(forceRefresh: true);
+        } catch (_) {}
+      } else {
+        _error = errorMsg;
+      }
       return false;
     } finally {
       _isUpdatingVerification = false;

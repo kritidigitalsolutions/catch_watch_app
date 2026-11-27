@@ -1,4 +1,5 @@
 import 'package:catch_watch/models/content_model.dart';
+import 'package:catch_watch/models/live_match_model.dart';
 import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/views/after_login_pages/movie_details_screen.dart';
@@ -28,6 +29,31 @@ class EntitlementHelper {
     if (subscription == null) return false;
 
     // Explicitly reject non-entitled statuses: inactive, pending, failed, created
+    final status = (subscription.status ?? '').toLowerCase().trim();
+    if (status == 'inactive' ||
+        status == 'pending' ||
+        status == 'failed' ||
+        status == 'created') {
+      return false;
+    }
+
+    return subscription.isCurrentlyValid(
+      remainingDays: subProvider.remainingDays,
+    );
+  }
+
+  /// Returns `true` when [match] is watchable by the current user.
+  ///
+  /// Free live matches (or matches where `isPremium` is not true) are always watchable.
+  /// Premium matches require an active, non-expired subscription.
+  /// Note: The existing [canWatch] method remains completely untouched.
+  static bool canWatchLiveMatch(BuildContext context, LiveMatchModel match) {
+    if (match.isPremium != true) return true;
+
+    final subProvider = context.read<SubscriptionProvider>();
+    final subscription = subProvider.currentSubscription;
+    if (subscription == null) return false;
+
     final status = (subscription.status ?? '').toLowerCase().trim();
     if (status == 'inactive' ||
         status == 'pending' ||

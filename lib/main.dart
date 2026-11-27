@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:catch_watch/data/network/notification_service.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -12,6 +14,7 @@ import 'package:catch_watch/views/before_login_Pages/onboarding_screen.dart';
 import 'package:catch_watch/views/before_login_Pages/login_screen.dart';
 import 'package:catch_watch/views/before_login_Pages/splash_screen.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
+import 'package:catch_watch/services/iap_service.dart';
 import 'package:catch_watch/utils/text_style.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -34,11 +37,21 @@ import 'package:catch_watch/view_model/after_login_provider/chat_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/report_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/block_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/live_cricket_provider.dart';
 import 'package:catch_watch/views/after_login_pages/message/call_overlay.dart';
 import 'package:cryptography_flutter/cryptography_flutter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isIOS) {
+    try {
+      IapService.instance.ensurePurchaseStreamInitialized();
+    } catch (error) {
+      debugPrint(
+        '[IAP] Startup listener initialization failed (${error.runtimeType}).',
+      );
+    }
+  }
   FlutterCryptography.enable();
 
   if (kDebugMode) {
@@ -73,10 +86,9 @@ void main() async {
       if (kDebugMode) {
         debugPrint('❌ [STARTUP] HiveService initialization error: $e\n$stack');
       }
-      runApp(StartupErrorApp(
-        errorMessage: e.toString(),
-        onRetry: () => main(),
-      ));
+      runApp(
+        StartupErrorApp(errorMessage: e.toString(), onRetry: () => main()),
+      );
       return;
     }
 
@@ -117,6 +129,7 @@ void main() async {
           ChangeNotifierProvider(create: (_) => CallProvider()),
           ChangeNotifierProvider(create: (_) => ReportProvider()),
           ChangeNotifierProvider(create: (_) => BlockProvider()),
+          ChangeNotifierProvider(create: (_) => LiveCricketProvider()),
         ],
         child: const MyApp(),
       ),
@@ -124,31 +137,41 @@ void main() async {
 
     // Initialize notification service asynchronously so APNs token queries and
     // permission requests never block the main thread or delay initial frame rendering.
-    NotificationService.init().then((_) {
-      if (kDebugMode) {
-        debugPrint('🔔 [STARTUP] Async NotificationService init completed');
-      }
-    }).catchError((e) {
-      if (kDebugMode) {
-        debugPrint('⚠️ [STARTUP] NotificationService initialization warning: $e');
-      }
-    });
+    NotificationService.init()
+        .then((_) {
+          if (kDebugMode) {
+            debugPrint('🔔 [STARTUP] Async NotificationService init completed');
+          }
+        })
+        .catchError((e) {
+          if (kDebugMode) {
+            debugPrint(
+              '⚠️ [STARTUP] NotificationService initialization warning: $e',
+            );
+          }
+        });
 
     try {
-      FirebaseMessaging.onBackgroundMessage(NotificationService.backgroundHandler);
+      FirebaseMessaging.onBackgroundMessage(
+        NotificationService.backgroundHandler,
+      );
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('⚠️ [STARTUP] Firebase background messaging handler registration warning: $e');
+        debugPrint(
+          '⚠️ [STARTUP] Firebase background messaging handler registration warning: $e',
+        );
       }
     }
   } catch (fatalError, fatalStack) {
     if (kDebugMode) {
       debugPrint('❌ [STARTUP] Fatal startup error: $fatalError\n$fatalStack');
     }
-    runApp(StartupErrorApp(
-      errorMessage: fatalError.toString(),
-      onRetry: () => main(),
-    ));
+    runApp(
+      StartupErrorApp(
+        errorMessage: fatalError.toString(),
+        onRetry: () => main(),
+      ),
+    );
   }
 }
 
@@ -160,7 +183,10 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      navigatorKey: Provider.of<CallProvider>(context, listen: false).navigatorKey,
+      navigatorKey: Provider.of<CallProvider>(
+        context,
+        listen: false,
+      ).navigatorKey,
       theme: ThemeData(
         textTheme: GoogleFonts.poppinsTextTheme(),
         appBarTheme: const AppBarTheme(
@@ -213,61 +239,61 @@ class MyHomePage extends StatelessWidget {
     final bool isProfile = ctr.pageIndex == 4;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-          value: SystemUiOverlayStyle(
-            statusBarColor: Colors.transparent,
-            statusBarIconBrightness: isProfile ? Brightness.light : Brightness.dark,
-            statusBarBrightness: isProfile ? Brightness.dark : Brightness.light,
-            systemNavigationBarColor: Colors.transparent,
-            systemNavigationBarIconBrightness: Brightness.dark,
-          ),
-          child: PopScope(
-            canPop: false,
-            onPopInvokedWithResult: (didPop, result) async {
-              if (didPop) return;
-              
-              if (ctr.pageIndex != 0) {
-                ctr.changePage(0);
-              } else {
-                final bool shouldExit = await _showExitDialog(context) ?? false;
-                if (shouldExit) {
-                  SystemNavigator.pop();
-                }
-              }
-            },
-            child: Scaffold(
-              appBar: isProfile
-                  ? null
-                  : AppBar(
-                      toolbarHeight: 0,
-                      backgroundColor: AppColors.white,
-                      elevation: 0,
-                      automaticallyImplyLeading: false,
-                    ),
-              backgroundColor: AppColors.white,
+      value: SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: isProfile ? Brightness.light : Brightness.dark,
+        statusBarBrightness: isProfile ? Brightness.dark : Brightness.light,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: Brightness.dark,
+      ),
+      child: PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, result) async {
+          if (didPop) return;
 
-              // Separate Bottom Navigation
-              bottomNavigationBar: SafeArea(
-                child: BottomNavBar(
-                  currentIndex: ctr.pageIndex,
-                  onTap: (index) {
-                    ctr.changePage(index);
-                  },
+          if (ctr.pageIndex != 0) {
+            ctr.changePage(0);
+          } else {
+            final bool shouldExit = await _showExitDialog(context) ?? false;
+            if (shouldExit) {
+              SystemNavigator.pop();
+            }
+          }
+        },
+        child: Scaffold(
+          appBar: isProfile
+              ? null
+              : AppBar(
+                  toolbarHeight: 0,
+                  backgroundColor: AppColors.white,
+                  elevation: 0,
+                  automaticallyImplyLeading: false,
                 ),
-              ),
-  
-              body: Consumer<HomeScreenProvider>(
-                builder: (context, p, child) {
-                  return Stack(
-                    children: [
-                      // Main Content using IndexedStack
-                      IndexedStack(index: p.pageIndex, children: p.screenPage),
-                    ],
-                  );
-                },
-              ),
+          backgroundColor: AppColors.white,
+
+          // Separate Bottom Navigation
+          bottomNavigationBar: SafeArea(
+            child: BottomNavBar(
+              currentIndex: ctr.pageIndex,
+              onTap: (index) {
+                ctr.changePage(index);
+              },
             ),
           ),
-        );
+
+          body: Consumer<HomeScreenProvider>(
+            builder: (context, p, child) {
+              return Stack(
+                children: [
+                  // Main Content using IndexedStack
+                  IndexedStack(index: p.pageIndex, children: p.screenPage),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
   }
 
   Future<bool?> _showExitDialog(BuildContext context) {
@@ -280,16 +306,16 @@ class MyHomePage extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text(
-              'No',
-              style: text14(color: AppColors.textSecondary),
-            ),
+            child: Text('No', style: text14(color: AppColors.textSecondary)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: Text(
               'Yes',
-              style: text14(color: AppColors.primary, fontWeight: FontWeight.bold),
+              style: text14(
+                color: AppColors.primary,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
@@ -342,10 +368,7 @@ class StartupErrorApp extends StatelessWidget {
                   Text(
                     'An error occurred during startup initialization.\nPlease check your connection and tap Retry.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey.shade600,
-                    ),
+                    style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton(
@@ -363,7 +386,10 @@ class StartupErrorApp extends StatelessWidget {
                     ),
                     child: const Text(
                       'Retry',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],

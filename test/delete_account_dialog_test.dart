@@ -174,7 +174,7 @@ void main() {
   });
 
   group('Delete Account Dialog Flow Scenarios', () {
-    testWidgets('Scenario A: Active subscription - User sees warning, Manage button, and acknowledgment',
+    testWidgets('Scenario A: Active purchase shows fixed-validity guidance and acknowledgment',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(800, 1400);
       addTearDown(tester.view.resetPhysicalSize);
@@ -214,17 +214,17 @@ void main() {
       // Step 2: Apple Subscription Guidance
       expect(find.text('Apple Subscription Notice'), findsOneWidget);
       expect(find.text('Active'), findsOneWidget);
-      expect(find.text('Manage Apple Subscription'), findsOneWidget);
-      expect(find.text('Important Apple Billing Guidance'), findsOneWidget);
+      expect(find.text('Manage Apple Subscription'), findsNothing);
+      expect(find.text('Apple Purchase & Access'), findsOneWidget);
       expect(
-        find.textContaining('Deleting your Catch & Watch account does not cancel your Apple subscription.'),
+        find.textContaining('This Apple purchase does not renew automatically.'),
         findsOneWidget,
       );
       expect(
-        find.textContaining('Apple will continue to charge your Apple ID on future renewal dates'),
+        find.textContaining('Access is limited to the purchased validity'),
         findsOneWidget,
       );
-      expect(find.text('Recently cancelled in Apple Settings?'), findsOneWidget);
+      expect(find.text('Recent purchase or restore?'), findsOneWidget);
 
       // Verify Continue to Deletion is disabled until acknowledgment
       final continueButton = tester.widget<ElevatedButton>(
@@ -249,7 +249,7 @@ void main() {
 
       // Step 3: Final confirmation
       expect(find.text('Delete Account'), findsNWidgets(2)); // Title and Button
-      expect(find.textContaining('Reminder: Deleting your account will NOT cancel your Apple subscription.'), findsOneWidget);
+      expect(find.textContaining('Your Apple purchase does not renew automatically.'), findsOneWidget);
       expect(find.text('What will be permanently erased'), findsOneWidget);
     });
 
@@ -315,7 +315,7 @@ void main() {
       expect(find.text('Subscription Check Failed'), findsOneWidget);
       expect(find.text('Failed to reach subscription verification service (503)'), findsOneWidget);
       expect(find.text('Retry'), findsOneWidget);
-      expect(find.text('Manage Apple Subscription'), findsOneWidget);
+      expect(find.text('Manage Apple Subscription'), findsNothing);
 
       // Verify user is NOT trapped: Checkbox allows acknowledging unverified status and continuing
       expect(find.widgetWithText(ElevatedButton, 'Continue to Deletion'), findsOneWidget);
@@ -335,7 +335,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Step 3 shows explicit warning about unverified status
-      expect(find.textContaining('Warning: Subscription status could not be verified with the server.'), findsOneWidget);
+      expect(find.textContaining('Warning: Purchase status could not be verified with the server.'), findsOneWidget);
       expect(find.widgetWithText(ElevatedButton, 'Delete Account'), findsOneWidget);
     });
 
@@ -449,7 +449,7 @@ void main() {
       expect(subProvider.fetchCallCount, greaterThan(initialFetchCount));
     });
 
-    testWidgets('Scenario G: User cancelled in Apple Settings, backend status updates to cancelledWithEntitlement',
+    testWidgets('Scenario G: Active fixed-validity entitlement remains available through expiry',
         (WidgetTester tester) async {
       final subProvider = MockSubscriptionProvider()
         ..mockSuccess = true
@@ -475,11 +475,11 @@ void main() {
       await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
 
-      // Step 2 shows "Cancelled" badge and entitled until notice
-      expect(find.text('Cancelled'), findsOneWidget);
-      expect(find.textContaining('Entitled until:'), findsOneWidget);
+      // Store cancellation status does not change remaining paid access.
+      expect(find.text('Active'), findsOneWidget);
+      expect(find.textContaining('Access ends:'), findsOneWidget);
       expect(
-        find.textContaining('Account deletion does not trigger an Apple refund for remaining paid time.'),
+        find.textContaining('Deleting your account may end access to Catch & Watch.'),
         findsOneWidget,
       );
     });
@@ -524,7 +524,7 @@ void main() {
       expect(find.text('CatchWatch Premium Monthly'), findsOneWidget);
       expect(find.text('Active'), findsOneWidget);
       expect(find.text('1 day remaining'), findsOneWidget);
-      expect(find.text('Manage Apple Subscription'), findsOneWidget);
+      expect(find.text('Manage Apple Subscription'), findsNothing);
       expect(find.byType(Checkbox), findsOneWidget);
     });
 

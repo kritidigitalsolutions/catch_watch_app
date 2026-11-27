@@ -217,7 +217,7 @@ class _PolicyScreenState extends State<PolicyScreen> {
           LegalSection(
             heading: '1. Subscription Billing',
             paragraphs: [
-              'Subscriptions are billed according to your selected billing cycle. You may cancel your subscription at any time through your account settings.',
+              'Each subscription purchase provides access for the fixed validity period shown at purchase and does not automatically renew. Access ends when that period expires. You must make a new purchase to continue, and Restore Purchases can recover only the remaining validity of an eligible unexpired purchase. Refund eligibility follows the applicable store policy.',
             ],
           ),
           LegalSection(

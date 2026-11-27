@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 class AppUrl {
-  // static const String serverUrl = 'http://192.168.1.9:5000';
+  // static const String serverUrl = 'http://192.168.1.26:5000';
   static const String serverUrl = 'https://api.catchandwatch.com';
   // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
@@ -233,4 +233,11 @@ class AppUrl {
   static const String vipTickets = '$baseUrl/support/vip';
   static String vipTicketDetail(String ticketId) => '$baseUrl/support/vip/$ticketId';
   static String vipReplyTicket(String ticketId) => '$baseUrl/support/vip/reply/$ticketId';
+
+  /// Live Cricket Endpoints
+  /// Note: Authorization is optional. URLs use baseUrl ($serverUrl/api) without /api duplication.
+  static const String liveMatches = '$baseUrl/live-matches';
+  static const String featuredLiveMatch = '$baseUrl/live-matches/featured';
+  static String liveMatchDetails(String matchId) => '$baseUrl/live-matches/$matchId';
+  static String recordLiveMatchView(String matchId) => '$baseUrl/live-matches/$matchId/view';
 }

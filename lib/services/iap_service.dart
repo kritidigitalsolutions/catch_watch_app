@@ -1,23 +1,80 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:in_app_purchase_storekit/in_app_purchase_storekit.dart';
+import 'package:catch_watch/utils/iap_transaction_deduplicator.dart';
+import 'package:catch_watch/utils/iap_transaction_metadata.dart';
+import 'package:catch_watch/utils/shared_purchase_stream_listener.dart';
+import 'package:catch_watch/utils/post_frame_event_queue.dart';
 
-/// Product IDs for App Store Connect In-App Purchases
-const String orangeTickProductId = 'com.app.catchWatch.sub.creator.orangetick';
-const String ottWeeklyProductId = 'com.app.catchWatch.sub.premium.weekly';
-const String ottMonthlyProductId = 'com.app.catchWatch.sub.premium.monthly';
-const String ottYearlyProductId = 'com.app.catchWatch.sub.premium.yearly';
+/// Product IDs for App Store Connect In-App Purchases (Non-Renewing Subscriptions)
+const String orangeTickProductId = 'com.app.catchWatch.creator.orangetick';
+const String ottWeeklyProductId = 'com.app.catchWatch.premium.weekly';
+const String ottMonthlyProductId = 'com.app.catchWatch.premium.monthly';
+const String ottYearlyProductId = 'com.app.catchWatch.premium.yearly';
 
-/// All configured In-App Purchase product IDs
-const Set<String> allAppProductIds = {
+/// Legacy Product IDs (retained for backward compatibility and restoring past purchases)
+const String legacyOrangeTickProductId =
+    'com.app.catchWatch.sub.creator.orangetick';
+const String legacyOttWeeklyProductId =
+    'com.app.catchWatch.sub.premium.weekly';
+const String legacyOttMonthlyProductId =
+    'com.app.catchWatch.sub.premium.monthly';
+const String legacyOttYearlyProductId =
+    'com.app.catchWatch.sub.premium.yearly';
+
+/// Active (current) In-App Purchase product IDs
+const Set<String> currentAppProductIds = {
   ottWeeklyProductId,
   ottMonthlyProductId,
   ottYearlyProductId,
   orangeTickProductId,
 };
+
+/// All configured In-App Purchase product IDs (current + legacy)
+const Set<String> allAppProductIds = {
+  ottWeeklyProductId,
+  ottMonthlyProductId,
+  ottYearlyProductId,
+  orangeTickProductId,
+  legacyOttWeeklyProductId,
+  legacyOttMonthlyProductId,
+  legacyOttYearlyProductId,
+  legacyOrangeTickProductId,
+};
+
+/// Helpers to identify product categories across current and legacy IDs
+bool isOrangeTickProduct(String? productId) =>
+    productId == orangeTickProductId ||
+    productId == legacyOrangeTickProductId;
+
+bool isOttWeeklyProduct(String? productId) =>
+    productId == ottWeeklyProductId ||
+    productId == legacyOttWeeklyProductId;
+
+bool isOttMonthlyProduct(String? productId) =>
+    productId == ottMonthlyProductId ||
+    productId == legacyOttMonthlyProductId;
+
+bool isOttYearlyProduct(String? productId) =>
+    productId == ottYearlyProductId ||
+    productId == legacyOttYearlyProductId;
+
+bool isOttProduct(String? productId) =>
+    isOttWeeklyProduct(productId) ||
+    isOttMonthlyProduct(productId) ||
+    isOttYearlyProduct(productId);
+
+enum IapProductState {
+  notStarted,
+  loading,
+  available,
+  productNotFound,
+  storeKitUnavailable,
+  queryError,
+}
 
 /// Service responsible for managing Apple In-App Purchases (StoreKit).
 /// Handles querying products, purchase stream listening, duplicate transaction
@@ -27,7 +84,10 @@ class IapService {
   static final IapService instance = IapService._();
 
   final InAppPurchase _iap = InAppPurchase.instance;
-  StreamSubscription<List<PurchaseDetails>>? _subscription;
+  final SharedPurchaseStreamListener<List<PurchaseDetails>> _purchaseListener =
+      SharedPurchaseStreamListener<List<PurchaseDetails>>();
+  final PostFrameEventQueue<PurchaseDetails> _queuedOttTransactions =
+      PostFrameEventQueue<PurchaseDetails>();
 
   final Map<String, ProductDetails> _products = {};
   Map<String, ProductDetails> get products => _products;
@@ -40,12 +100,17 @@ class IapService {
 
   bool _isLoadingProducts = false;
   bool get isLoadingProducts => _isLoadingProducts;
+  final Map<String, IapProductState> _productStates = {};
+  IapProductState productState(String productId) =>
+      _productStates[productId] ?? IapProductState.notStarted;
 
   final Set<String> _processedTransactionIds = {};
   final Set<String> _inFlightTransactionIds = {};
   final Set<String> _verifiedTransactionIds = {};
   final Set<String> _terminalTransactionIds = {};
   final Map<String, String> _terminalTransactionReasons = {};
+  final IapTransactionDeduplicator _eventDeduplicator =
+      IapTransactionDeduplicator();
 
   bool isTransactionVerified(String txId) =>
       _verifiedTransactionIds.contains(txId);
@@ -74,11 +139,14 @@ class IapService {
     _unresolvedOrangeTickPurchase = null;
   }
 
+  void allowFailedTransactionRetries() => _eventDeduplicator.allowRetries();
+
   // Persistent Orange Tick purchase state & handlers
   Future<bool> Function(PurchaseDetails purchase)? orangeTickPurchaseHandler;
   String? activeOrangeTickPlanId;
   String? activeOrangeTickOrderId;
-  bool isRestoring = false;
+  bool isOttRestoring = false;
+  bool isOrangeTickRestoring = false;
   bool isPurchasingOrangeTick = false;
   bool get hasInFlightTransaction => _inFlightTransactionIds.isNotEmpty;
   String? lastVerificationErrorMessage;
@@ -90,9 +158,7 @@ class IapService {
     required String orderId,
     required String planId,
   }) {
-    debugPrint(
-      '[ORANGE_TICK_IAP] Beginning fresh purchase attempt (orderId: $orderId, planId: $planId)',
-    );
+    debugPrint('[ORANGE_TICK_IAP] Beginning fresh purchase attempt');
     isPurchasingOrangeTick = true;
     activeOrangeTickOrderId = orderId;
     activeOrangeTickPlanId = planId;
@@ -111,6 +177,8 @@ class IapService {
   /// Safely completes and marks resolved an already processed transaction
   Future<void> resolveAndCompleteTransaction(PurchaseDetails purchase) async {
     final txId = purchase.purchaseID;
+    final eventKey = transactionEventKey(purchase);
+    if (eventKey != null) _eventDeduplicator.markVerified(eventKey);
     if (txId != null && txId.isNotEmpty) {
       _processedTransactionIds.add(txId);
       _verifiedTransactionIds.add(txId);
@@ -121,7 +189,7 @@ class IapService {
     }
     if (purchase.pendingCompletePurchase) {
       debugPrint(
-        '[ORANGE_TICK_IAP] Completing settled transaction $txId in StoreKit',
+        '[ORANGE_TICK_IAP] Completing settled transaction in StoreKit',
       );
       await completePurchase(purchase);
     }
@@ -134,6 +202,8 @@ class IapService {
     String reason = 'terminal',
   }) async {
     final txId = purchase.purchaseID;
+    final eventKey = transactionEventKey(purchase);
+    if (eventKey != null) _eventDeduplicator.markTerminal(eventKey);
     if (txId != null && txId.isNotEmpty) {
       _terminalTransactionIds.add(txId);
       _terminalTransactionReasons[txId] = reason;
@@ -144,7 +214,7 @@ class IapService {
     }
     if (purchase.pendingCompletePurchase) {
       debugPrint(
-        '[ORANGE_TICK_IAP] Completing terminal transaction $txId ($reason) in StoreKit',
+        '[ORANGE_TICK_IAP] Completing terminal transaction ($reason) in StoreKit',
       );
       await completePurchase(purchase);
     }
@@ -152,17 +222,27 @@ class IapService {
 
   // Callbacks registered by the active subscription view/provider
   Future<bool> Function(PurchaseDetails purchase)? onVerifyPurchase;
+  Future<bool> Function(PurchaseDetails purchase)? onVerifyOrangeTickRestore;
   void Function(PurchaseDetails purchase)? onPurchaseSuccess;
+  void Function(PurchaseDetails purchase)? onOrangeTickPurchaseSuccess;
   void Function(String errorMessage)? onError;
+  void Function(String errorMessage)? onOrangeTickError;
   void Function(bool isPending)? onPending;
+  void Function(bool isPending)? onOrangeTickPending;
   void Function()? onCanceled;
+  void Function()? onOrangeTickCanceled;
 
   /// Checks if StoreKit / IAP is available on this device
   Future<bool> isAvailable() async {
+    final stopwatch = Stopwatch()..start();
     try {
-      return await _iap.isAvailable();
+      final available = await _iap.isAvailable();
+      debugPrint(
+        '[IAP] StoreKit availability=$available (${stopwatch.elapsedMilliseconds}ms)',
+      );
+      return available;
     } catch (e) {
-      debugPrint('[IAP] isAvailable error: $e');
+      debugPrint('[IAP] StoreKit availability error: ${_safeError(e)}');
       return false;
     }
   }
@@ -182,64 +262,161 @@ class IapService {
     this.onCanceled = onCanceled;
 
     ensurePurchaseStreamInitialized();
+    _drainQueuedOttTransactions();
+  }
+
+  void initializeOrangeTickRestore({
+    required Future<bool> Function(PurchaseDetails purchase) onVerify,
+    required void Function(PurchaseDetails purchase) onSuccess,
+    required void Function(String errorMessage) onError,
+    required void Function(bool isPending) onPending,
+    required void Function() onCanceled,
+  }) {
+    onVerifyOrangeTickRestore = onVerify;
+    onOrangeTickPurchaseSuccess = onSuccess;
+    onOrangeTickError = onError;
+    onOrangeTickPending = onPending;
+    onOrangeTickCanceled = onCanceled;
+    ensurePurchaseStreamInitialized();
+  }
+
+  void clearOrangeTickRestoreHandler(
+    Future<bool> Function(PurchaseDetails purchase) handler,
+  ) {
+    if (onVerifyOrangeTickRestore == handler) {
+      onVerifyOrangeTickRestore = null;
+    }
+  }
+
+  void clearOrangeTickCallbacks() {
+    onVerifyOrangeTickRestore = null;
+    onOrangeTickPurchaseSuccess = null;
+    onOrangeTickError = null;
+    onOrangeTickPending = null;
+    onOrangeTickCanceled = null;
   }
 
   /// Ensures a single effective purchaseStream listener is active across the app session
   void ensurePurchaseStreamInitialized() {
-    if (_subscription != null) return;
-    _subscription = _iap.purchaseStream.listen(
-      _onPurchaseStreamData,
+    if (_purchaseListener.isListening) {
+      debugPrint('[IAP] Shared purchase listener already active.');
+      return;
+    }
+    _purchaseListener.ensureListening(
+      stream: _iap.purchaseStream,
+      onEvent: _onPurchaseStreamData,
       onDone: () {
-        debugPrint('[IAP] purchaseStream onDone');
-        _subscription?.cancel();
-        _subscription = null;
+        debugPrint('[IAP] Shared purchase listener ended.');
       },
       onError: (error) {
-        debugPrint('[IAP] purchaseStream error: $error');
-        onError?.call(error.toString());
+        debugPrint('[IAP] purchaseStream error (${error.runtimeType}).');
+        try {
+          onError?.call('Purchase stream error: ${error.runtimeType}');
+        } catch (callbackError) {
+          debugPrint(
+            '[IAP] Purchase stream error callback failed (${callbackError.runtimeType}).',
+          );
+        }
       },
     );
+    debugPrint('[IAP] Shared purchase listener active.');
+  }
+
+  void _drainQueuedOttTransactions() {
+    _queuedOttTransactions.scheduleDrain(
+      isReady: () => onVerifyPurchase != null,
+      schedulePostFrame: (callback) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => callback());
+      },
+      onEvent: (purchase) {
+        unawaited(_handleSuccessfulOrRestoredPurchase(purchase));
+      },
+    );
+  }
+
+  /// Releases a screen-owned verification callback without canceling the shared
+  /// StoreKit stream used by other IAP flows.
+  void clearVerifyHandler(
+    Future<bool> Function(PurchaseDetails purchase) handler,
+  ) {
+    if (onVerifyPurchase == handler) onVerifyPurchase = null;
   }
 
   /// Queries StoreKit for the product details corresponding to given IDs
   Future<List<ProductDetails>> loadProducts(Set<String> productIds) async {
     if (productIds.isEmpty) return [];
 
+    final unexpectedIds = productIds.difference(allAppProductIds);
+    if (unexpectedIds.isNotEmpty) {
+      debugPrint(
+        '[IAP] Ignoring unexpected Apple product IDs: ${unexpectedIds.toList()..sort()}',
+      );
+    }
+    final requestedIds = productIds.intersection(allAppProductIds);
+    if (requestedIds.isEmpty) return [];
+    for (final id in requestedIds) {
+      _productStates[id] = IapProductState.loading;
+      _notFoundProductIds.remove(id);
+    }
+    debugPrint(
+      '[IAP] Product query requested IDs: ${requestedIds.toList()..sort()}',
+    );
     _isLoadingProducts = true;
     final available = await isAvailable();
     if (!available) {
-      debugPrint('[IAP] Store is not available');
-      _queriedProductIds.addAll(productIds);
-      _notFoundProductIds.addAll(productIds);
+      debugPrint('[IAP] StoreKit unavailable; products remain retryable');
+      _queriedProductIds.addAll(requestedIds);
+      for (final id in requestedIds) {
+        _productStates[id] = IapProductState.storeKitUnavailable;
+      }
       _isLoadingProducts = false;
       return [];
     }
 
+    final stopwatch = Stopwatch()..start();
     try {
       final ProductDetailsResponse response = await _iap.queryProductDetails(
-        productIds,
+        requestedIds,
       );
       if (response.error != null) {
-        debugPrint('[IAP] queryProductDetails error: ${response.error}');
+        debugPrint(
+          '[IAP] Product query error: code=${response.error!.code}, message=${response.error!.message}',
+        );
       }
-      _queriedProductIds.addAll(productIds);
+      debugPrint(
+        '[IAP] Product query returned IDs: ${response.productDetails.map((p) => p.id).toList()}',
+      );
+      debugPrint(
+        '[IAP] Product query notFoundIDs: ${response.notFoundIDs.toList()}',
+      );
+      debugPrint(
+        '[IAP] Product query duration=${stopwatch.elapsedMilliseconds}ms',
+      );
+      _queriedProductIds.addAll(requestedIds);
       for (final product in response.productDetails) {
         _products[product.id] = product;
         _notFoundProductIds.remove(product.id);
+        _productStates[product.id] = IapProductState.available;
       }
       for (final notFoundId in response.notFoundIDs) {
         _notFoundProductIds.add(notFoundId);
         _products.remove(notFoundId);
+        _productStates[notFoundId] = IapProductState.productNotFound;
       }
-      for (final id in productIds) {
-        if (!_products.containsKey(id)) {
-          _notFoundProductIds.add(id);
+      for (final id in requestedIds) {
+        if (!_products.containsKey(id) && !response.notFoundIDs.contains(id)) {
+          _productStates[id] = IapProductState.queryError;
         }
       }
       return response.productDetails;
     } catch (e) {
-      debugPrint('[IAP] loadProducts exception: $e');
-      _queriedProductIds.addAll(productIds);
+      debugPrint(
+        '[IAP] Product query exception after ${stopwatch.elapsedMilliseconds}ms: ${_safeError(e)}',
+      );
+      _queriedProductIds.addAll(requestedIds);
+      for (final id in requestedIds) {
+        _productStates[id] = IapProductState.queryError;
+      }
       return [];
     } finally {
       _isLoadingProducts = false;
@@ -260,7 +437,17 @@ class IapService {
   bool isProductQueried(String productId) =>
       _queriedProductIds.contains(productId);
 
-  /// Initiates an Apple In-App Purchase for an Auto-Renewable Subscription
+  static String _safeError(Object error) {
+    if (error is PlatformException) {
+      return 'code=${error.code}, message=${error.message ?? 'unknown'}';
+    }
+    return error.runtimeType.toString();
+  }
+
+  /// Starts an Apple purchase for the configured product.
+  ///
+  /// The StoreKit product type is configured in App Store Connect; this
+  /// Flutter purchase method does not determine whether a product renews.
   Future<bool> buyProduct(ProductDetails product) async {
     final purchaseParam = PurchaseParam(productDetails: product);
     try {
@@ -279,7 +466,7 @@ class IapService {
       );
       return false;
     } catch (e) {
-      debugPrint('[IAP] buyProduct error: $e');
+      debugPrint('[IAP] buyProduct error (${e.runtimeType}).');
       onError?.call('Unable to initiate purchase: $e');
       return false;
     }
@@ -290,21 +477,53 @@ class IapService {
     try {
       await _iap.restorePurchases();
     } catch (e) {
-      debugPrint('[IAP] restorePurchases error: $e');
+      debugPrint('[IAP] restorePurchases error: ${e.runtimeType}');
       onError?.call('Unable to restore purchases: $e');
       rethrow;
     }
   }
 
+  Future<void> restoreOttPurchases() async {
+    isOttRestoring = true;
+    try {
+      await restorePurchases();
+    } finally {
+      isOttRestoring = false;
+    }
+  }
+
+  Future<void> restoreOrangeTickPurchases() async {
+    isOrangeTickRestoring = true;
+    try {
+      await restorePurchases();
+    } finally {
+      isOrangeTickRestoring = false;
+    }
+  }
+
   /// Completes the StoreKit transaction when safe to do so
   Future<void> completePurchase(PurchaseDetails purchaseDetails) async {
+    final isVerificationRequired =
+        purchaseDetails.status == PurchaseStatus.purchased ||
+        purchaseDetails.status == PurchaseStatus.restored;
+    final txId = extractTransactionId(purchaseDetails);
+    if (isVerificationRequired &&
+        (txId == null ||
+            (!_verifiedTransactionIds.contains(txId) &&
+                !_terminalTransactionIds.contains(txId)))) {
+      debugPrint(
+        '[IAP] Purchase transaction completion blocked until backend verification succeeds.',
+      );
+      return;
+    }
     if (purchaseDetails.pendingCompletePurchase) {
-      final txId = purchaseDetails.purchaseID ?? 'unknown';
       try {
         await _iap.completePurchase(purchaseDetails);
-        debugPrint('[IAP] Transaction completed: $txId');
+        debugPrint('[IAP] Transaction completed transactionId=$txId');
       } catch (e) {
-        debugPrint('[IAP] completePurchase error for transaction $txId: $e');
+        debugPrint(
+          '[IAP] completePurchase failed transactionId=$txId error=${e.runtimeType}',
+        );
       }
     }
   }
@@ -327,7 +546,7 @@ class IapService {
         }
       }
     } catch (e) {
-      debugPrint('[IAP] Error decoding JWS payload: $e');
+      debugPrint('[IAP] Error decoding JWS payload: ${e.runtimeType}');
     }
     return null;
   }
@@ -365,21 +584,68 @@ class IapService {
 
   /// Extracts the subscription expiration date from purchase details if available
   DateTime? extractExpirationDate(PurchaseDetails purchaseDetails) {
+    return _transactionMetadata(purchaseDetails).expiryDate;
+  }
+
+  DateTime? extractPurchaseDate(PurchaseDetails purchaseDetails) {
+    return _transactionMetadata(purchaseDetails).purchaseDate;
+  }
+
+  String? extractTransactionId(PurchaseDetails purchaseDetails) {
+    return _transactionMetadata(purchaseDetails).transactionId;
+  }
+
+  IapTransactionMetadata _transactionMetadata(PurchaseDetails purchase) =>
+      IapTransactionMetadata.fromStoreKit(
+        purchaseId: purchase.purchaseID,
+        transactionDate: purchase.transactionDate,
+        serverVerificationData:
+            purchase.verificationData.serverVerificationData,
+      );
+
+  void _logTransactionEvent(PurchaseDetails purchaseDetails) {
+    final metadata = _transactionMetadata(purchaseDetails);
+    final eventReceivedAt = DateTime.now().toUtc().toIso8601String();
+    final transactionId = metadata.transactionId ?? 'unavailable';
+    final originalTransactionId =
+        extractOriginalTransactionId(purchaseDetails) ?? 'unavailable';
+    final purchaseDate =
+        metadata.purchaseDate?.toIso8601String() ?? 'unavailable';
+    final expiryDate = metadata.expiryDate?.toIso8601String() ?? 'unavailable';
+    debugPrint(
+      '[IAP_EVENT] status=${purchaseDetails.status.name} '
+      'eventReceivedAtUtc=$eventReceivedAt '
+      'productId=${purchaseDetails.productID} '
+      'transactionId=$transactionId '
+      'originalTransactionId=$originalTransactionId '
+      'purchaseDateUtc=$purchaseDate expiryDateUtc=$expiryDate',
+    );
+  }
+
+  /// Stable event identity that distinguishes renewals sharing an original ID.
+  String? transactionEventKey(PurchaseDetails purchaseDetails) {
     final data = decodeJwsPayload(
       purchaseDetails.verificationData.serverVerificationData,
     );
-    if (data != null) {
-      final exp = data['expiresDate'] ?? data['expires_date'];
-      if (exp is int) {
-        return DateTime.fromMillisecondsSinceEpoch(exp, isUtc: true);
-      } else if (exp is String) {
-        final parsed = int.tryParse(exp);
-        if (parsed != null) {
-          return DateTime.fromMillisecondsSinceEpoch(parsed, isUtc: true);
-        }
-      }
-    }
-    return null;
+    final transactionId =
+        purchaseDetails.purchaseID ??
+        (data?['transactionId'] ?? data?['transaction_id'])?.toString();
+    final originalTransactionId =
+        extractOriginalTransactionId(purchaseDetails) ??
+        (data?['originalTransactionId'] ?? data?['original_transaction_id'])
+            ?.toString();
+    // The signed data is used only as an in-memory fingerprint if StoreKit
+    // supplies neither transaction ID. It is never emitted to logs.
+    final serverData = purchaseDetails.verificationData.serverVerificationData;
+    final fallback = serverData.isNotEmpty
+        ? serverData.hashCode.toRadixString(16)
+        : purchaseDetails.transactionDate;
+    return iapTransactionEventKey(
+      productId: purchaseDetails.productID,
+      transactionId: transactionId,
+      originalTransactionId: originalTransactionId,
+      fallbackFingerprint: fallback,
+    );
   }
 
   /// Returns whether the transaction is known to have expired locally based on signed JWS payload
@@ -419,17 +685,22 @@ class IapService {
     for (final purchaseDetails in purchaseDetailsList) {
       final env = extractEnvironment(purchaseDetails) ?? 'Unknown';
       debugPrint(
-        '[IAP] Processing purchase: ${purchaseDetails.productID}, status: ${purchaseDetails.status}, id: ${purchaseDetails.purchaseID}, env: $env',
+        '[IAP] Processing purchase: ${purchaseDetails.productID}, status: ${purchaseDetails.status}, env: $env',
       );
+
+      if (purchaseDetails.status == PurchaseStatus.purchased ||
+          purchaseDetails.status == PurchaseStatus.restored) {
+        _logTransactionEvent(purchaseDetails);
+      }
 
       switch (purchaseDetails.status) {
         case PurchaseStatus.pending:
-          onPending?.call(true);
+          _onPending(purchaseDetails, true);
           break;
 
         case PurchaseStatus.error:
-          onPending?.call(false);
-          if (purchaseDetails.productID == orangeTickProductId &&
+          _onPending(purchaseDetails, false);
+          if (isOrangeTickProduct(purchaseDetails.productID) &&
               _unresolvedOrangeTickPurchase?.purchaseID ==
                   purchaseDetails.purchaseID) {
             _unresolvedOrangeTickPurchase = null;
@@ -437,7 +708,7 @@ class IapService {
           final message =
               purchaseDetails.error?.message ??
               'An error occurred during the transaction.';
-          onError?.call(message);
+          _onError(purchaseDetails, message);
           // StoreKit requires completion of error transactions
           if (purchaseDetails.pendingCompletePurchase) {
             await completePurchase(purchaseDetails);
@@ -445,13 +716,13 @@ class IapService {
           break;
 
         case PurchaseStatus.canceled:
-          onPending?.call(false);
-          if (purchaseDetails.productID == orangeTickProductId &&
+          _onPending(purchaseDetails, false);
+          if (isOrangeTickProduct(purchaseDetails.productID) &&
               _unresolvedOrangeTickPurchase?.purchaseID ==
                   purchaseDetails.purchaseID) {
             _unresolvedOrangeTickPurchase = null;
           }
-          onCanceled?.call();
+          _onCanceled(purchaseDetails);
           // StoreKit requires completion of canceled transactions
           if (purchaseDetails.pendingCompletePurchase) {
             await completePurchase(purchaseDetails);
@@ -466,6 +737,30 @@ class IapService {
     }
   }
 
+  void _onPending(PurchaseDetails purchase, bool pending) {
+    if (isOrangeTickProduct(purchase.productID)) {
+      onOrangeTickPending?.call(pending);
+    } else {
+      onPending?.call(pending);
+    }
+  }
+
+  void _onError(PurchaseDetails purchase, String message) {
+    if (isOrangeTickProduct(purchase.productID)) {
+      onOrangeTickError?.call(message);
+    } else {
+      onError?.call(message);
+    }
+  }
+
+  void _onCanceled(PurchaseDetails purchase) {
+    if (isOrangeTickProduct(purchase.productID)) {
+      onOrangeTickCanceled?.call();
+    } else {
+      onCanceled?.call();
+    }
+  }
+
   /// Registers a dedicated handler for Orange Tick purchases that survives widget lifecycle transitions
   void registerOrangeTickHandler({
     required Future<bool> Function(PurchaseDetails purchase) onVerify,
@@ -476,13 +771,11 @@ class IapService {
         activeOrangeTickPlanId == planId &&
         activeOrangeTickOrderId == orderId) {
       debugPrint(
-        '[ORANGE_TICK_IAP] Orange Tick purchase handler already registered (planId: $planId, orderId: $orderId). Skipping duplicate.',
+        '[ORANGE_TICK_IAP] Orange Tick purchase handler already registered. Skipping duplicate.',
       );
       return;
     }
-    debugPrint(
-      '[ORANGE_TICK_IAP] Registering Orange Tick purchase handler (planId: $planId, orderId: $orderId)',
-    );
+    debugPrint('[ORANGE_TICK_IAP] Registering Orange Tick purchase handler');
     orangeTickPurchaseHandler = onVerify;
     if (planId != null && planId.isNotEmpty) {
       activeOrangeTickPlanId = planId;
@@ -506,8 +799,14 @@ class IapService {
   Future<void> _handleSuccessfulOrRestoredPurchase(
     PurchaseDetails purchaseDetails,
   ) async {
-    final String? txId = purchaseDetails.purchaseID;
-    final isOrangeTick = purchaseDetails.productID == orangeTickProductId;
+    final String? txId = extractTransactionId(purchaseDetails);
+    final eventKey = transactionEventKey(purchaseDetails);
+    final isOrangeTick = isOrangeTickProduct(purchaseDetails.productID);
+
+    if (eventKey == null) {
+      debugPrint('[IAP] Purchase event lacks a stable transaction identity.');
+      return;
+    }
 
     if (txId != null && txId.isNotEmpty) {
       _allKnownTransactionIds.add(txId);
@@ -519,14 +818,13 @@ class IapService {
         '[ORANGE_TICK_IAP] Status: ${purchaseDetails.status == PurchaseStatus.purchased ? "purchased" : purchaseDetails.status.name}',
       );
       debugPrint('[ORANGE_TICK_IAP] Product ID: ${purchaseDetails.productID}');
-      debugPrint('[ORANGE_TICK_IAP] Transaction ID: $txId');
     }
 
     // Prevent duplicate or concurrent processing of the same transaction
     if (txId != null && txId.isNotEmpty) {
       if (_terminalTransactionIds.contains(txId)) {
         debugPrint(
-          '[IAP] Transaction $txId was already confirmed terminal (${_terminalTransactionReasons[txId] ?? 'terminal'}). Completing in StoreKit if pending.',
+          '[IAP] Transaction was already confirmed terminal (${_terminalTransactionReasons[txId] ?? 'terminal'}). Completing in StoreKit if pending.',
         );
         if (purchaseDetails.pendingCompletePurchase) {
           await completePurchase(purchaseDetails);
@@ -537,10 +835,9 @@ class IapService {
         return;
       }
       if (_processedTransactionIds.contains(txId) ||
-          _verifiedTransactionIds.contains(txId) ||
-          _inFlightTransactionIds.contains(txId)) {
+          _verifiedTransactionIds.contains(txId)) {
         debugPrint(
-          '[IAP] Transaction $txId was already processed or is currently in-flight. Completing if needed.',
+          '[IAP] Transaction was already processed or is currently in-flight. Completing if needed.',
         );
         if ((_processedTransactionIds.contains(txId) ||
                 _verifiedTransactionIds.contains(txId)) &&
@@ -549,8 +846,23 @@ class IapService {
         }
         return;
       }
-      _inFlightTransactionIds.add(txId);
     }
+
+    if (!isOrangeTick && onVerifyPurchase == null) {
+      _queuedOttTransactions.add(eventKey, purchaseDetails);
+      debugPrint(
+        '[IAP] Queued OTT transaction until the backend verifier is registered.',
+      );
+      return;
+    }
+
+    if (!_eventDeduplicator.tryStart(eventKey)) {
+      debugPrint(
+        '[IAP] Duplicate or recently failed transaction event ignored.',
+      );
+      return;
+    }
+    if (txId != null && txId.isNotEmpty) _inFlightTransactionIds.add(txId);
 
     if (isOrangeTick) {
       if (purchaseDetails.status == PurchaseStatus.purchased ||
@@ -558,89 +870,44 @@ class IapService {
         // Enforce handler readiness:
         // If an active purchase or explicit recovery handler is registered, process it immediately.
         // Otherwise, cache the unprompted StoreKit queue transaction until the user submits the form or initiates recovery.
-        if (!isPurchasingOrangeTick || orangeTickPurchaseHandler == null) {
-          if (isTransactionExpired(purchaseDetails)) {
-            debugPrint(
-              '[ORANGE_TICK_IAP] Unprompted transaction $txId is expired locally (expiresDate: ${extractExpirationDate(purchaseDetails)}). Not caching as active purchase.',
-            );
-            debugPrint(
-              '[ORANGE_TICK_IAP] Completing expired/unprompted transaction $txId in StoreKit to clear pending queue',
-            );
-            if (purchaseDetails.pendingCompletePurchase) {
-              await completePurchase(purchaseDetails);
-            }
-            if (_unresolvedOrangeTickPurchase?.purchaseID == txId) {
-              _unresolvedOrangeTickPurchase = null;
-            }
-            if (txId != null && txId.isNotEmpty) {
-              _inFlightTransactionIds.remove(txId);
-              _terminalTransactionIds.add(txId);
-              _terminalTransactionReasons[txId] = 'expired';
-            }
-            return;
-          }
+        if ((!isPurchasingOrangeTick || orangeTickPurchaseHandler == null) &&
+            !isOrangeTickRestoring) {
           debugPrint(
-            '[ORANGE_TICK_IAP] Caching unprompted Orange Tick transaction (txId: $txId, status: ${purchaseDetails.status.name}) awaiting user submission',
+            '[ORANGE_TICK_IAP] Caching unprompted Orange Tick transaction (status: ${purchaseDetails.status.name}) awaiting user submission',
           );
           _unresolvedOrangeTickPurchase = purchaseDetails;
           if (txId != null && txId.isNotEmpty) {
             _inFlightTransactionIds.remove(txId);
           }
+          _eventDeduplicator.abandon(eventKey);
           return;
         }
         debugPrint(
-          '[ORANGE_TICK_IAP] Correlated active attempt transaction (txId: $txId, status: ${purchaseDetails.status.name})',
+          '[ORANGE_TICK_IAP] Correlated active attempt transaction (status: ${purchaseDetails.status.name})',
         );
       }
     } else {
-      // Non-Orange Tick (OTT Subscription): complete expired transactions to clear pending queue
-      if (isTransactionExpired(purchaseDetails)) {
-        debugPrint(
-          '[IAP] OTT transaction $txId is expired locally (expiresDate: ${extractExpirationDate(purchaseDetails)}). Completing in StoreKit to clear pending queue.',
-        );
-        if (purchaseDetails.pendingCompletePurchase) {
-          await completePurchase(purchaseDetails);
-        }
-        if (txId != null && txId.isNotEmpty) {
-          _inFlightTransactionIds.remove(txId);
-          _terminalTransactionIds.add(txId);
-          _terminalTransactionReasons[txId] = 'expired';
-        }
-        return;
-      }
-
-      // Non-Orange Tick (OTT Subscription): distinguish normal purchase vs restore flow
-      if (purchaseDetails.status == PurchaseStatus.restored && !isRestoring) {
-        debugPrint(
-          '[IAP] Ignoring restored transaction $txId as restore flow is not active. Completing if pending.',
-        );
-        if (purchaseDetails.pendingCompletePurchase) {
-          await completePurchase(purchaseDetails);
-        }
-        if (txId != null && txId.isNotEmpty) {
-          _inFlightTransactionIds.remove(txId);
-        }
-        return;
-      }
+      // OTT purchased/restored events always go through backend verification,
+      // including restored events delivered after the screen has been closed.
     }
 
-    onPending?.call(true);
+    _onPending(purchaseDetails, true);
 
     try {
       bool verified = false;
 
       if (isOrangeTick) {
         // Dedicated Orange Tick handler only (active when user tapped Submit & Subscribe or during active restore)
-        if (orangeTickPurchaseHandler != null) {
+        if (isOrangeTickRestoring && onVerifyOrangeTickRestore != null) {
+          debugPrint(
+            '[ORANGE_TICK_IAP] Dispatching restore to Orange Tick verifier',
+          );
+          verified = await onVerifyOrangeTickRestore!(purchaseDetails);
+        } else if (orangeTickPurchaseHandler != null) {
           debugPrint(
             '[ORANGE_TICK_IAP] Dispatching to registered Orange Tick purchase handler',
           );
           verified = await orangeTickPurchaseHandler!(purchaseDetails);
-        } else if (isRestoring && onVerifyPurchase != null) {
-          debugPrint(
-            '[ORANGE_TICK_IAP] Dispatching restore to active onVerifyPurchase handler',
-          );
-          verified = await onVerifyPurchase!(purchaseDetails);
         } else {
           debugPrint(
             '[ORANGE_TICK_IAP] Orange Tick event received without active handler. Dropping.',
@@ -658,13 +925,14 @@ class IapService {
         }
       }
 
-      onPending?.call(false);
+      _onPending(purchaseDetails, false);
 
       if (verified) {
         if (txId != null && txId.isNotEmpty) {
           _processedTransactionIds.add(txId);
           _verifiedTransactionIds.add(txId);
         }
+        _eventDeduplicator.markVerified(eventKey);
         if (isOrangeTick) {
           _unresolvedOrangeTickPurchase = null;
           debugPrint('[ORANGE_TICK_IAP] Backend verification success');
@@ -674,14 +942,19 @@ class IapService {
         if (purchaseDetails.pendingCompletePurchase) {
           await completePurchase(purchaseDetails);
         }
-        onPurchaseSuccess?.call(purchaseDetails);
+        if (isOrangeTick) {
+          onOrangeTickPurchaseSuccess?.call(purchaseDetails);
+        } else {
+          onPurchaseSuccess?.call(purchaseDetails);
+        }
       } else {
+        _eventDeduplicator.markFailed(eventKey);
         // Backend verification failed: Do NOT complete transaction so it can be retried/recovered
         // UNLESS the caller definitively verified that this transaction is terminal (expired)
         debugPrint('[IAP] Backend verification failed.');
         if (txId != null && _terminalTransactionIds.contains(txId)) {
           debugPrint(
-            '[IAP] Transaction $txId was marked terminal during verification. Not retaining as unresolved.',
+            '[IAP] Transaction was marked terminal during verification. Not retaining as unresolved.',
           );
           if (_unresolvedOrangeTickPurchase?.purchaseID == txId) {
             _unresolvedOrangeTickPurchase = null;
@@ -692,17 +965,19 @@ class IapService {
           }
           if (purchaseDetails.status == PurchaseStatus.purchased ||
               purchaseDetails.status == PurchaseStatus.restored) {
-            final errorMsg = lastVerificationErrorMessage ??
+            final errorMsg =
+                lastVerificationErrorMessage ??
                 'Subscription verification failed. Please contact support if amount was deducted.';
             lastVerificationErrorMessage = null;
-            onError?.call(errorMsg);
+            _onError(purchaseDetails, errorMsg);
           }
         }
       }
     } catch (e) {
-      onPending?.call(false);
-      debugPrint('[IAP] Verification error: $e');
-      onError?.call('Verification error: $e');
+      _eventDeduplicator.markFailed(eventKey);
+      _onPending(purchaseDetails, false);
+      debugPrint('[IAP] Verification error: ${e.runtimeType}');
+      _onError(purchaseDetails, 'Verification error: ${e.runtimeType}');
     } finally {
       if (txId != null && txId.isNotEmpty) {
         _inFlightTransactionIds.remove(txId);
@@ -712,20 +987,26 @@ class IapService {
 
   /// Disposes the purchase stream subscription and clears callbacks
   void dispose() {
-    _subscription?.cancel();
-    _subscription = null;
+    unawaited(_purchaseListener.cancel());
     _inFlightTransactionIds.clear();
     _terminalTransactionIds.clear();
     _terminalTransactionReasons.clear();
+    _eventDeduplicator.clear();
     onVerifyPurchase = null;
+    onVerifyOrangeTickRestore = null;
     onPurchaseSuccess = null;
+    onOrangeTickPurchaseSuccess = null;
     onError = null;
+    onOrangeTickError = null;
     onPending = null;
+    onOrangeTickPending = null;
     onCanceled = null;
+    onOrangeTickCanceled = null;
     orangeTickPurchaseHandler = null;
     activeOrangeTickPlanId = null;
     activeOrangeTickOrderId = null;
-    isRestoring = false;
+    isOttRestoring = false;
+    isOrangeTickRestoring = false;
     isPurchasingOrangeTick = false;
     _unresolvedOrangeTickPurchase = null;
   }

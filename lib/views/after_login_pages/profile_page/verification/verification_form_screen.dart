@@ -108,21 +108,15 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
     return false;
   }
 
-  bool get _isUpdate => widget.existingApplication != null && !_isReapplication;
+  bool get _isUpdate {
+    if (_isReapplication) return false;
+    return VerificationProvider.isEligibleForEdit(widget.existingApplication);
+  }
 
   @override
   void initState() {
     super.initState();
-    final appStatus = widget.existingApplication?.status?.trim().toUpperCase();
-    final bool isClosedStatus = appStatus == 'REJECTED' ||
-        appStatus == 'CANCELLED' ||
-        appStatus == 'CANCELED' ||
-        appStatus == 'ADMIN_CANCELLED' ||
-        appStatus == 'ADMIN_CANCELED' ||
-        appStatus == 'CLOSED';
-    final bool isUpdate = widget.existingApplication != null &&
-        !widget.isReapplication &&
-        !isClosedStatus;
+    final bool isUpdate = _isUpdate;
     if (!isUpdate) {
       if (!Platform.isIOS) {
         _razorpay = Razorpay();
@@ -190,8 +184,8 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
       planId: widget.plan.id,
       orderId: _backendOrderId,
     );
-    IapService.instance.onPurchaseSuccess = _onApplePurchaseSuccess;
-    IapService.instance.onError = (message) {
+    IapService.instance.onOrangeTickPurchaseSuccess = _onApplePurchaseSuccess;
+    IapService.instance.onOrangeTickError = (message) {
       IapService.instance.unregisterOrangeTickHandler();
       if (!mounted) return;
       _lastAppleVerificationError = message;
@@ -208,17 +202,17 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
           SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
         );
       } catch (e) {
-        debugPrint('[ORANGE_TICK_DEBUG] Ignored SnackBar error: $e');
+        debugPrint('[ORANGE_TICK_DEBUG] SnackBar error (${e.runtimeType}).');
       }
     };
-    IapService.instance.onPending = (isPending) {
+    IapService.instance.onOrangeTickPending = (isPending) {
       if (mounted && _isPurchasing != isPending) {
         setState(() {
           _isPurchasing = isPending;
         });
       }
     };
-    IapService.instance.onCanceled = () {
+    IapService.instance.onOrangeTickCanceled = () {
       IapService.instance.unregisterOrangeTickHandler();
       if (mounted) {
         setState(() {
@@ -238,15 +232,13 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
     if (Platform.isIOS) {
       _isPurchaseInitiatedByButton = false;
       IapService.instance.unregisterOrangeTickHandler();
-      if (IapService.instance.onPurchaseSuccess == _onApplePurchaseSuccess) {
-        IapService.instance.onPurchaseSuccess = null;
+      if (IapService.instance.onOrangeTickPurchaseSuccess ==
+          _onApplePurchaseSuccess) {
+        IapService.instance.onOrangeTickPurchaseSuccess = null;
       }
-      if (IapService.instance.onVerifyPurchase == _verifyApplePurchase) {
-        IapService.instance.onVerifyPurchase = null;
-      }
-      IapService.instance.onError = null;
-      IapService.instance.onPending = null;
-      IapService.instance.onCanceled = null;
+      IapService.instance.onOrangeTickError = null;
+      IapService.instance.onOrangeTickPending = null;
+      IapService.instance.onOrangeTickCanceled = null;
     }
     _fullNameController.dispose();
     _usernameController.dispose();
@@ -278,9 +270,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
       '[ORANGE_TICK_IAP] Status: ${purchaseDetails.status == PurchaseStatus.purchased ? "purchased" : purchaseDetails.status.name}',
     );
     debugPrint('[ORANGE_TICK_IAP] Product ID: ${purchaseDetails.productID}');
-    debugPrint(
-      '[ORANGE_TICK_IAP] Transaction ID: ${purchaseDetails.purchaseID}',
-    );
+    debugPrint('[ORANGE_TICK_IAP] Transaction metadata received (redacted)');
 
     // 2. CRITICAL: Strictly verify PurchaseStatus is PURCHASED or RESTORED
     // Backend verification must NEVER be triggered for pending, canceled, or error states
@@ -297,10 +287,10 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
 
     // 3. CRITICAL: Verify product belongs to Orange Tick plan
     final expectedProductId = widget.plan.effectiveAppleProductId;
-    final isOrangeTickProduct =
-        purchaseDetails.productID == orangeTickProductId ||
+    final isMatchingProduct =
+        isOrangeTickProduct(purchaseDetails.productID) ||
         purchaseDetails.productID == expectedProductId;
-    if (!isOrangeTickProduct) {
+    if (!isMatchingProduct) {
       debugPrint(
         '[ORANGE_TICK_IAP] Verification skipped: product ${purchaseDetails.productID} does not match Orange Tick ($expectedProductId)',
       );
@@ -322,9 +312,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
     if (_verifiedTransactionIds.contains(txId) ||
         IapService.instance.isTransactionVerified(txId) ||
         _inFlightTransactionIds.contains(txId)) {
-      debugPrint(
-        '[ORANGE_TICK_IAP] Transaction $txId already verified or currently in-flight. Skipping duplicate verification.',
-      );
+      debugPrint('[ORANGE_TICK_IAP] Duplicate transaction event ignored.');
       return _verifiedTransactionIds.contains(txId) ||
           IapService.instance.isTransactionVerified(txId);
     }
@@ -334,18 +322,16 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
       final String? originalTxId = IapService.instance
           .extractOriginalTransactionId(purchaseDetails);
       final String orderId =
-          _backendOrderId ??
-          IapService.instance.activeOrangeTickOrderId ??
-          '';
+          _backendOrderId ?? IapService.instance.activeOrangeTickOrderId ?? '';
 
       debugPrint('[ORANGE_TICK_IAP]');
       debugPrint('[ORANGE_TICK_IAP] Payment successful');
       debugPrint('[ORANGE_TICK_IAP] Product ID: ${purchaseDetails.productID}');
-      debugPrint('[ORANGE_TICK_IAP] Transaction ID: $txId');
+      debugPrint('[ORANGE_TICK_IAP] Transaction metadata received (redacted)');
       debugPrint(
-        '[ORANGE_TICK_IAP] Original Transaction ID: ${originalTxId ?? txId}',
+        '[ORANGE_TICK_IAP] Original transaction metadata received (redacted)',
       );
-      debugPrint('[ORANGE_TICK_IAP] Backend Order ID: $orderId');
+      debugPrint('[ORANGE_TICK_IAP] Transaction metadata received (redacted)');
 
       final payload = {
         "orderId": orderId,
@@ -374,22 +360,19 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
             response?['message']?.toString() ??
             'Apple subscription verification rejected by server.';
         _lastAppleVerificationError = serverMsg;
-        debugPrint(
-          '[ORANGE_TICK_IAP] Backend verification failed: $_lastAppleVerificationError',
-        );
+        debugPrint('[ORANGE_TICK_IAP] Backend verification failed.');
         await _checkAndHandleTerminalResponse(purchaseDetails, serverMsg);
         return false;
       }
     } catch (e) {
       debugPrint(
-        '[ORANGE_TICK_IAP] Apple transaction verification exception: $e',
+        '[ORANGE_TICK_IAP] Apple transaction verification exception (${e.runtimeType}).',
       );
       String errorMsg = e.toString();
       if (e is AppException) {
         errorMsg = e.message;
       }
       _lastAppleVerificationError = errorMsg;
-      await _checkAndHandleTerminalResponse(purchaseDetails, errorMsg);
       return false;
     } finally {
       _inFlightTransactionIds.remove(txId);
@@ -401,19 +384,13 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
     String message,
   ) async {
     final lower = message.toLowerCase();
-    final bool isExpired =
-        lower.contains('expired') ||
-        IapService.instance.isTransactionExpired(purchaseDetails);
+    final bool isExpired = lower.contains('expired');
 
     if (isExpired) {
       debugPrint(
-        '[ORANGE_TICK_IAP] Transaction ${purchaseDetails.purchaseID} confirmed EXPIRED by backend ($message). Marking terminal and completing in StoreKit.',
+        '[ORANGE_TICK_IAP] Verification endpoint reports expired; retaining transaction pending authoritative verification.',
       );
       _isLastTransactionExpired = true;
-      await IapService.instance.resolveAndCompleteTerminalTransaction(
-        purchaseDetails,
-        reason: 'expired',
-      );
       return;
     }
 
@@ -424,7 +401,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
 
     if (isConflict) {
       debugPrint(
-        '[ORANGE_TICK_IAP] Transaction ${purchaseDetails.purchaseID} belongs to another account ($message).',
+        '[ORANGE_TICK_IAP] Backend reported transaction account conflict.',
       );
       _isLastTransactionConflict = true;
       return;
@@ -551,7 +528,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
         }
       }
     } catch (e) {
-      debugPrint('[ORANGE_TICK_FLOW] Exception during KYC submission: $e');
+      debugPrint('[ORANGE_TICK_FLOW] KYC submission error (${e.runtimeType}).');
       _verifiedPurchaseDetails = purchaseDetails;
       if (mounted) {
         _showKycRetryDialog(
@@ -649,10 +626,9 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
     try {
       final planRepo = PlanRepository();
       final orderResponse = await planRepo.createOrder(widget.plan.id!);
-      final orderData =
-          orderResponse != null && orderResponse['order'] is Map
-              ? orderResponse['order']
-              : null;
+      final orderData = orderResponse != null && orderResponse['order'] is Map
+          ? orderResponse['order']
+          : null;
       final createdOrderId =
           orderData?['id']?.toString() ?? orderResponse?['orderId']?.toString();
 
@@ -677,7 +653,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
       debugPrint('[ORANGE_TICK_IAP] Backend order created: $_backendOrderId');
       return true;
     } catch (e) {
-      debugPrint('[ORANGE_TICK_IAP] Exception creating order: $e');
+      debugPrint('[ORANGE_TICK_IAP] Order creation error (${e.runtimeType}).');
       IapService.instance.unregisterOrangeTickHandler();
       if (mounted) {
         setState(() {
@@ -781,7 +757,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
               _isPurchaseInitiatedByButton = false;
             });
             _showSubmissionErrorDialog(
-              'A transaction is already pending with the App Store for this subscription. Please wait a moment and tap Submit & Subscribe again, or check your App Store subscriptions.',
+              'A transaction is already pending with the App Store for this verification. Please wait a moment and tap Submit & Purchase again, or contact support if amount was deducted.',
             );
           }
         }
@@ -800,7 +776,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
         return false;
       }
     } catch (e) {
-      debugPrint('[ORANGE_TICK_IAP] buyProduct unexpected exception: $e');
+      debugPrint('[ORANGE_TICK_IAP] buyProduct error (${e.runtimeType}).');
       IapService.instance.endOrangeTickPurchaseAttempt();
       IapService.instance.unregisterOrangeTickHandler();
       if (mounted) {
@@ -824,34 +800,11 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
     });
 
     try {
-      debugPrint(
-        '[ORANGE_TICK_FLOW] Recovering existing transaction: ${oldPurchase.purchaseID}',
-      );
+      debugPrint('[ORANGE_TICK_FLOW] Recovering existing transaction.');
       _setupIapHandlersForPurchase();
 
-      final expDate = IapService.instance.extractExpirationDate(oldPurchase);
-      final bool isExpired =
-          IapService.instance.isTransactionExpired(oldPurchase) ||
-          (expDate != null && expDate.isBefore(DateTime.now()));
-
-      if (isExpired) {
-        debugPrint(
-          '[ORANGE_TICK_FLOW] Recovered transaction ${oldPurchase.purchaseID} is expired locally. Completing in StoreKit and retrying fresh purchase.',
-        );
-        if (oldPurchase.pendingCompletePurchase) {
-          await IapService.instance.completePurchase(oldPurchase);
-        }
-        IapService.instance.clearUnresolvedOrangeTickPurchase();
-        await _startApplePurchase();
-        return;
-      }
-
-      final oldTxId = oldPurchase.purchaseID ?? '';
-      final originalTxId =
-          IapService.instance.extractOriginalTransactionId(oldPurchase) ??
-          oldTxId;
       debugPrint(
-        '[ORANGE_TICK_IAP] Reusing active subscription transaction $oldTxId (original $originalTxId) for re-application',
+        '[ORANGE_TICK_IAP] Reusing existing subscription transaction for re-application.',
       );
 
       final verified = await _verifyApplePurchase(oldPurchase);
@@ -906,7 +859,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
           } else {
             _showSubmissionErrorDialog(
               _lastAppleVerificationError ??
-                  'Unable to verify the existing App Store transaction with the server. Please check your App Store subscriptions or contact support.',
+                  'Unable to verify the existing App Store transaction with the server. Please check your internet connection or contact support.',
             );
           }
         }
@@ -1190,19 +1143,31 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
           return;
         } else {
           if (mounted && context.mounted) {
-            _showSubmissionErrorDialog(
-              provider.error ??
-                  'Failed to update verification details. Please try again.',
-            );
+            final String errorMsg = provider.error ??
+                'Failed to update verification details. Please try again.';
+            if (VerificationProvider.isNoPendingRequestError(provider.lastErrorData ?? provider.error) ||
+                errorMsg.contains('No pending verification request')) {
+              _showNoPendingApplicationDialog(errorMsg);
+            } else {
+              _showSubmissionErrorDialog(errorMsg);
+            }
           }
           return;
         }
       } catch (e) {
-        debugPrint('[ORANGE_TICK_FLOW] updateVerification exception: $e');
+        debugPrint(
+          '[ORANGE_TICK_FLOW] Verification update error (${e.runtimeType}).',
+        );
         if (mounted && context.mounted) {
-          _showSubmissionErrorDialog(
-            'Failed to update verification details: $e',
-          );
+          if (VerificationProvider.isNoPendingRequestError(e)) {
+            _showNoPendingApplicationDialog(
+              'No pending verification request was found to update. Your application status may have changed.',
+            );
+          } else {
+            _showSubmissionErrorDialog(
+              'Failed to update verification details: $e',
+            );
+          }
         }
         return;
       } finally {
@@ -1261,37 +1226,12 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
         final unresolved = IapService.instance.unresolvedOrangeTickPurchase;
         if (unresolved != null) {
           final unresolvedTxId = unresolved.purchaseID ?? '';
-          final appTxId =
-              provider.currentApplication?.transactionId ??
-              provider.currentApplication?.paymentId;
-
-          // 2a. Check if this transaction was already processed in backend application
-          if (unresolvedTxId.isNotEmpty &&
-              (appTxId == unresolvedTxId ||
-                  provider.hasActiveOrPendingApplication)) {
-            debugPrint(
-              '[ORANGE_TICK_FLOW] Unresolved transaction $unresolvedTxId already processed in backend application. Completing StoreKit transaction.',
-            );
-            if (unresolved.pendingCompletePurchase) {
-              await IapService.instance.completePurchase(unresolved);
-            }
-            IapService.instance.clearUnresolvedOrangeTickPurchase();
-            IapService.instance.unregisterOrangeTickHandler();
-            setState(() {
-              _isSubmitting = false;
-            });
-            if (mounted && context.mounted) {
-              _showPendingVerificationDialog();
-            }
-            return;
-          }
-
           // 2b. Check if transaction is error, canceled, or already confirmed terminal
           if (unresolved.status == PurchaseStatus.error ||
               unresolved.status == PurchaseStatus.canceled ||
               IapService.instance.isTransactionTerminal(unresolvedTxId)) {
             debugPrint(
-              '[ORANGE_TICK_FLOW] Unresolved transaction $unresolvedTxId is ${unresolved.status.name} / terminal. Completing in StoreKit.',
+              '[ORANGE_TICK_FLOW] Unresolved transaction is an error, canceled, or backend-confirmed terminal state.',
             );
             if (unresolved.pendingCompletePurchase) {
               await IapService.instance.completePurchase(unresolved);
@@ -1303,106 +1243,84 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
             // 2c. Unresolved purchased/restored transaction exists!
             // Reconcile and verify with backend now that user has submitted the form
             debugPrint(
-              '[ORANGE_TICK_FLOW] Reconciling unresolved StoreKit transaction $unresolvedTxId with backend.',
+              '[ORANGE_TICK_FLOW] Reconciling unresolved StoreKit transaction with backend.',
             );
 
-            // Re-check cached transaction is still active (expiresDate in the future)
-            final expDate =
-                IapService.instance.extractExpirationDate(unresolved);
-            final bool isExpired =
-                IapService.instance.isTransactionExpired(unresolved) ||
-                (expDate != null && expDate.isBefore(DateTime.now()));
+            debugPrint(
+              '[ORANGE_TICK_IAP] Reusing existing subscription transaction for re-application.',
+            );
 
-            if (isExpired) {
+            setState(() {
+              _isPurchasing = true;
+            });
+
+            final verified = await _verifyApplePurchase(unresolved);
+            if (verified) {
               debugPrint(
-                '[ORANGE_TICK_FLOW] Cached unresolved transaction $unresolvedTxId is expired locally (expiresDate: $expDate). Completing in StoreKit and falling through to fresh purchase.',
+                '[ORANGE_TICK_FLOW] Unresolved transaction verified successfully.',
               );
               if (unresolved.pendingCompletePurchase) {
                 await IapService.instance.completePurchase(unresolved);
               }
               IapService.instance.clearUnresolvedOrangeTickPurchase();
-              // Queue is now clear; do not return so execution falls through to fresh buyProduct purchase below
-            } else {
-              final originalTxId =
-                  IapService.instance.extractOriginalTransactionId(unresolved) ??
-                  unresolvedTxId;
-              debugPrint(
-                '[ORANGE_TICK_IAP] Reusing active subscription transaction $unresolvedTxId (original $originalTxId) for re-application',
-              );
-
-              setState(() {
-                _isPurchasing = true;
-              });
-
-              final verified = await _verifyApplePurchase(unresolved);
-              if (verified) {
-                debugPrint(
-                  '[ORANGE_TICK_FLOW] Unresolved transaction $unresolvedTxId verified successfully.',
-                );
-                if (unresolved.pendingCompletePurchase) {
-                  await IapService.instance.completePurchase(unresolved);
-                }
-                IapService.instance.clearUnresolvedOrangeTickPurchase();
-                IapService.instance.unregisterOrangeTickHandler();
-                _verifiedPurchaseDetails = unresolved;
-                if (mounted) {
-                  try {
-                    final messenger = ScaffoldMessenger.maybeOf(context);
-                    messenger?.hideCurrentSnackBar();
-                    messenger?.showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          "Your existing active subscription will be used. You won't be charged again.",
-                        ),
-                        behavior: SnackBarBehavior.floating,
-                        duration: Duration(seconds: 4),
+              IapService.instance.unregisterOrangeTickHandler();
+              _verifiedPurchaseDetails = unresolved;
+              if (mounted) {
+                try {
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  messenger?.hideCurrentSnackBar();
+                  messenger?.showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        "Your existing active subscription will be used. You won't be charged again.",
                       ),
-                    );
-                  } catch (_) {}
-                  setState(() {
-                    _isPurchasing = false;
-                  });
-                  await _submitKycAfterPayment(unresolved);
-                }
-                return;
-              } else {
-                debugPrint(
-                  '[ORANGE_TICK_FLOW] Unresolved transaction $unresolvedTxId verification failed: $_lastAppleVerificationError',
-                );
-                IapService.instance.unregisterOrangeTickHandler();
-                if (mounted) {
-                  setState(() {
-                    _isPurchasing = false;
-                    _isSubmitting = false;
-                    _isPurchaseInitiatedByButton = false;
-                  });
-                  if (_isLastTransactionExpired) {
-                    _isLastTransactionExpired = false;
-                    _showExpiredSubscriptionDialog(
-                      txId: unresolvedTxId,
-                      errorMessage:
-                          _lastAppleVerificationError ??
-                          'Your previous Apple subscription has expired.',
-                    );
-                  } else if (_isLastTransactionConflict) {
-                    _isLastTransactionConflict = false;
-                    _showSubmissionErrorDialog(
-                      _lastAppleVerificationError ??
-                          'This Apple subscription is already associated with another account.',
-                    );
-                  } else {
-                    _showSubmissionErrorDialog(
-                      _lastAppleVerificationError ??
-                          'Unable to verify your App Store subscription with the server. Please check your internet connection and try again.',
-                    );
-                  }
-                }
-                return;
+                      behavior: SnackBarBehavior.floating,
+                      duration: Duration(seconds: 4),
+                    ),
+                  );
+                } catch (_) {}
+                setState(() {
+                  _isPurchasing = false;
+                });
+                await _submitKycAfterPayment(unresolved);
               }
+              return;
+            } else {
+              debugPrint(
+                '[ORANGE_TICK_FLOW] Unresolved transaction verification failed.',
+              );
+              IapService.instance.unregisterOrangeTickHandler();
+              if (mounted) {
+                setState(() {
+                  _isPurchasing = false;
+                  _isSubmitting = false;
+                  _isPurchaseInitiatedByButton = false;
+                });
+                if (_isLastTransactionExpired) {
+                  _isLastTransactionExpired = false;
+                  _showExpiredSubscriptionDialog(
+                    txId: unresolvedTxId,
+                    errorMessage:
+                        _lastAppleVerificationError ??
+                        'Your previous Apple subscription has expired.',
+                  );
+                } else if (_isLastTransactionConflict) {
+                  _isLastTransactionConflict = false;
+                  _showSubmissionErrorDialog(
+                    _lastAppleVerificationError ??
+                        'This Apple subscription is already associated with another account.',
+                  );
+                } else {
+                  _showSubmissionErrorDialog(
+                    _lastAppleVerificationError ??
+                        'Unable to verify your App Store verification purchase with the server. Please check your internet connection and try again.',
+                  );
+                }
+              }
+              return;
             }
           }
         }
-
 
         // Step 3: Trigger fresh Apple StoreKit purchase (no Razorpay order needed for Apple IAP)
         debugPrint(
@@ -1449,10 +1367,9 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
           if (response != null && response['order'] != null) {
             final order = response['order'];
             final rawKey = response['key'];
-            final razorpayKey =
-                (rawKey is String && rawKey.trim().isNotEmpty)
-                    ? rawKey.trim()
-                    : null;
+            final razorpayKey = (rawKey is String && rawKey.trim().isNotEmpty)
+                ? rawKey.trim()
+                : null;
 
             if (razorpayKey == null) {
               debugPrint(
@@ -1754,6 +1671,65 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
     );
   }
 
+  void _showNoPendingApplicationDialog(String message) {
+    if (!mounted || !context.mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text(
+            'Application Not Found',
+            style: text16(fontWeight: FontWeight.bold),
+          ),
+          content: Text(
+            '$message\n\nWould you like to return and start a new verification application?',
+            style: text14(color: AppColors.textSecondary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                if (Navigator.canPop(context)) {
+                  Navigator.pop(context, false);
+                }
+              },
+              child: Text(
+                'Cancel',
+                style: text14(color: AppColors.textSecondary),
+              ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                // Return to verification flow; status has been refreshed and allows new application
+                if (Navigator.canPop(context)) {
+                  Navigator.pop(context, false);
+                }
+              },
+              child: Text(
+                'Start New Application',
+                style: text14(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   void _showExpiredSubscriptionDialog({
     required String txId,
@@ -1782,7 +1758,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
           ],
         ),
         content: Text(
-          'Your previous Apple subscription (Transaction ID: $txId) has expired.\n\n$errorMessage\n\nYou can continue to purchase a new subscription to get your Orange Tick.',
+          'Your previous Apple subscription has expired.\n\n$errorMessage\n\nYou can continue to purchase a new subscription to get your Orange Tick.',
           style: text14(color: AppColors.textSecondary),
         ),
         actions: [
@@ -1804,7 +1780,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
               ),
             ),
             child: Text(
-              'Subscribe Now',
+              'Purchase Again',
               style: text14(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ),
@@ -1828,9 +1804,9 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
             widget.plan.effectiveAppleProductId,
           ) &&
           IapService.instance.isProductNotFound(orangeTickProductId)) {
-        return 'Subscription Unavailable';
+        return 'Verification Unavailable';
       }
-      return 'Submit & Subscribe';
+      return 'Submit & Purchase';
     }
     return 'Submit & Pay$priceStr';
   }
@@ -1843,6 +1819,14 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
       return _isUpdate ? 'Saving Changes...' : 'Submitting Application...';
     }
     return 'Please wait...';
+  }
+
+  String _orangeTickPurchaseDisclosure() {
+    final durationDays = widget.plan.duration ?? 30;
+    final validity = durationDays == 1
+        ? '1 day'
+        : '$durationDays days';
+    return 'One-time Orange Tick purchase: $validity of access. It does not renew automatically. Access ends when this validity expires; purchase again manually to continue. Restore is limited to remaining validity of an eligible unexpired purchase.';
   }
 
   @override
@@ -1885,8 +1869,8 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
           _isReapplication
               ? 'Reapply for Orange Tick'
               : _isUpdate
-                  ? 'Update Verification Details'
-                  : 'Orange Tick Request',
+              ? 'Update Verification Details'
+              : 'Orange Tick Request',
           style: text18(fontWeight: FontWeight.bold),
         ),
         leading: IconButton(
@@ -2039,6 +2023,14 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
                       ),
                     ),
 
+                  if (requiresPayment && Platform.isIOS) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      _orangeTickPurchaseDisclosure(),
+                      textAlign: TextAlign.center,
+                      style: text11(color: AppColors.grey600),
+                    ),
+                  ],
                   const SizedBox(height: 30),
                   SizedBox(
                     width: double.infinity,
@@ -2237,8 +2229,8 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
                   color: errorMessage != null
                       ? AppColors.error
                       : (hasNew || hasExisting)
-                          ? AppColors.primary.withValues(alpha: 0.3)
-                          : AppColors.grey200,
+                      ? AppColors.primary.withValues(alpha: 0.3)
+                      : AppColors.grey200,
                   style: BorderStyle.solid,
                 ),
               ),
@@ -2346,10 +2338,7 @@ class _VerificationFormScreenState extends State<VerificationFormScreen> {
                     color: AppColors.error,
                   ),
                   const SizedBox(width: 4),
-                  Text(
-                    errorMessage,
-                    style: text12(color: AppColors.error),
-                  ),
+                  Text(errorMessage, style: text12(color: AppColors.error)),
                 ],
               ),
             ),

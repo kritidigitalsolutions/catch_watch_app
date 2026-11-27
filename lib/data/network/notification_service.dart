@@ -24,15 +24,12 @@ import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class NotificationService {
-  static final FirebaseMessaging _messaging =
-      FirebaseMessaging.instance;
+  static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
 
-  static final FlutterLocalNotificationsPlugin
-  _localNotifications =
-  FlutterLocalNotificationsPlugin();
+  static final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
 
-  static final BaseApiService _apiService =
-  NetworkApiService();
+  static final BaseApiService _apiService = NetworkApiService();
 
   /// Current active chat.
   /// Used to suppress normal chat notifications.
@@ -43,12 +40,10 @@ class NotificationService {
   /// IMPORTANT:
   /// Incoming calls are handled by CallKit and are NOT
   /// sent through this stream.
-  static final StreamController<RemoteMessage>
-  _foregroundMessageController =
-  StreamController<RemoteMessage>.broadcast();
+  static final StreamController<RemoteMessage> _foregroundMessageController =
+      StreamController<RemoteMessage>.broadcast();
 
-  static Stream<RemoteMessage>
-  get foregroundMessageStream =>
+  static Stream<RemoteMessage> get foregroundMessageStream =>
       _foregroundMessageController.stream;
 
   /// Prevent duplicate initialization of notification listeners
@@ -76,44 +71,37 @@ class NotificationService {
   static const String notificationChannelId =
       'high_importance_channel_catch_watch';
 
-  static const String notificationChannelName =
-      'Catch Watch Notifications';
+  static const String notificationChannelName = 'Catch Watch Notifications';
 
-  static const String incomingCallChannelName =
-      'Incoming Calls';
+  static const String incomingCallChannelName = 'Incoming Calls';
 
-  static const String missedCallChannelName =
-      'Missed Calls';
+  static const String missedCallChannelName = 'Missed Calls';
 
-  static const Duration incomingCallDuration =
-  Duration(seconds: 30);
+  static const Duration incomingCallDuration = Duration(seconds: 30);
 
   /// Short window used to suppress duplicate CallKit rings for the same call.
-  static const Duration _callKitDuplicateWindow =
-  Duration(seconds: 8);
+  static const Duration _callKitDuplicateWindow = Duration(seconds: 8);
 
   /// callId -> last time CallKit was shown for it (per-isolate, TTL bounded).
-  static final Map<String, DateTime> _recentCallKitShown =
-  <String, DateTime>{};
+  static final Map<String, DateTime> _recentCallKitShown = <String, DateTime>{};
 
   // ============================================================
   // UUID
   // ============================================================
 
   static String _getUuidFromCallId(String callId) {
-    final String uuid = const Uuid().v5(
-      Uuid.NAMESPACE_URL,
-      callId,
-    );
+    final String uuid = const Uuid().v5(Uuid.NAMESPACE_URL, callId);
     _persistCallIdMapping(callId, uuid);
     return uuid;
   }
 
   static void _persistCallIdMapping(String callId, String uuid) {
-    SharedPreferences.getInstance().then((prefs) {
-      prefs.setString('call_uuid_$uuid', callId);
-      prefs.setString('last_incoming_call_id', callId);
-    }).catchError((_) {});
+    SharedPreferences.getInstance()
+        .then((prefs) {
+          prefs.setString('call_uuid_$uuid', callId);
+          prefs.setString('last_incoming_call_id', callId);
+        })
+        .catchError((_) {});
   }
 
   // ============================================================
@@ -121,47 +109,29 @@ class NotificationService {
   // ============================================================
 
   @pragma('vm:entry-point')
-  static Future<void> backgroundHandler(
-      RemoteMessage message,
-      ) async {
+  static Future<void> backgroundHandler(RemoteMessage message) async {
     try {
       await Firebase.initializeApp();
       await HiveService.init();
 
-      debugPrint(
-        '📩 BACKGROUND FCM RECEIVED',
-      );
+      debugPrint('📩 BACKGROUND FCM RECEIVED');
 
-      debugPrint(
-        'Message ID: ${message.messageId}',
-      );
+      debugPrint('Message ID: ${message.messageId}');
 
-      debugPrint(
-        'Data: ${message.data}',
-      );
+      debugPrint('Data: ${message.data}');
 
-      final Map<String, dynamic> data =
-      Map<String, dynamic>.from(
-        message.data,
-      );
+      final Map<String, dynamic> data = Map<String, dynamic>.from(message.data);
 
-      final String type =
-          data['type']
-              ?.toString()
-              .toUpperCase() ??
-              '';
+      final String type = data['type']?.toString().toUpperCase() ?? '';
 
-      final String? callId =
-      _extractCallId(data);
+      final String? callId = _extractCallId(data);
 
       // ----------------------------------------------------------
       // CALL ENDED / CANCELLED / REJECTED
       // ----------------------------------------------------------
 
       if (_isCallEndType(type)) {
-        await _endCallFromBackground(
-          callId,
-        );
+        await _endCallFromBackground(callId);
 
         return;
       }
@@ -171,9 +141,7 @@ class NotificationService {
       // ----------------------------------------------------------
 
       if (_isIncomingCall(data)) {
-        await _showIncomingCallKit(
-          data,
-        );
+        await _showIncomingCallKit(data);
 
         return;
       }
@@ -182,17 +150,11 @@ class NotificationService {
       // NORMAL NOTIFICATION
       // ----------------------------------------------------------
 
-      await _showNotificationInternal(
-        message,
-      );
+      await _showNotificationInternal(message);
     } catch (e, stackTrace) {
-      debugPrint(
-        '❌ Background FCM error: $e',
-      );
+      debugPrint('❌ Background FCM error: $e');
 
-      debugPrint(
-        '$stackTrace',
-      );
+      debugPrint('$stackTrace');
     }
   }
 
@@ -200,23 +162,21 @@ class NotificationService {
   // CALL DATA HELPERS
   // ============================================================
 
-  static String? _extractCallId(
-      Map<String, dynamic> data,
-      ) {
-    dynamic value = data['callId'] ??
-        data['call_id'] ??
-        data['_id'] ??
-        data['id'];
+  static String? _extractCallId(Map<String, dynamic> data) {
+    dynamic value =
+        data['callId'] ?? data['call_id'] ?? data['_id'] ?? data['id'];
 
     if (value == null && data['call'] != null) {
       if (data['call'] is Map) {
-        value = data['call']['_id'] ?? data['call']['id'] ?? data['call']['callId'];
+        value =
+            data['call']['_id'] ?? data['call']['id'] ?? data['call']['callId'];
       }
     }
 
     if (value == null && data['data'] != null) {
       if (data['data'] is Map) {
-        value = data['data']['callId'] ?? data['data']['_id'] ?? data['data']['id'];
+        value =
+            data['data']['callId'] ?? data['data']['_id'] ?? data['data']['id'];
       }
     }
 
@@ -232,21 +192,22 @@ class NotificationService {
     return result;
   }
 
-  static bool _isIncomingCall(
-      Map<String, dynamic> data,
-      ) {
-    final String type = (data['type'] ?? data['notificationType'] ?? data['event'])
+  static bool _isIncomingCall(Map<String, dynamic> data) {
+    final String type =
+        (data['type'] ?? data['notificationType'] ?? data['event'])
             ?.toString()
             .toUpperCase() ??
         '';
 
     // NOTE: this previously shadowed the `callType` constant, so `type == callType`
     // never matched the intended literal 'CALL'. Compare against the constant honestly.
-    final String payloadCallType =
-        (data['callType'] ?? '').toString().toUpperCase();
+    final String payloadCallType = (data['callType'] ?? '')
+        .toString()
+        .toUpperCase();
     final bool hasCallId = _extractCallId(data) != null;
 
-    final bool isCallLikeType = type == callType ||
+    final bool isCallLikeType =
+        type == callType ||
         type == incomingCallType ||
         type == 'CALL_INCOMING' ||
         type == 'VIDEO_CALL' ||
@@ -255,7 +216,8 @@ class NotificationService {
         payloadCallType == 'VIDEO_CALL' ||
         payloadCallType == 'AUDIO_CALL';
 
-    final bool isMediaCallType = hasCallId &&
+    final bool isMediaCallType =
+        hasCallId &&
         (type == 'VIDEO' ||
             type == 'AUDIO' ||
             payloadCallType == 'VIDEO' ||
@@ -264,9 +226,7 @@ class NotificationService {
     return isCallLikeType || isMediaCallType;
   }
 
-  static bool _isCallEndType(
-      String type,
-      ) {
+  static bool _isCallEndType(String type) {
     return type == callCancelledType ||
         type == callEndedType ||
         type == cancelType ||
@@ -292,16 +252,14 @@ class NotificationService {
   static bool isCallEndPayload(Map<String, dynamic> data) {
     final String type =
         (data['type'] ?? data['notificationType'] ?? data['event'])
-                ?.toString()
-                .toUpperCase() ??
-            '';
+            ?.toString()
+            .toUpperCase() ??
+        '';
     return _isCallEndType(type);
   }
 
   /// Resolves the nested call object when a backend nests call fields.
-  static Map<String, dynamic>? _nestedCallPayload(
-      Map<String, dynamic> data,
-      ) {
+  static Map<String, dynamic>? _nestedCallPayload(Map<String, dynamic> data) {
     final dynamic call = data['call'];
     if (call is Map) {
       return Map<String, dynamic>.from(call);
@@ -319,45 +277,42 @@ class NotificationService {
   }
 
   /// Caller display name, falling back across top-level and nested fields.
-  static String _resolveCallerName(
-      Map<String, dynamic> data,
-      ) {
+  static String _resolveCallerName(Map<String, dynamic> data) {
     final Map<String, dynamic> nested =
         _nestedCallPayload(data) ?? const <String, dynamic>{};
-    final String? name = (data['callerName'] ??
-            data['senderName'] ??
-            nested['callerName'] ??
-            nested['senderName'] ??
-            nested['name'])
-        ?.toString()
-        .trim();
+    final String? name =
+        (data['callerName'] ??
+                data['senderName'] ??
+                nested['callerName'] ??
+                nested['senderName'] ??
+                nested['name'])
+            ?.toString()
+            .trim();
     return (name != null && name.isNotEmpty) ? name : 'Unknown Caller';
   }
 
   /// Caller identifier, falling back across top-level and nested fields.
-  static String? _resolveCallerId(
-      Map<String, dynamic> data,
-      ) {
+  static String? _resolveCallerId(Map<String, dynamic> data) {
     final Map<String, dynamic> nested =
         _nestedCallPayload(data) ?? const <String, dynamic>{};
-    final String? id = (data['callerId'] ??
-            data['senderId'] ??
-            nested['callerId'] ??
-            nested['senderId'] ??
-            nested['_id'])
-        ?.toString()
-        .trim();
+    final String? id =
+        (data['callerId'] ??
+                data['senderId'] ??
+                nested['callerId'] ??
+                nested['senderId'] ??
+                nested['_id'])
+            ?.toString()
+            .trim();
     return (id != null && id.isNotEmpty) ? id : null;
   }
 
   /// Normalizes the call type to 'video' or 'audio' regardless of whether the
   /// backend labels it `video`, `VIDEO_CALL`, `callType` or `type`.
-  static String _resolveCallType(
-      Map<String, dynamic> data,
-      ) {
+  static String _resolveCallType(Map<String, dynamic> data) {
     final Map<String, dynamic> nested =
         _nestedCallPayload(data) ?? const <String, dynamic>{};
-    final String raw = (data['callType'] ??
+    final String raw =
+        (data['callType'] ??
                 nested['callType'] ??
                 nested['call_type'] ??
                 data['type'] ??
@@ -372,32 +327,23 @@ class NotificationService {
   // END CALL FROM BACKGROUND
   // ============================================================
 
-  static Future<void> _endCallFromBackground(
-      String? callId,
-      ) async {
+  static Future<void> _endCallFromBackground(String? callId) async {
     try {
       if (callId != null) {
         // Allow a future, genuinely new ring for this call without the
         // duplicate-suppression window blocking it.
         _recentCallKitShown.remove(callId);
 
-        final String uuid =
-        _getUuidFromCallId(callId);
+        final String uuid = _getUuidFromCallId(callId);
 
-        await FlutterCallkitIncoming.endCall(
-          uuid,
-        );
+        await FlutterCallkitIncoming.endCall(uuid);
 
-        debugPrint(
-          '🛑 CallKit call ended: $callId',
-        );
+        debugPrint('🛑 CallKit call ended: $callId');
       }
 
       await FlutterCallkitIncoming.endAllCalls();
     } catch (e) {
-      debugPrint(
-        '❌ Error ending CallKit call: $e',
-      );
+      debugPrint('❌ Error ending CallKit call: $e');
     }
   }
 
@@ -405,23 +351,17 @@ class NotificationService {
   // SHOW INCOMING CALL
   // ============================================================
 
-  static Future<void> _showIncomingCallKit(
-      Map<String, dynamic> data,
-      ) async {
+  static Future<void> _showIncomingCallKit(Map<String, dynamic> data) async {
     try {
-      final String? extractedCallId =
-      _extractCallId(data);
+      final String? extractedCallId = _extractCallId(data);
 
       if (extractedCallId == null) {
-        debugPrint(
-          '❌ Incoming call has no callId',
-        );
+        debugPrint('❌ Incoming call has no callId');
 
         return;
       }
 
-      final String callId =
-          extractedCallId;
+      final String callId = extractedCallId;
 
       final Map<String, dynamic> nestedCall =
           _nestedCallPayload(data) ?? const <String, dynamic>{};
@@ -431,11 +371,8 @@ class NotificationService {
       // ----------------------------------------------------------
       final String? callerId = _resolveCallerId(data);
 
-      if (callerId != null &&
-          callerId == HiveService.userId) {
-        debugPrint(
-          '🚫 Ignoring self-call notification',
-        );
+      if (callerId != null && callerId == HiveService.userId) {
+        debugPrint('🚫 Ignoring self-call notification');
 
         return;
       }
@@ -450,37 +387,31 @@ class NotificationService {
       // window so the user never sees two concurrent rings.
       final DateTime now = DateTime.now();
       _recentCallKitShown.removeWhere(
-            (_, shownAt) =>
-                now.difference(shownAt) > _callKitDuplicateWindow,
+        (_, shownAt) => now.difference(shownAt) > _callKitDuplicateWindow,
       );
       final DateTime? lastShown = _recentCallKitShown[callId];
       if (lastShown != null &&
           now.difference(lastShown) <= _callKitDuplicateWindow) {
-        debugPrint(
-          '🚫 CallKit already shown for $callId; skipping duplicate',
-        );
+        debugPrint('🚫 CallKit already shown for $callId; skipping duplicate');
 
         return;
       }
       _recentCallKitShown[callId] = now;
 
-      final String uuid =
-      _getUuidFromCallId(callId);
+      final String uuid = _getUuidFromCallId(callId);
 
-      final String callerName =
-      _resolveCallerName(data);
+      final String callerName = _resolveCallerName(data);
 
-      final String callType =
-      _resolveCallType(data);
+      final String callType = _resolveCallType(data);
 
       final String? callerImage =
           data['callerImage']?.toString() ??
-              data['senderImage']?.toString() ??
-              nestedCall['callerImage']?.toString() ??
-              nestedCall['senderImage']?.toString();
+          data['senderImage']?.toString() ??
+          nestedCall['callerImage']?.toString() ??
+          nestedCall['senderImage']?.toString();
 
       final String? callerPhone =
-      data['callerPhone']?.toString() ??
+          data['callerPhone']?.toString() ??
           nestedCall['callerPhone']?.toString();
 
       // ----------------------------------------------------------
@@ -499,8 +430,7 @@ class NotificationService {
       // We don't start FlutterRingtonePlayer here.
       // ----------------------------------------------------------
 
-      final Map<String, dynamic> extraData =
-      <String, dynamic>{
+      final Map<String, dynamic> extraData = <String, dynamic>{
         'callId': callId,
         'callerName': callerName,
         'callerImage': callerImage,
@@ -509,35 +439,23 @@ class NotificationService {
         'callType': callType,
 
         // Preserve values from backend if they exist.
-        'channelName':
-        data['channelName'] ?? nestedCall['channelName'],
-        'agoraToken':
-        data['agoraToken'] ?? nestedCall['agoraToken'],
-        'agoraUid':
-        data['agoraUid'] ?? nestedCall['agoraUid'],
-        'receiverId':
-        data['receiverId'] ?? nestedCall['receiverId'],
+        'channelName': data['channelName'] ?? nestedCall['channelName'],
+        'agoraToken': data['agoraToken'] ?? nestedCall['agoraToken'],
+        'agoraUid': data['agoraUid'] ?? nestedCall['agoraUid'],
+        'receiverId': data['receiverId'] ?? nestedCall['receiverId'],
       };
 
-      final CallKitParams params =
-      CallKitParams(
+      final CallKitParams params = CallKitParams(
         id: uuid,
         nameCaller: callerName,
         appName: 'CatchWatch',
         avatar: callerImage,
-        handle:
-        callerPhone ??
-            callerId ??
-            'Incoming call',
-        type: callType == 'video'
-            ? 1
-            : 0,
+        handle: callerPhone ?? callerId ?? 'Incoming call',
+        type: callType == 'video' ? 1 : 0,
 
-        duration:
-        incomingCallDuration.inMilliseconds,
+        duration: incomingCallDuration.inMilliseconds,
 
-        missedCallNotification:
-        const NotificationParams(
+        missedCallNotification: const NotificationParams(
           showNotification: true,
           isShowCallback: true,
           subtitle: 'Missed call',
@@ -546,39 +464,33 @@ class NotificationService {
 
         extra: extraData,
 
-        headers: const <String, dynamic>{
-          'platform': 'flutter',
-        },
+        headers: const <String, dynamic>{'platform': 'flutter'},
 
         android: AndroidParams(
           isCustomNotification: true,
           isShowLogo: false,
           isCustomSmallExNotification: true,
 
-          ringtonePath:
-          'system_ringtone_default',
+          ringtonePath: 'system_ringtone_default',
 
-          backgroundColor:
-          '#641dff', // Your App's Primary Color
+          backgroundColor: '#641dff', // Your App's Primary Color
 
-          actionColor:
-          '#4CAF50',
+          actionColor: '#4CAF50',
 
           textAccept: 'Accept',
           textDecline: 'Decline',
 
           // Use high-priority notification for incoming calls to comply with Play Store policy
-          isFullScreen: false, 
+          isFullScreen: false,
 
           isImportant: true,
 
           isShowFullLockedScreen: false,
 
           incomingCallNotificationChannelName:
-          'high_importance_channel_catch_watch_calls',
+              'high_importance_channel_catch_watch_calls',
 
-          missedCallNotificationChannelName:
-          missedCallChannelName,
+          missedCallNotificationChannelName: missedCallChannelName,
         ),
 
         ios: const IOSParams(
@@ -589,51 +501,31 @@ class NotificationService {
           maximumCallsPerCallGroup: 1,
           audioSessionMode: 'default',
           audioSessionActive: true,
-          audioSessionPreferredSampleRate:
-          44100.0,
-          audioSessionPreferredIOBufferDuration:
-          0.005,
+          audioSessionPreferredSampleRate: 44100.0,
+          audioSessionPreferredIOBufferDuration: 0.005,
           supportsDTMF: true,
           supportsHolding: true,
           supportsGrouping: false,
           supportsUngrouping: false,
-          ringtonePath:
-          'system_ringtone_default',
+          ringtonePath: 'system_ringtone_default',
         ),
       );
 
-      debugPrint(
-        '📞 SHOWING CALLKIT INCOMING CALL',
-      );
+      debugPrint('📞 SHOWING CALLKIT INCOMING CALL');
 
-      debugPrint(
-        'Call ID: $callId',
-      );
+      debugPrint('Call ID: $callId');
 
-      debugPrint(
-        'UUID: $uuid',
-      );
+      debugPrint('UUID: $uuid');
 
-      debugPrint(
-        'Caller: $callerName',
-      );
+      debugPrint('Caller: $callerName');
 
-      await FlutterCallkitIncoming
-          .showCallkitIncoming(
-        params,
-      );
+      await FlutterCallkitIncoming.showCallkitIncoming(params);
 
-      debugPrint(
-        '✅ CallKit incoming call shown',
-      );
+      debugPrint('✅ CallKit incoming call shown');
     } catch (e, stackTrace) {
-      debugPrint(
-        '❌ Error showing CallKit incoming call: $e',
-      );
+      debugPrint('❌ Error showing CallKit incoming call: $e');
 
-      debugPrint(
-        '$stackTrace',
-      );
+      debugPrint('$stackTrace');
     }
   }
 
@@ -644,7 +536,9 @@ class NotificationService {
   static Future<void> init() async {
     if (_initialized) {
       if (kDebugMode) {
-        debugPrint('🔔 [NotificationService] Already initialized; checking token sync state.');
+        debugPrint(
+          '🔔 [NotificationService] Already initialized; checking token sync state.',
+        );
       }
       if (HiveService.isLogin() && !_tokenSynced) {
         await syncTokenToServer();
@@ -660,15 +554,10 @@ class NotificationService {
       // LOCAL NOTIFICATION INITIALIZATION
       // --------------------------------------------------------
 
-      const AndroidInitializationSettings
-      android =
-      AndroidInitializationSettings(
-        '@mipmap/ic_launcher',
-      );
+      const AndroidInitializationSettings android =
+          AndroidInitializationSettings('@mipmap/ic_launcher');
 
-      const DarwinInitializationSettings
-      ios =
-      DarwinInitializationSettings(
+      const DarwinInitializationSettings ios = DarwinInitializationSettings(
         requestAlertPermission: false,
         requestBadgePermission: false,
         requestSoundPermission: false,
@@ -680,27 +569,18 @@ class NotificationService {
       );
 
       await _localNotifications.initialize(
-        const InitializationSettings(
-          android: android,
-          iOS: ios,
-        ),
-        onDidReceiveNotificationResponse:
-            (response) {
-          debugPrint(
-            '👉 LOCAL NOTIFICATION CLICKED',
-          );
+        const InitializationSettings(android: android, iOS: ios),
+        onDidReceiveNotificationResponse: (response) {
+          debugPrint('👉 LOCAL NOTIFICATION CLICKED');
 
-          debugPrint(
-            'Payload: ${response.payload}',
-          );
+          debugPrint('Payload: ${response.payload}');
 
           if (response.payload != null && response.payload!.isNotEmpty) {
             try {
-              final Map<String, dynamic> data =
-                  Map<String, dynamic>.from(jsonDecode(response.payload!));
-              _foregroundMessageController.add(
-                RemoteMessage(data: data),
+              final Map<String, dynamic> data = Map<String, dynamic>.from(
+                jsonDecode(response.payload!),
               );
+              _foregroundMessageController.add(RemoteMessage(data: data));
             } catch (e) {
               debugPrint('Error routing local notification tap payload: $e');
             }
@@ -713,31 +593,26 @@ class NotificationService {
       // --------------------------------------------------------
 
       if (Platform.isAndroid) {
-        final AndroidFlutterLocalNotificationsPlugin?
-        androidImplementation =
-        _localNotifications
-            .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
+        final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
+            _localNotifications
+                .resolvePlatformSpecificImplementation<
+                  AndroidFlutterLocalNotificationsPlugin
+                >();
 
-        await androidImplementation
-            ?.requestNotificationsPermission();
+        await androidImplementation?.requestNotificationsPermission();
 
-        await androidImplementation
-            ?.createNotificationChannel(
+        await androidImplementation?.createNotificationChannel(
           const AndroidNotificationChannel(
             notificationChannelId,
             notificationChannelName,
-            description:
-            'This channel is used for important notifications.',
-            importance:
-            Importance.max,
+            description: 'This channel is used for important notifications.',
+            importance: Importance.max,
             playSound: true,
           ),
         );
 
         // CREATE INCOMING CALL CHANNEL
-        await androidImplementation
-            ?.createNotificationChannel(
+        await androidImplementation?.createNotificationChannel(
           const AndroidNotificationChannel(
             'high_importance_channel_catch_watch_calls',
             incomingCallChannelName,
@@ -750,8 +625,7 @@ class NotificationService {
         );
 
         // CREATE MISSED CALL CHANNEL
-        await androidImplementation
-            ?.createNotificationChannel(
+        await androidImplementation?.createNotificationChannel(
           const AndroidNotificationChannel(
             'missed_call_channel_id',
             missedCallChannelName,
@@ -761,49 +635,66 @@ class NotificationService {
           ),
         );
       } else if (Platform.isIOS) {
-        final NotificationSettings settings = await _messaging.requestPermission(
-          alert: true,
-          announcement: false,
-          badge: true,
-          carPlay: false,
-          criticalAlert: false,
-          provisional: false,
-          sound: true,
-        );
+        final NotificationSettings settings = await _messaging
+            .requestPermission(
+              alert: true,
+              announcement: false,
+              badge: true,
+              carPlay: false,
+              criticalAlert: false,
+              provisional: false,
+              sound: true,
+            );
 
         if (kDebugMode) {
-          debugPrint('iOS Notification requestPermission() result: ${settings.authorizationStatus}');
+          debugPrint(
+            'iOS Notification requestPermission() result: ${settings.authorizationStatus}',
+          );
         }
 
-        final NotificationSettings currentSettings =
-            await _messaging.getNotificationSettings();
+        final NotificationSettings currentSettings = await _messaging
+            .getNotificationSettings();
 
-        debugPrint('🔔 [iOS Notification Settings - getNotificationSettings()]');
-        debugPrint('  - authorizationStatus: ${currentSettings.authorizationStatus}');
+        debugPrint(
+          '🔔 [iOS Notification Settings - getNotificationSettings()]',
+        );
+        debugPrint(
+          '  - authorizationStatus: ${currentSettings.authorizationStatus}',
+        );
         debugPrint('  - alert: ${currentSettings.alert}');
         debugPrint('  - sound: ${currentSettings.sound}');
         debugPrint('  - badge: ${currentSettings.badge}');
         debugPrint('  - lockScreen: ${currentSettings.lockScreen}');
-        debugPrint('  - notificationCenter: ${currentSettings.notificationCenter}');
+        debugPrint(
+          '  - notificationCenter: ${currentSettings.notificationCenter}',
+        );
         debugPrint('  - showPreviews: ${currentSettings.showPreviews}');
         debugPrint('  - criticalAlert: ${currentSettings.criticalAlert}');
 
         final IOSFlutterLocalNotificationsPlugin? iosLocalPlugin =
-            _localNotifications.resolvePlatformSpecificImplementation<
-                IOSFlutterLocalNotificationsPlugin>();
+            _localNotifications
+                .resolvePlatformSpecificImplementation<
+                  IOSFlutterLocalNotificationsPlugin
+                >();
         if (iosLocalPlugin != null) {
           try {
-            final NotificationsEnabledOptions? localPerms =
-                await iosLocalPlugin.checkPermissions();
+            final NotificationsEnabledOptions? localPerms = await iosLocalPlugin
+                .checkPermissions();
             debugPrint('🔔 [iOS Local Notifications - checkPermissions()]');
             debugPrint('  - isEnabled: ${localPerms?.isEnabled}');
             debugPrint('  - isAlertEnabled: ${localPerms?.isAlertEnabled}');
             debugPrint('  - isSoundEnabled: ${localPerms?.isSoundEnabled}');
             debugPrint('  - isBadgeEnabled: ${localPerms?.isBadgeEnabled}');
-            debugPrint('  - isProvisionalEnabled: ${localPerms?.isProvisionalEnabled}');
-            debugPrint('  - isCriticalEnabled: ${localPerms?.isCriticalEnabled}');
+            debugPrint(
+              '  - isProvisionalEnabled: ${localPerms?.isProvisionalEnabled}',
+            );
+            debugPrint(
+              '  - isCriticalEnabled: ${localPerms?.isCriticalEnabled}',
+            );
           } catch (e) {
-            debugPrint('⚠️ [iOS Local Notifications] Error querying checkPermissions(): $e');
+            debugPrint(
+              '⚠️ [iOS Local Notifications] Error querying checkPermissions(): $e',
+            );
           }
         }
 
@@ -826,150 +717,106 @@ class NotificationService {
       // FCM TOKEN REFRESH
       // --------------------------------------------------------
 
-      _messaging.onTokenRefresh.listen(
-            (newToken) {
-          if (newToken.isNotEmpty) {
-            debugPrint('CURRENT_FCM_TOKEN: $newToken');
-          }
-          if (kDebugMode) {
-            debugPrint('🔄 FCM TOKEN REFRESHED (available: ${newToken.isNotEmpty}, length: ${newToken.length})');
-          }
-
-          syncTokenToServer(
-            newToken,
+      _messaging.onTokenRefresh.listen((newToken) {
+        if (newToken.isNotEmpty) {
+          debugPrint('CURRENT_FCM_TOKEN: [REDACTED]');
+        }
+        if (kDebugMode) {
+          debugPrint(
+            '🔄 FCM TOKEN REFRESHED (available: ${newToken.isNotEmpty}, length: ${newToken.length})',
           );
-        },
-      );
+        }
+
+        syncTokenToServer(newToken);
+      });
 
       // --------------------------------------------------------
       // FOREGROUND FCM
       // --------------------------------------------------------
 
-      FirebaseMessaging.onMessage.listen(
-            (RemoteMessage message) async {
-          try {
-            debugPrint(
-              '📩 FOREGROUND FCM RECEIVED',
-            );
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
+        try {
+          debugPrint('📩 FOREGROUND FCM RECEIVED');
 
-            debugPrint(
-              'Data: ${message.data}',
-            );
+          debugPrint('Data: ${message.data}');
 
-            final Map<String, dynamic> data =
-            Map<String, dynamic>.from(
-              message.data,
-            );
+          final Map<String, dynamic> data = Map<String, dynamic>.from(
+            message.data,
+          );
 
-            final String type =
-                data['type']
-                    ?.toString()
-                    .toUpperCase() ??
-                    '';
+          final String type = data['type']?.toString().toUpperCase() ?? '';
 
-            final String? callId =
-            _extractCallId(data);
+          final String? callId = _extractCallId(data);
 
-            // --------------------------------------------------
-            // CALL ENDED
-            // --------------------------------------------------
+          // --------------------------------------------------
+          // CALL ENDED
+          // --------------------------------------------------
 
-            if (_isCallEndType(type)) {
-              await _endCallFromBackground(
-                callId,
-              );
+          if (_isCallEndType(type)) {
+            await _endCallFromBackground(callId);
 
-              _foregroundMessageController.add(
-                message,
-              );
+            _foregroundMessageController.add(message);
 
-              return;
-            }
-
-            // --------------------------------------------------
-            // INCOMING CALL
-            // --------------------------------------------------
-
-            if (_isIncomingCall(data)) {
-              debugPrint('📲 Foreground incoming call: piping to CallProvider stream');
-              _foregroundMessageController.add(
-                message,
-              );
-              return;
-            }
-
-            // --------------------------------------------------
-            // NORMAL FCM MESSAGE
-            // --------------------------------------------------
-
-            _foregroundMessageController.add(
-              message,
-            );
-
-            await _showNotificationInternal(
-              message,
-            );
-          } catch (e) {
-            debugPrint(
-              '❌ Foreground FCM error: $e',
-            );
+            return;
           }
-        },
-      );
+
+          // --------------------------------------------------
+          // INCOMING CALL
+          // --------------------------------------------------
+
+          if (_isIncomingCall(data)) {
+            debugPrint(
+              '📲 Foreground incoming call: piping to CallProvider stream',
+            );
+            _foregroundMessageController.add(message);
+            return;
+          }
+
+          // --------------------------------------------------
+          // NORMAL FCM MESSAGE
+          // --------------------------------------------------
+
+          _foregroundMessageController.add(message);
+
+          await _showNotificationInternal(message);
+        } catch (e) {
+          debugPrint('❌ Foreground FCM error: $e');
+        }
+      });
 
       // --------------------------------------------------------
       // NOTIFICATION CLICKED WHILE BACKGROUND
       // --------------------------------------------------------
 
-      FirebaseMessaging.onMessageOpenedApp.listen(
-            (RemoteMessage message) {
-          debugPrint(
-            '📲 NOTIFICATION CLICKED FROM BACKGROUND',
-          );
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        debugPrint('📲 NOTIFICATION CLICKED FROM BACKGROUND');
 
-          debugPrint(
-            'Data: ${message.data}',
-          );
+        debugPrint('Data: ${message.data}');
 
-          // Don't route incoming call through normal
-          // notification navigation.
-          if (_isIncomingCall(
-            message.data,
-          )) {
-            return;
-          }
+        // Don't route incoming call through normal
+        // notification navigation.
+        if (_isIncomingCall(message.data)) {
+          return;
+        }
 
-          _foregroundMessageController.add(
-            message,
-          );
-        },
-      );
+        _foregroundMessageController.add(message);
+      });
 
       // --------------------------------------------------------
       // APP LAUNCHED FROM NOTIFICATION
       // --------------------------------------------------------
 
-      final RemoteMessage? initialMessage =
-      await _messaging.getInitialMessage().timeout(
-        const Duration(seconds: 3),
-        onTimeout: () => null,
-      );
+      final RemoteMessage? initialMessage = await _messaging
+          .getInitialMessage()
+          .timeout(const Duration(seconds: 3), onTimeout: () => null);
 
       if (initialMessage != null) {
-        debugPrint(
-          '📲 APP LAUNCHED FROM NOTIFICATION',
-        );
+        debugPrint('📲 APP LAUNCHED FROM NOTIFICATION');
 
-        debugPrint(
-          'Data: ${initialMessage.data}',
-        );
+        debugPrint('Data: ${initialMessage.data}');
 
-        if (!_isIncomingCall(
-          initialMessage.data,
-        )) {
-          _foregroundMessageController.add(
-            initialMessage,
-          );
+        if (!_isIncomingCall(initialMessage.data)) {
+          _foregroundMessageController.add(initialMessage);
         }
       }
 
@@ -982,18 +829,12 @@ class NotificationService {
       }
 
       if (kDebugMode) {
-        debugPrint(
-          '✅ NotificationService initialized',
-        );
+        debugPrint('✅ NotificationService initialized');
       }
     } catch (e, stackTrace) {
-      debugPrint(
-        '❌ NotificationService init error: $e',
-      );
+      debugPrint('❌ NotificationService init error: $e');
 
-      debugPrint(
-        '$stackTrace',
-      );
+      debugPrint('$stackTrace');
     }
   }
 
@@ -1015,20 +856,16 @@ class NotificationService {
 
       if (Platform.isAndroid) {
         // Android 13+
-        await FlutterCallkitIncoming
-            .requestNotificationPermission({
-          'title':
-          'Notification permission',
+        await FlutterCallkitIncoming.requestNotificationPermission({
+          'title': 'Notification permission',
           'rationaleMessagePermission':
-          'Notification permission is required to show incoming calls.',
+              'Notification permission is required to show incoming calls.',
           'postNotificationMessageRequired':
-          'Notification permission is required. Please allow notification permission from settings.',
+              'Notification permission is required. Please allow notification permission from settings.',
         });
       }
     } catch (e) {
-      debugPrint(
-        '❌ Permission error: $e',
-      );
+      debugPrint('❌ Permission error: $e');
     }
   }
 
@@ -1042,7 +879,9 @@ class NotificationService {
         final apnsToken = await _messaging.getAPNSToken();
         if (apnsToken == null || apnsToken.isEmpty) {
           if (kDebugMode) {
-            debugPrint('ℹ️ [FCM_GET] APNs token not yet available on iOS; deferring getToken().');
+            debugPrint(
+              'ℹ️ [FCM_GET] APNs token not yet available on iOS; deferring getToken().',
+            );
           }
           return null;
         }
@@ -1072,7 +911,9 @@ class NotificationService {
             final apnsToken = await _messaging.getAPNSToken();
             if (apnsToken != null && apnsToken.isNotEmpty) {
               if (kDebugMode) {
-                debugPrint('✅ [APNs] APNs token ready on attempt ${retry + 1} (length: ${apnsToken.length})');
+                debugPrint(
+                  '✅ [APNs] APNs token ready on attempt ${retry + 1} (length: ${apnsToken.length})',
+                );
               }
               break;
             }
@@ -1095,21 +936,31 @@ class NotificationService {
 
       if (token != null && token.isNotEmpty) {
         _cachedFcmToken = token;
-        debugPrint('CURRENT_FCM_TOKEN: $token');
+        debugPrint('CURRENT_FCM_TOKEN: [REDACTED]');
         if (kDebugMode) {
-          debugPrint('🔥 [FCM] FCM token retrieved successfully (length: ${token.length})');
+          debugPrint(
+            '🔥 [FCM] FCM token retrieved successfully (length: ${token.length})',
+          );
         }
         await syncTokenToServer(token);
       } else {
-        debugPrint('CURRENT_FCM_TOKEN: null (FCM token retrieval deferred or APNs token not yet ready)');
+        debugPrint(
+          'CURRENT_FCM_TOKEN: null (FCM token retrieval deferred or APNs token not yet ready)',
+        );
         if (kDebugMode) {
-          debugPrint('⚠️ [FCM] FCM token unavailable after initial launch attempts. Will synchronize on authentication or token refresh.');
+          debugPrint(
+            '⚠️ [FCM] FCM token unavailable after initial launch attempts. Will synchronize on authentication or token refresh.',
+          );
         }
       }
     } catch (e) {
-      debugPrint('CURRENT_FCM_TOKEN: Error retrieving token: $e');
+      debugPrint(
+        'CURRENT_FCM_TOKEN: Error retrieving token (${e.runtimeType})',
+      );
       if (kDebugMode) {
-        debugPrint('⚠️ [FCM] Error during deferred FCM token retrieval/sync: $e');
+        debugPrint(
+          '⚠️ [FCM] Error during deferred FCM token retrieval/sync (${e.runtimeType}).',
+        );
       }
     }
   }
@@ -1118,41 +969,43 @@ class NotificationService {
   // TOKEN SYNC
   // ============================================================
 
-  static Future<void> syncTokenToServer([
-      String? token,
-      ]) async {
+  static Future<void> syncTokenToServer([String? token]) async {
     try {
-      final effectiveToken = token ?? _cachedFcmToken ?? await _getFcmTokenSafely();
+      final effectiveToken =
+          token ?? _cachedFcmToken ?? await _getFcmTokenSafely();
 
       if (effectiveToken != null && effectiveToken.isNotEmpty) {
         _cachedFcmToken = effectiveToken;
-        debugPrint('CURRENT_FCM_TOKEN: $effectiveToken');
+        debugPrint('CURRENT_FCM_TOKEN: [REDACTED]');
       }
 
       if (!HiveService.isLogin()) {
         if (kDebugMode) {
-          debugPrint('ℹ️ [FCM_SYNC] User not logged in. Caching FCM token for post-login sync (len: ${effectiveToken?.length ?? 0}).');
+          debugPrint(
+            'ℹ️ [FCM_SYNC] User not logged in. Caching FCM token for post-login sync (len: ${effectiveToken?.length ?? 0}).',
+          );
         }
         return;
       }
 
       if (effectiveToken == null || effectiveToken.isEmpty) {
         if (kDebugMode) {
-          debugPrint('⚠️ [FCM_SYNC] FCM token not available yet. Skipping backend sync.');
+          debugPrint(
+            '⚠️ [FCM_SYNC] FCM token not available yet. Skipping backend sync.',
+          );
         }
         return;
       }
 
       if (kDebugMode) {
-        debugPrint('🔥 [FCM_SYNC] Syncing FCM token to backend (length: ${effectiveToken.length})...');
+        debugPrint(
+          '🔥 [FCM_SYNC] Syncing FCM token to backend (length: ${effectiveToken.length})...',
+        );
       }
 
-      await _apiService.patchApi(
-        AppUrl.updateFcmToken,
-        {
-          'fcmToken': effectiveToken,
-        },
-      );
+      await _apiService.patchApi(AppUrl.updateFcmToken, {
+        'fcmToken': effectiveToken,
+      });
 
       _tokenSynced = true;
       if (kDebugMode) {
@@ -1160,9 +1013,7 @@ class NotificationService {
       }
     } catch (e) {
       if (kDebugMode) {
-        debugPrint(
-          '❌ [FCM_SYNC] Error syncing FCM token: $e',
-        );
+        debugPrint('❌ [FCM_SYNC] Error syncing FCM token: $e');
       }
     }
   }
@@ -1173,12 +1024,7 @@ class NotificationService {
       if (!HiveService.isLogin()) {
         return;
       }
-      await _apiService.patchApi(
-        AppUrl.updateFcmToken,
-        {
-          'fcmToken': '',
-        },
-      );
+      await _apiService.patchApi(AppUrl.updateFcmToken, {'fcmToken': ''});
       if (kDebugMode) {
         debugPrint('✅ [FCM_SYNC] Cleared FCM token on server on logout');
       }
@@ -1193,12 +1039,9 @@ class NotificationService {
   // NORMAL NOTIFICATION
   // ============================================================
 
-  static Future<void> _showNotificationInternal(
-      RemoteMessage message,
-      ) async {
+  static Future<void> _showNotificationInternal(RemoteMessage message) async {
     try {
-      final RemoteNotification? notification =
-          message.notification;
+      final RemoteNotification? notification = message.notification;
 
       // On iOS the system already presents notification-payload messages
       // (see _messaging.setForegroundNotificationPresentationOptions and the
@@ -1214,38 +1057,30 @@ class NotificationService {
       }
 
       final String title =
-          notification?.title ??
-              message.data['title'] ??
-              'CatchWatch';
+          notification?.title ?? message.data['title'] ?? 'CatchWatch';
 
       final String body =
           notification?.body ??
-              message.data['message'] ??
-              message.data['body'] ??
-              '';
+          message.data['message'] ??
+          message.data['body'] ??
+          '';
 
       final String? imageUrl =
           message.data['image'] ??
-              message.data['imageUrl'] ??
-              notification?.android?.imageUrl ??
-              notification?.apple?.imageUrl;
+          message.data['imageUrl'] ??
+          notification?.android?.imageUrl ??
+          notification?.apple?.imageUrl;
 
       // --------------------------------------------------------
       // CHAT SUPPRESSION
       // --------------------------------------------------------
 
-      final String? conversationId =
-      message.data['conversationId'];
+      final String? conversationId = message.data['conversationId'];
 
-      if (conversationId != null &&
-          activeChatId == conversationId) {
-        debugPrint(
-          '🚀 Chat active: $conversationId',
-        );
+      if (conversationId != null && activeChatId == conversationId) {
+        debugPrint('🚀 Chat active: $conversationId');
 
-        debugPrint(
-          'Suppressing notification',
-        );
+        debugPrint('Suppressing notification');
 
         return;
       }
@@ -1258,11 +1093,11 @@ class NotificationService {
       // showLocalChatNotification) and FCM. Reuse the shared id set so the
       // user only ever sees one notification.
       final String? fcmMessageId =
-      (message.data['messageId'] ??
-          message.data['message_id'] ??
-          message.data['_id'] ??
-          message.data['id'])
-          ?.toString();
+          (message.data['messageId'] ??
+                  message.data['message_id'] ??
+                  message.data['_id'] ??
+                  message.data['id'])
+              ?.toString();
 
       if (conversationId != null &&
           fcmMessageId != null &&
@@ -1286,102 +1121,69 @@ class NotificationService {
         return;
       }
 
-      String? senderName =
-          message.data['senderName'] ??
-              title;
+      String? senderName = message.data['senderName'] ?? title;
 
-      String? senderImage =
-      message.data['senderImage'];
+      String? senderImage = message.data['senderImage'];
 
-      MessagingStyleInformation?
-      messagingStyle;
+      MessagingStyleInformation? messagingStyle;
 
       if (conversationId != null) {
-        final Person person =
-        Person(
+        final Person person = Person(
           name: senderName,
           key: message.data['senderId'],
           icon: senderImage != null
-              ? BitmapFilePathAndroidIcon(
-            senderImage,
-          )
+              ? BitmapFilePathAndroidIcon(senderImage)
               : null,
         );
 
-        messagingStyle =
-            MessagingStyleInformation(
-              person,
-              conversationTitle:
-              message.data['groupName'],
-              messages: [
-                Message(
-                  body,
-                  DateTime.now(),
-                  person,
-                ),
-              ],
-            );
+        messagingStyle = MessagingStyleInformation(
+          person,
+          conversationTitle: message.data['groupName'],
+          messages: [Message(body, DateTime.now(), person)],
+        );
       }
 
-      BigPictureStyleInformation?
-      bigPictureStyleInformation;
+      BigPictureStyleInformation? bigPictureStyleInformation;
 
       String? localImagePath;
 
-      if (imageUrl != null &&
-          imageUrl.isNotEmpty &&
-          messagingStyle == null) {
+      if (imageUrl != null && imageUrl.isNotEmpty && messagingStyle == null) {
         try {
           final String fileName =
               'notification_img_'
               '${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-          final String downloadedPath =
-          await _downloadAndSaveFile(
+          final String downloadedPath = await _downloadAndSaveFile(
             imageUrl,
             fileName,
           );
 
           localImagePath = downloadedPath;
 
-          bigPictureStyleInformation =
-              BigPictureStyleInformation(
-                FilePathAndroidBitmap(
-                  downloadedPath,
-                ),
-                largeIcon:
-                FilePathAndroidBitmap(
-                  downloadedPath,
-                ),
-                contentTitle: title,
-                summaryText: body,
-              );
-        } catch (e) {
-          debugPrint(
-            '❌ Notification image error: $e',
+          bigPictureStyleInformation = BigPictureStyleInformation(
+            FilePathAndroidBitmap(downloadedPath),
+            largeIcon: FilePathAndroidBitmap(downloadedPath),
+            contentTitle: title,
+            summaryText: body,
           );
+        } catch (e) {
+          debugPrint('❌ Notification image error: $e');
         }
       }
 
-      final AndroidNotificationDetails
-      androidDetails =
-      AndroidNotificationDetails(
-        notificationChannelId,
-        notificationChannelName,
-        importance: Importance.max,
-        priority: Priority.high,
-        icon: '@mipmap/ic_launcher',
-        styleInformation:
-        messagingStyle ??
-            bigPictureStyleInformation,
-        largeIcon: localImagePath != null && localImagePath.isNotEmpty
-            ? FilePathAndroidBitmap(
-          localImagePath,
-        )
-            : null,
-        category:
-        AndroidNotificationCategory.message,
-      );
+      final AndroidNotificationDetails androidDetails =
+          AndroidNotificationDetails(
+            notificationChannelId,
+            notificationChannelName,
+            importance: Importance.max,
+            priority: Priority.high,
+            icon: '@mipmap/ic_launcher',
+            styleInformation: messagingStyle ?? bigPictureStyleInformation,
+            largeIcon: localImagePath != null && localImagePath.isNotEmpty
+                ? FilePathAndroidBitmap(localImagePath)
+                : null,
+            category: AndroidNotificationCategory.message,
+          );
 
       final String? finalAttachmentPath = localImagePath;
 
@@ -1400,21 +1202,15 @@ class NotificationService {
             interruptionLevel: InterruptionLevel.active,
             threadIdentifier: conversationId,
             attachments:
-            finalAttachmentPath != null && finalAttachmentPath.isNotEmpty
-                ? [
-              DarwinNotificationAttachment(
-                finalAttachmentPath,
-              ),
-            ]
+                finalAttachmentPath != null && finalAttachmentPath.isNotEmpty
+                ? [DarwinNotificationAttachment(finalAttachmentPath)]
                 : null,
           ),
         ),
         payload: jsonEncode(message.data),
       );
     } catch (e) {
-      debugPrint(
-        '❌ Normal notification error: $e',
-      );
+      debugPrint('❌ Normal notification error: $e');
     }
   }
 
@@ -1480,39 +1276,36 @@ class NotificationService {
         }
       }
 
-      final String title = senderName.trim().isNotEmpty ? senderName.trim() : 'CatchWatch';
-      final String displayBody = body.trim().isNotEmpty ? body.trim() : 'New message';
+      final String title = senderName.trim().isNotEmpty
+          ? senderName.trim()
+          : 'CatchWatch';
+      final String displayBody = body.trim().isNotEmpty
+          ? body.trim()
+          : 'New message';
 
       debugPrint(
         '📲 [ChatNotification] Attempting local notification display for messageId: $messageId',
       );
 
-      final Person person = Person(
-        name: title,
-        key: senderId,
-      );
+      final Person person = Person(name: title, key: senderId);
 
-      final MessagingStyleInformation messagingStyle = MessagingStyleInformation(
-        person,
-        conversationTitle: groupName,
-        messages: [
-          Message(
-            displayBody,
-            DateTime.now(),
+      final MessagingStyleInformation messagingStyle =
+          MessagingStyleInformation(
             person,
-          ),
-        ],
-      );
+            conversationTitle: groupName,
+            messages: [Message(displayBody, DateTime.now(), person)],
+          );
 
-      final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-        notificationChannelId,
-        notificationChannelName,
-        importance: Importance.max,
-        priority: Priority.high,
-        icon: '@mipmap/ic_launcher',
-        styleInformation: messagingStyle,
-        category: AndroidNotificationCategory.message,
-      );
+      final AndroidNotificationDetails androidDetails =
+          AndroidNotificationDetails(
+            notificationChannelId,
+            notificationChannelName,
+            importance: Importance.max,
+            priority: Priority.high,
+            icon: '@mipmap/ic_launcher',
+            styleInformation: messagingStyle,
+            category: AndroidNotificationCategory.message,
+          );
 
       final DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
         presentAlert: true,
@@ -1549,9 +1342,7 @@ class NotificationService {
         '✅ [ChatNotification] Local notification shown successfully for messageId: $messageId',
       );
     } catch (e, st) {
-      debugPrint(
-        '❌ [ChatNotification] Notification plugin error: $e',
-      );
+      debugPrint('❌ [ChatNotification] Notification plugin error: $e');
       if (kDebugMode) {
         debugPrint('$st');
       }
@@ -1563,28 +1354,20 @@ class NotificationService {
   // ============================================================
 
   static Future<String> _downloadAndSaveFile(
-      String url,
-      String fileName,
-      ) async {
-    final Directory directory =
-    await getApplicationDocumentsDirectory();
+    String url,
+    String fileName,
+  ) async {
+    final Directory directory = await getApplicationDocumentsDirectory();
 
-    final String filePath =
-        '${directory.path}/$fileName';
+    final String filePath = '${directory.path}/$fileName';
 
-    final http.Response response =
-    await http
+    final http.Response response = await http
         .get(Uri.parse(url))
-        .timeout(
-      const Duration(seconds: 10),
-    );
+        .timeout(const Duration(seconds: 10));
 
-    final File file =
-    File(filePath);
+    final File file = File(filePath);
 
-    await file.writeAsBytes(
-      response.bodyBytes,
-    );
+    await file.writeAsBytes(response.bodyBytes);
 
     return filePath;
   }

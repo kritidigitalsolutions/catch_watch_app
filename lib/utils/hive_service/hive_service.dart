@@ -28,9 +28,7 @@ class HiveService {
       resetOnError: false,
       migrateOnAlgorithmChange: true,
     ),
-    iOptions: IOSOptions(
-      accessibility: KeychainAccessibility.first_unlock,
-    ),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
   );
 
   // In-memory cache loaded securely for synchronous access
@@ -38,8 +36,10 @@ class HiveService {
   static List<int>? _cachedPrivateKey;
   static String? _cachedKeyUserId;
 
-  static String _scopedPrivateKeyKey(String uid) => '$_securePrivateKeyPrefix$uid';
-  static String _scopedPublicKeyKey(String uid) => '$_securePublicKeyPrefix$uid';
+  static String _scopedPrivateKeyKey(String uid) =>
+      '$_securePrivateKeyPrefix$uid';
+  static String _scopedPublicKeyKey(String uid) =>
+      '$_securePublicKeyPrefix$uid';
 
   static Future<void> init() async {
     await Hive.initFlutter();
@@ -69,7 +69,9 @@ class HiveService {
         secureToken = await _secureStorage.read(key: _secureTokenKey);
       } catch (e) {
         if (kDebugMode) {
-          debugPrint('⚠️ [SECURE_STORAGE] Failed to read auth token: $e');
+          debugPrint(
+            '⚠️ [SECURE_STORAGE] Failed to read auth token (${e.runtimeType})',
+          );
         }
       }
 
@@ -81,7 +83,10 @@ class HiveService {
         final trimmedHiveToken = hiveToken.trim();
         if (secureToken == null || secureToken.isEmpty) {
           // Write to secure storage and verify before modifying Hive
-          await _secureStorage.write(key: _secureTokenKey, value: trimmedHiveToken);
+          await _secureStorage.write(
+            key: _secureTokenKey,
+            value: trimmedHiveToken,
+          );
           final verified = await _secureStorage.read(key: _secureTokenKey);
           if (verified == trimmedHiveToken) {
             secureToken = verified;
@@ -89,7 +94,9 @@ class HiveService {
             currentUser.token = null;
             await _box.put(userKey, currentUser);
             if (kDebugMode) {
-              debugPrint('🔒 [SECURE_STORAGE] Successfully migrated JWT token to secure storage');
+              debugPrint(
+                '🔒 [SECURE_STORAGE] Successfully migrated JWT token to secure storage',
+              );
             }
           }
         } else {
@@ -104,7 +111,9 @@ class HiveService {
       List<int>? privateKeyBytes;
       if (currentUid != null && currentUid.isNotEmpty) {
         try {
-          final scopedKeyStr = await _secureStorage.read(key: _scopedPrivateKeyKey(currentUid));
+          final scopedKeyStr = await _secureStorage.read(
+            key: _scopedPrivateKeyKey(currentUid),
+          );
           if (scopedKeyStr != null && scopedKeyStr.isNotEmpty) {
             privateKeyBytes = base64Decode(scopedKeyStr);
             _cachedKeyUserId = currentUid;
@@ -114,19 +123,26 @@ class HiveService {
 
       if (privateKeyBytes == null) {
         try {
-          final legacyKeyStr = await _secureStorage.read(key: _securePrivateKeyKey);
+          final legacyKeyStr = await _secureStorage.read(
+            key: _securePrivateKeyKey,
+          );
           if (legacyKeyStr != null && legacyKeyStr.isNotEmpty) {
             privateKeyBytes = base64Decode(legacyKeyStr);
             if (currentUid != null && currentUid.isNotEmpty) {
               _cachedKeyUserId = currentUid;
               // Adopt into scoped key for active user and remove unscoped key to prevent exposure
-              await _secureStorage.write(key: _scopedPrivateKeyKey(currentUid), value: legacyKeyStr);
+              await _secureStorage.write(
+                key: _scopedPrivateKeyKey(currentUid),
+                value: legacyKeyStr,
+              );
               await _secureStorage.delete(key: _securePrivateKeyKey);
             }
           }
         } catch (e) {
           if (kDebugMode) {
-            debugPrint('⚠️ [SECURE_STORAGE] Failed to read E2EE private key: $e');
+            debugPrint(
+              '⚠️ [SECURE_STORAGE] Failed to read E2EE private key (${e.runtimeType})',
+            );
           }
         }
       }
@@ -140,8 +156,13 @@ class HiveService {
             if (privateKeyBytes == null || privateKeyBytes.isEmpty) {
               final b64 = base64Encode(hiveKeyBytes);
               if (currentUid != null && currentUid.isNotEmpty) {
-                await _secureStorage.write(key: _scopedPrivateKeyKey(currentUid), value: b64);
-                final verifiedStr = await _secureStorage.read(key: _scopedPrivateKeyKey(currentUid));
+                await _secureStorage.write(
+                  key: _scopedPrivateKeyKey(currentUid),
+                  value: b64,
+                );
+                final verifiedStr = await _secureStorage.read(
+                  key: _scopedPrivateKeyKey(currentUid),
+                );
                 if (verifiedStr != null) {
                   final verifiedBytes = base64Decode(verifiedStr);
                   if (listEquals(verifiedBytes, hiveKeyBytes)) {
@@ -149,13 +170,18 @@ class HiveService {
                     _cachedKeyUserId = currentUid;
                     await _keysBox.delete('privateKey');
                     if (kDebugMode) {
-                      debugPrint('🔒 [SECURE_STORAGE] Successfully migrated E2EE private key to user-scoped secure storage');
+                      debugPrint(
+                        '🔒 [SECURE_STORAGE] Successfully migrated E2EE private key to user-scoped secure storage',
+                      );
                     }
                   }
                 }
               } else {
                 // If no user is authenticated yet, temporarily store until first login
-                await _secureStorage.write(key: _securePrivateKeyKey, value: b64);
+                await _secureStorage.write(
+                  key: _securePrivateKeyKey,
+                  value: b64,
+                );
                 await _keysBox.delete('privateKey');
               }
             } else {
@@ -172,11 +198,17 @@ class HiveService {
         final hivePub = _keysBox.get('publicKey');
         if (hivePub != null && hivePub is String && hivePub.isNotEmpty) {
           if (currentUid != null && currentUid.isNotEmpty) {
-            await _secureStorage.write(key: _scopedPublicKeyKey(currentUid), value: hivePub);
+            await _secureStorage.write(
+              key: _scopedPublicKeyKey(currentUid),
+              value: hivePub,
+            );
             await _keysBox.put('publicKey_$currentUid', hivePub);
             await _keysBox.delete('publicKey');
           } else {
-            await _secureStorage.write(key: _securePublicKeyKey, value: hivePub);
+            await _secureStorage.write(
+              key: _securePublicKeyKey,
+              value: hivePub,
+            );
             await _keysBox.delete('publicKey');
           }
         }
@@ -208,7 +240,8 @@ class HiveService {
       final token = user.token!.trim();
       _cachedToken = token;
       await _secureStorage.write(key: _secureTokenKey, value: token);
-      user.token = null; // Ensure token is never written to plaintext Hive storage
+      user.token =
+          null; // Ensure token is never written to plaintext Hive storage
     }
     await _box.put(userKey, user);
 
@@ -222,7 +255,9 @@ class HiveService {
   static Future<void> _loadOrAdoptUserKeys(String uid) async {
     try {
       // 1. Check if user already has a scoped private key in Secure Storage
-      final scopedKeyStr = await _secureStorage.read(key: _scopedPrivateKeyKey(uid));
+      final scopedKeyStr = await _secureStorage.read(
+        key: _scopedPrivateKeyKey(uid),
+      );
       if (scopedKeyStr != null && scopedKeyStr.isNotEmpty) {
         _cachedPrivateKey = base64Decode(scopedKeyStr);
         _cachedKeyUserId = uid;
@@ -236,14 +271,20 @@ class HiveService {
         _cachedPrivateKey = decoded;
         _cachedKeyUserId = uid;
         // Adopt into scoped key for this user
-        await _secureStorage.write(key: _scopedPrivateKeyKey(uid), value: legacyKeyStr);
+        await _secureStorage.write(
+          key: _scopedPrivateKeyKey(uid),
+          value: legacyKeyStr,
+        );
         // Delete legacy unscoped key so another user cannot adopt it
         await _secureStorage.delete(key: _securePrivateKeyKey);
 
         // Also adopt legacy public key if available
         final legacyPub = await _secureStorage.read(key: _securePublicKeyKey);
         if (legacyPub != null && legacyPub.isNotEmpty) {
-          await _secureStorage.write(key: _scopedPublicKeyKey(uid), value: legacyPub);
+          await _secureStorage.write(
+            key: _scopedPublicKeyKey(uid),
+            value: legacyPub,
+          );
           await _secureStorage.delete(key: _securePublicKeyKey);
           if (Hive.isBoxOpen(keysBoxName)) {
             await _keysBox.put('publicKey_$uid', legacyPub);
@@ -289,7 +330,10 @@ class HiveService {
   }
 
   // --- Watch History ---
-  static Future<void> saveWatchHistory(String contentId, Map<String, dynamic> data) async {
+  static Future<void> saveWatchHistory(
+    String contentId,
+    Map<String, dynamic> data,
+  ) async {
     if (!Hive.isBoxOpen(historyBoxName)) return;
     await _historyBox.put(contentId, data);
   }
@@ -385,7 +429,7 @@ class HiveService {
 
   /// Logs out the user session. Clears the JWT auth token from Secure Storage
   /// and wipes local user session boxes.
-  /// 
+  ///
   /// NOTE: Preserves the user's E2EE private and public keys in Secure Storage
   /// so that logging back into this account on this device can reuse the existing key pair
   /// and decrypt historical messages. Keys are scoped by user ID to prevent cross-account exposure.
@@ -397,7 +441,9 @@ class HiveService {
       await _secureStorage.delete(key: _secureTokenKey);
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('⚠️ [SECURE_STORAGE] Error deleting auth token on logout: $e');
+        debugPrint(
+          '⚠️ [SECURE_STORAGE] Error deleting auth token on logout: $e',
+        );
       }
     }
     await _box.clear();
@@ -406,7 +452,9 @@ class HiveService {
     await _statsBox.clear();
     // Clear ephemeral partner JWKs on logout
     if (Hive.isBoxOpen(keysBoxName)) {
-      final keysToDelete = _keysBox.keys.where((k) => k.toString().startsWith('partner_jwk_')).toList();
+      final keysToDelete = _keysBox.keys
+          .where((k) => k.toString().startsWith('partner_jwk_'))
+          .toList();
       for (final k in keysToDelete) {
         await _keysBox.delete(k);
       }
@@ -427,7 +475,9 @@ class HiveService {
         }
       } catch (e) {
         if (kDebugMode) {
-          debugPrint('⚠️ [SECURE_STORAGE] Error deleting scoped keys on account deletion: $e');
+          debugPrint(
+            '⚠️ [SECURE_STORAGE] Error deleting scoped keys on account deletion: $e',
+          );
         }
       }
     }
@@ -445,7 +495,12 @@ class HiveService {
   }
 
   // --- User Stats Cache ---
-  static Future<void> saveUserStats(String userId, int followers, int following, int reels) async {
+  static Future<void> saveUserStats(
+    String userId,
+    int followers,
+    int following,
+    int reels,
+  ) async {
     await _statsBox.put(userId, {
       'followers': followers,
       'following': following,
@@ -464,11 +519,16 @@ class HiveService {
   /// Persists E2EE private key bytes to hardware-backed Secure Storage.
   /// Scopes the key to [targetUserId] or the currently authenticated user (`userId`).
   /// Always normalizes key bytes to strictly 32 bytes (removes 33-byte sign prefix).
-  static Future<void> savePrivateKey(List<int> bytes, {String? targetUserId}) async {
+  static Future<void> savePrivateKey(
+    List<int> bytes, {
+    String? targetUserId,
+  }) async {
     final uid = targetUserId ?? userId;
     if (uid == null || uid.isEmpty) {
       if (kDebugMode) {
-        debugPrint('⚠️ [SECURE_STORAGE] Cannot save private key without a valid user ID.');
+        debugPrint(
+          '⚠️ [SECURE_STORAGE] Cannot save private key without a valid user ID.',
+        );
       }
       return;
     }
@@ -492,7 +552,9 @@ class HiveService {
     final uid = targetUserId ?? userId;
     if (uid == null || uid.isEmpty) return null;
     if (_cachedPrivateKey != null && _cachedKeyUserId == uid) {
-      return List<int>.from(EncryptionHelper.normalizeBytes(_cachedPrivateKey!, 32));
+      return List<int>.from(
+        EncryptionHelper.normalizeBytes(_cachedPrivateKey!, 32),
+      );
     }
     return null;
   }
@@ -504,11 +566,15 @@ class HiveService {
     if (uid == null || uid.isEmpty) return null;
 
     if (_cachedPrivateKey != null && _cachedKeyUserId == uid) {
-      return List<int>.from(EncryptionHelper.normalizeBytes(_cachedPrivateKey!, 32));
+      return List<int>.from(
+        EncryptionHelper.normalizeBytes(_cachedPrivateKey!, 32),
+      );
     }
 
     try {
-      final scopedKeyStr = await _secureStorage.read(key: _scopedPrivateKeyKey(uid));
+      final scopedKeyStr = await _secureStorage.read(
+        key: _scopedPrivateKeyKey(uid),
+      );
       if (scopedKeyStr != null && scopedKeyStr.isNotEmpty) {
         final decoded = base64Decode(scopedKeyStr);
         final normalized = EncryptionHelper.normalizeBytes(decoded, 32);
@@ -518,7 +584,9 @@ class HiveService {
       }
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('⚠️ [SECURE_STORAGE] Error reading scoped private key: $e');
+        debugPrint(
+          '⚠️ [SECURE_STORAGE] Error reading scoped private key (${e.runtimeType})',
+        );
       }
     }
 
@@ -530,7 +598,10 @@ class HiveService {
         final normalized = EncryptionHelper.normalizeBytes(decoded, 32);
         _cachedPrivateKey = normalized;
         _cachedKeyUserId = uid;
-        await _secureStorage.write(key: _scopedPrivateKeyKey(uid), value: base64Encode(normalized));
+        await _secureStorage.write(
+          key: _scopedPrivateKeyKey(uid),
+          value: base64Encode(normalized),
+        );
         await _secureStorage.delete(key: _securePrivateKeyKey);
         return List<int>.from(normalized);
       }
@@ -613,7 +684,9 @@ class HiveService {
   static String? getPublicKey({String? targetUserId}) {
     final uid = targetUserId ?? userId;
     if (_cachedPublicKey != null && _cachedPublicKey!.isNotEmpty) {
-      if (uid == null || _cachedPublicKeyUserId == null || _cachedPublicKeyUserId == uid) {
+      if (uid == null ||
+          _cachedPublicKeyUserId == null ||
+          _cachedPublicKeyUserId == uid) {
         return _cachedPublicKey;
       }
     }
@@ -643,14 +716,18 @@ class HiveService {
     final uid = targetUserId ?? userId;
 
     if (_cachedPublicKey != null && _cachedPublicKey!.isNotEmpty) {
-      if (uid == null || _cachedPublicKeyUserId == null || _cachedPublicKeyUserId == uid) {
+      if (uid == null ||
+          _cachedPublicKeyUserId == null ||
+          _cachedPublicKeyUserId == uid) {
         return _cachedPublicKey;
       }
     }
 
     if (uid != null && uid.isNotEmpty) {
       try {
-        final scopedPub = await _secureStorage.read(key: _scopedPublicKeyKey(uid));
+        final scopedPub = await _secureStorage.read(
+          key: _scopedPublicKeyKey(uid),
+        );
         if (scopedPub != null && scopedPub.trim().isNotEmpty) {
           final clean = scopedPub.trim();
           _cachedPublicKey = clean;
@@ -663,7 +740,9 @@ class HiveService {
         }
       } catch (e, stack) {
         if (kDebugMode) {
-          debugPrint('⚠️ [SECURE_STORAGE] Error reading scoped public key: $e\n$stack');
+          debugPrint(
+            '⚠️ [SECURE_STORAGE] Error reading scoped public key: $e\n$stack',
+          );
         }
       }
     }
@@ -694,7 +773,10 @@ class HiveService {
         _cachedPublicKey = clean;
         if (uid != null && uid.isNotEmpty) {
           _cachedPublicKeyUserId = uid;
-          await _secureStorage.write(key: _scopedPublicKeyKey(uid), value: clean);
+          await _secureStorage.write(
+            key: _scopedPublicKeyKey(uid),
+            value: clean,
+          );
           await _secureStorage.delete(key: _securePublicKeyKey);
         }
         if (Hive.isBoxOpen(keysBoxName)) {
@@ -707,7 +789,9 @@ class HiveService {
       }
     } catch (e, stack) {
       if (kDebugMode) {
-        debugPrint('⚠️ [SECURE_STORAGE] Error reading legacy public key: $e\n$stack');
+        debugPrint(
+          '⚠️ [SECURE_STORAGE] Error reading legacy public key: $e\n$stack',
+        );
       }
     }
 
@@ -765,6 +849,7 @@ class HiveService {
 
   static bool isOnboardingCompleted() {
     if (!Hive.isBoxOpen(appSettingsBoxName)) return false;
-    return _appSettingsBox.get(onboardingCompletedKey, defaultValue: false) == true;
+    return _appSettingsBox.get(onboardingCompletedKey, defaultValue: false) ==
+        true;
   }
 }

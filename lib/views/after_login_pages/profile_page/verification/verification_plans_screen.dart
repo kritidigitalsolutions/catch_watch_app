@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:catch_watch/data/exception/app_exception.dart';
 import 'package:catch_watch/models/plan_model.dart';
 import 'package:catch_watch/repository/plan_repository.dart';
 import 'package:catch_watch/res/app_colors.dart';
@@ -15,6 +14,7 @@ import 'package:provider/provider.dart';
 import 'verification_form_screen.dart';
 import 'verification_status_screen.dart';
 import 'verified_status_screen.dart';
+import 'package:catch_watch/utils/restore_purchase_policy.dart';
 
 class VerificationPlansScreen extends StatefulWidget {
   const VerificationPlansScreen({super.key});
@@ -30,6 +30,7 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
   }
   bool _isRestoring = false;
   int _inFlightVerificationCount = 0;
+  int _verifiedRestoreCount = 0;
 
   @override
   void initState() {
@@ -41,9 +42,9 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
   }
 
   void _initIap() {
-    IapService.instance.initialize(
-      onVerifyPurchase: _verifyApplePurchase,
-      onPurchaseSuccess: _onApplePurchaseSuccess,
+    IapService.instance.initializeOrangeTickRestore(
+      onVerify: _verifyApplePurchase,
+      onSuccess: _onApplePurchaseSuccess,
       onError: (message) {
         if (!mounted) return;
         setState(() {
@@ -90,6 +91,7 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
   }
 
   Future<bool> _verifyApplePurchase(PurchaseDetails purchaseDetails) async {
+    if (!isOrangeTickProduct(purchaseDetails.productID)) return false;
     // Strictly guard: VerificationPlansScreen ONLY handles active restore flows
     if (!_isRestoring || purchaseDetails.status != PurchaseStatus.restored) {
       debugPrint(
@@ -123,28 +125,12 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
         debugPrint('[ORANGE_TICK_IAP] Backend verification success (restore)');
       } else {
         debugPrint('[ORANGE_TICK_IAP] Backend verification failed (restore)');
-        final serverMsg = response?['message']?.toString() ?? '';
-        if (serverMsg.toLowerCase().contains('expired') ||
-            IapService.instance.isTransactionExpired(purchaseDetails)) {
-          await IapService.instance.resolveAndCompleteTerminalTransaction(
-            purchaseDetails,
-            reason: 'expired',
-          );
-        }
       }
       return success;
     } catch (e) {
       debugPrint(
-        '[ORANGE_TICK_IAP] Backend verification exception (restore): $e',
+        '[ORANGE_TICK_IAP] Backend verification exception during restore (${e.runtimeType}).',
       );
-      final errorMsg = e is AppException ? e.message : e.toString();
-      if (errorMsg.toLowerCase().contains('expired') ||
-          IapService.instance.isTransactionExpired(purchaseDetails)) {
-        await IapService.instance.resolveAndCompleteTerminalTransaction(
-          purchaseDetails,
-          reason: 'expired',
-        );
-      }
       return false;
     } finally {
       _inFlightVerificationCount--;
@@ -152,6 +138,9 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
   }
 
   void _onApplePurchaseSuccess(PurchaseDetails purchaseDetails) {
+    if (_isRestoring && purchaseDetails.status == PurchaseStatus.restored) {
+      _verifiedRestoreCount++;
+    }
     if (!mounted) return;
     try {
       context.read<ProfileProvider>().fetchProfile();
@@ -159,7 +148,9 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
         forceRefresh: true,
       );
     } catch (e) {
-      debugPrint('[ORANGE_TICK_DEBUG] Ignored context lookup on success: $e');
+      debugPrint(
+        '[ORANGE_TICK_DEBUG] Context lookup failed (${e.runtimeType}).',
+      );
     }
   }
 
@@ -169,8 +160,9 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
     setState(() {
       _isRestoring = true;
     });
-    IapService.instance.isRestoring = true;
-
+    _verifiedRestoreCount = 0;
+    IapService.instance.isOrangeTickRestoring = true;
+    IapService.instance.allowFailedTransactionRetries();
     try {
       _initIap();
       final verProvider = context.read<VerificationProvider>();
@@ -201,12 +193,15 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
       await profileProvider.fetchProfile();
       if (!mounted) return;
 
-      if (verProvider.currentApplication?.status == 'approved' ||
-          profileProvider.user?.hasVerifiedTick == true) {
+      if (hasVerifiedRestoreTransaction(_verifiedRestoreCount) &&
+          (verProvider.currentApplication?.status == 'approved' ||
+              profileProvider.user?.hasVerifiedTick == true)) {
         try {
           ScaffoldMessenger.maybeOf(context)?.showSnackBar(
             const SnackBar(
-              content: Text('Orange Tick subscription restored successfully!'),
+              content: Text(
+                'Orange Tick access restored for the remaining eligible validity.',
+              ),
             ),
           );
           Navigator.pushReplacement(
@@ -214,14 +209,17 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
             MaterialPageRoute(builder: (_) => const VerifiedStatusScreen()),
           );
         } catch (e) {
-          debugPrint('[ORANGE_TICK_DEBUG] Ignored navigation error: $e');
+          debugPrint(
+            '[ORANGE_TICK_DEBUG] Navigation error (${e.runtimeType}).',
+          );
         }
-      } else if (verProvider.currentApplication != null) {
+      } else if (hasVerifiedRestoreTransaction(_verifiedRestoreCount) &&
+          verProvider.currentApplication != null) {
         try {
           ScaffoldMessenger.maybeOf(context)?.showSnackBar(
             const SnackBar(
               content: Text(
-                'Subscription restored. Your application is under review.',
+                'Orange Tick access restored for the remaining eligible validity. Your application is under review.',
               ),
             ),
           );
@@ -230,8 +228,18 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
             MaterialPageRoute(builder: (_) => const VerificationStatusScreen()),
           );
         } catch (e) {
-          debugPrint('[ORANGE_TICK_DEBUG] Ignored navigation error: $e');
+          debugPrint(
+            '[ORANGE_TICK_DEBUG] Navigation error (${e.runtimeType}).',
+          );
         }
+      } else if (hasVerifiedRestoreTransaction(_verifiedRestoreCount)) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'The purchase was verified and its remaining validity was restored, but the Orange Tick application status is unavailable. Refresh or contact support.',
+            ),
+          ),
+        );
       } else {
         try {
           ScaffoldMessenger.maybeOf(context)?.showSnackBar(
@@ -242,29 +250,25 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
             ),
           );
         } catch (e) {
-          debugPrint('[ORANGE_TICK_DEBUG] Ignored SnackBar error: $e');
+          debugPrint('[ORANGE_TICK_DEBUG] SnackBar error (${e.runtimeType}).');
         }
       }
     } catch (e) {
-      debugPrint('[IAP] Restore error: $e');
+      debugPrint('[IAP] Restore error (${e.runtimeType}).');
       if (mounted) {
         try {
           ScaffoldMessenger.maybeOf(
             context,
           )?.showSnackBar(SnackBar(content: Text('Restore failed: $e')));
         } catch (err) {
-          debugPrint('[ORANGE_TICK_DEBUG] Ignored SnackBar error: $err');
+          debugPrint(
+            '[ORANGE_TICK_DEBUG] SnackBar error (${err.runtimeType}).',
+          );
         }
       }
     } finally {
-      IapService.instance.isRestoring = false;
-      if (IapService.instance.onVerifyPurchase == _verifyApplePurchase) {
-        IapService.instance.onVerifyPurchase = null;
-        IapService.instance.onPurchaseSuccess = null;
-        IapService.instance.onError = null;
-        IapService.instance.onPending = null;
-        IapService.instance.onCanceled = null;
-      }
+      IapService.instance.isOrangeTickRestoring = false;
+      IapService.instance.clearOrangeTickCallbacks();
       if (mounted) {
         setState(() {
           _isRestoring = false;
@@ -275,13 +279,6 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
 
   @override
   void dispose() {
-    if (IapService.instance.onVerifyPurchase == _verifyApplePurchase) {
-      IapService.instance.onVerifyPurchase = null;
-      IapService.instance.onPurchaseSuccess = null;
-      IapService.instance.onError = null;
-      IapService.instance.onPending = null;
-      IapService.instance.onCanceled = null;
-    }
     super.dispose();
   }
 
@@ -686,13 +683,14 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
   }
 
   Widget _buildPriceWidget(Plan plan) {
-    final String durationLabel = (plan.duration != null && plan.duration == 30)
-        ? '/ Month'
-        : (plan.duration != null ? '/ ${plan.duration} Days' : '/ Month');
+    final String durationLabel = plan.duration != null
+        ? (plan.duration == 1 ? '1 day' : '${plan.duration} days')
+        : 'fixed validity';
 
     if (Platform.isIOS) {
       final String productId = plan.effectiveAppleProductId;
-      final product = IapService.instance.getProduct(productId) ??
+      final product =
+          IapService.instance.getProduct(productId) ??
           IapService.instance.getProduct(orangeTickProductId);
 
       if (product != null && product.price.isNotEmpty) {
@@ -723,11 +721,9 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
         );
       }
 
+      final productState = IapService.instance.productState(productId);
       final bool isUnavailable =
-          IapService.instance.isProductNotFound(productId) ||
-          (IapService.instance.isProductQueried(productId) &&
-              IapService.instance.getProduct(productId) == null &&
-              IapService.instance.getProduct(orangeTickProductId) == null);
+          productState == IapProductState.productNotFound;
 
       return Row(
         crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -735,7 +731,12 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
         children: [
           Flexible(
             child: Text(
-              isUnavailable ? 'Unavailable' : 'Loading...',
+              isUnavailable
+                  ? 'Unavailable'
+                  : (productState == IapProductState.queryError ||
+                            productState == IapProductState.storeKitUnavailable
+                        ? 'Store unavailable'
+                        : 'Loading...'),
               style: text24(
                 fontWeight: FontWeight.w800,
                 color: AppColors.grey500,
@@ -774,18 +775,19 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
   }
 
   Widget _buildEnhancedPlanCard(Plan plan) {
+    final productState = IapService.instance.productState(
+      plan.effectiveAppleProductId,
+    );
     final bool isProductUnavailable =
+        Platform.isIOS && productState == IapProductState.productNotFound;
+    final bool isProductQueryError =
         Platform.isIOS &&
-        (IapService.instance.isProductNotFound(plan.effectiveAppleProductId) ||
-            (IapService.instance.isProductQueried(
-                  plan.effectiveAppleProductId,
-                ) &&
-                IapService.instance.getProduct(plan.effectiveAppleProductId) ==
-                    null &&
-                IapService.instance.getProduct(orangeTickProductId) == null));
+        (productState == IapProductState.queryError ||
+            productState == IapProductState.storeKitUnavailable);
     final bool isProductLoading =
         Platform.isIOS &&
-        !isProductUnavailable &&
+        (productState == IapProductState.notStarted ||
+            productState == IapProductState.loading) &&
         IapService.instance.getProduct(plan.effectiveAppleProductId) == null &&
         IapService.instance.getProduct(orangeTickProductId) == null;
 
@@ -892,11 +894,18 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: (isProductUnavailable || isProductLoading)
+                    onPressed: isProductQueryError
+                        ? () async {
+                            await IapService.instance.loadProducts({
+                              plan.effectiveAppleProductId,
+                            });
+                            if (mounted) setState(() {});
+                          }
+                        : (isProductUnavailable || isProductLoading)
                         ? null
                         : () {
-                            final provider =
-                                context.read<VerificationProvider>();
+                            final provider = context
+                                .read<VerificationProvider>();
                             Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -924,9 +933,11 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
                     child: Text(
                       isProductUnavailable
                           ? 'Currently Unavailable'
-                          : (isProductLoading
-                                ? 'Loading...'
-                                : 'Apply for Orange Tick'),
+                          : (isProductQueryError
+                                ? 'Retry StoreKit'
+                                : (isProductLoading
+                                      ? 'Loading...'
+                                      : 'Apply for Orange Tick')),
                       style: text16(
                         fontWeight: FontWeight.w800,
                         color: AppColors.white,
@@ -1010,7 +1021,7 @@ class _VerificationPlansScreenState extends State<VerificationPlansScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            'CatchWatch Orange Tick is an auto-renewable monthly creator subscription. Payment is charged to your Apple ID account upon confirmation of purchase. Subscription automatically renews unless auto-renew is turned off at least 24 hours before the end of the current billing cycle. You may manage or cancel subscriptions in your App Store Account Settings.',
+            'Orange Tick is a one-time purchase for the fixed validity shown on each plan. Payment is charged to your Apple Account when you confirm. It does not automatically renew; access ends when the purchased validity expires, and you must purchase again manually to continue. Restore recovers only the remaining validity of an eligible unexpired purchase. Expired purchases do not restore access.',
             textAlign: TextAlign.center,
             style: textStyle,
           ),

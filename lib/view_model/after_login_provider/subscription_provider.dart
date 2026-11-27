@@ -1,16 +1,24 @@
 import 'package:catch_watch/data/exception/app_exception.dart';
 import 'package:catch_watch/models/plan_model.dart';
 import 'package:catch_watch/repository/plan_repository.dart';
+import 'package:catch_watch/services/iap_service.dart';
 import 'package:catch_watch/utils/hive_service/hive_service.dart';
 import 'package:flutter/material.dart';
 
 class SubscriptionProvider extends ChangeNotifier {
-  final PlanRepository _planRepository = PlanRepository();
+  SubscriptionProvider({PlanRepository? planRepository})
+    : _planRepository = planRepository ?? PlanRepository();
+
+  final PlanRepository _planRepository;
 
   List<Plan> _plans = [];
   SubscriptionData? _currentSubscription;
   int? _remainingDays;
   bool _isLoading = false;
+  bool _isPlanLoading = false;
+  bool _isStatusLoading = false;
+  bool _isPurchaseInitiating = false;
+  int _activeAppleVerifications = 0;
   String? _error;
   String? _subscriptionStatusError;
 
@@ -18,6 +26,10 @@ class SubscriptionProvider extends ChangeNotifier {
   SubscriptionData? get currentSubscription => _currentSubscription;
   int? get remainingDays => _remainingDays;
   bool get isLoading => _isLoading;
+  bool get isPlanLoading => _isPlanLoading;
+  bool get isStatusLoading => _isStatusLoading;
+  bool get isPurchaseLoading =>
+      _isPurchaseInitiating || _activeAppleVerifications > 0;
   String? get error => _error;
   String? get subscriptionStatusError => _subscriptionStatusError;
 
@@ -28,6 +40,16 @@ class SubscriptionProvider extends ChangeNotifier {
     _error = null;
     _subscriptionStatusError = null;
     _isLoading = false;
+    _isPlanLoading = false;
+    _isStatusLoading = false;
+    _isPurchaseInitiating = false;
+    _activeAppleVerifications = 0;
+    notifyListeners();
+  }
+
+  void setPurchaseInitiating(bool value) {
+    if (_isPurchaseInitiating == value) return;
+    _isPurchaseInitiating = value;
     notifyListeners();
   }
 
@@ -40,7 +62,7 @@ class SubscriptionProvider extends ChangeNotifier {
   }
 
   Future<void> fetchPlans() async {
-    _isLoading = true;
+    _isPlanLoading = true;
     _error = null;
     notifyListeners();
 
@@ -54,14 +76,13 @@ class SubscriptionProvider extends ChangeNotifier {
     } catch (e) {
       _error = e.toString();
     } finally {
-      _isLoading = false;
+      _isPlanLoading = false;
       notifyListeners();
     }
   }
 
   Future<bool> fetchSubscriptionStatus({int? expectedMinLevel}) async {
-    _isLoading = true;
-    _error = null;
+    _isStatusLoading = true;
     _subscriptionStatusError = null;
     notifyListeners();
 
@@ -73,7 +94,8 @@ class SubscriptionProvider extends ChangeNotifier {
         // If an expected minimum tier level is requested (e.g. following a verified upgrade),
         // ensure server has propagated the new tier and does not overwrite with stale lower-tier data.
         if (expectedMinLevel != null &&
-            response.subscription!.getEffectiveLevel(_plans) < expectedMinLevel) {
+            response.subscription!.getEffectiveLevel(_plans) <
+                expectedMinLevel) {
           debugPrint(
             '[SUBSCRIPTION] Server returned status with level ${response.subscription?.getEffectiveLevel(_plans)} '
             'which is below expected min level $expectedMinLevel. Retrying query after brief delay...',
@@ -82,11 +104,14 @@ class SubscriptionProvider extends ChangeNotifier {
           final retryResponse = await _planRepository.getSubscriptionStatus();
           if (retryResponse.success == true &&
               retryResponse.subscription != null &&
-              retryResponse.subscription!.getEffectiveLevel(_plans) >= expectedMinLevel) {
+              retryResponse.subscription!.getEffectiveLevel(_plans) >=
+                  expectedMinLevel) {
             _currentSubscription = retryResponse.subscription;
             _remainingDays = retryResponse.remainingDays;
             _subscriptionStatusError = null;
-            debugPrint('[SUBSCRIPTION] fetchSubscriptionStatus: active/entitled subscription retrieved after upgrade check (level >= $expectedMinLevel)');
+            debugPrint(
+              '[SUBSCRIPTION] fetchSubscriptionStatus: active/entitled subscription retrieved after upgrade check (level >= $expectedMinLevel)',
+            );
             return true;
           }
           // Server has not yet propagated the upgrade; preserve verified higher-tier entitlement
@@ -99,7 +124,9 @@ class SubscriptionProvider extends ChangeNotifier {
         _currentSubscription = response.subscription;
         _remainingDays = response.remainingDays;
         _subscriptionStatusError = null;
-        debugPrint('[SUBSCRIPTION] fetchSubscriptionStatus: subscription found (status: ${_currentSubscription?.status}, remainingDays: $_remainingDays)');
+        debugPrint(
+          '[SUBSCRIPTION] fetchSubscriptionStatus: subscription found (status: ${_currentSubscription?.status}, remainingDays: $_remainingDays)',
+        );
         return true;
       }
 
@@ -107,14 +134,17 @@ class SubscriptionProvider extends ChangeNotifier {
       // backend returned success == false with "No active subscription" / "not subscribed" message.
       // This is a GENUINE SUCCESSFUL status lookup confirming NO entitlement.
       final String? msg = response.message;
-      final bool isNoSubMessage = msg != null &&
+      final bool isNoSubMessage =
+          msg != null &&
           (msg.toLowerCase().contains('no active subscription') ||
               msg.toLowerCase().contains('no subscription') ||
               msg.toLowerCase().contains('not subscribed') ||
               msg.toLowerCase().contains('subscription not found'));
 
       if (response.success == true || isNoSubMessage) {
-        debugPrint('[SUBSCRIPTION] fetchSubscriptionStatus: genuine confirmation of NO subscription (message: $msg)');
+        debugPrint(
+          '[SUBSCRIPTION] fetchSubscriptionStatus: genuine confirmation of NO subscription (message: $msg)',
+        );
         _currentSubscription = null;
         _remainingDays = null;
         _subscriptionStatusError = null;
@@ -122,7 +152,9 @@ class SubscriptionProvider extends ChangeNotifier {
       }
 
       // Case 3: Backend explicitly returned an unhandled error response
-      debugPrint('[SUBSCRIPTION] fetchSubscriptionStatus: server returned unexpected failure response (message: $msg)');
+      debugPrint(
+        '[SUBSCRIPTION] fetchSubscriptionStatus: server returned unexpected failure response (message: $msg)',
+      );
       _subscriptionStatusError = msg ?? 'Failed to fetch subscription status';
       if (expectedMinLevel == null) {
         _currentSubscription = null;
@@ -139,8 +171,11 @@ class SubscriptionProvider extends ChangeNotifier {
             lowerMsg.contains('no subscription') ||
             lowerMsg.contains('not subscribed') ||
             lowerMsg.contains('subscription not found') ||
-            (e is BadRequestException && lowerMsg.contains('resource not found'))) {
-          debugPrint('[SUBSCRIPTION] fetchSubscriptionStatus: 404/AppException confirmed NO subscription (${e.message})');
+            (e is BadRequestException &&
+                lowerMsg.contains('resource not found'))) {
+          debugPrint(
+            '[SUBSCRIPTION] fetchSubscriptionStatus: 404/AppException confirmed NO subscription (${e.message})',
+          );
           _currentSubscription = null;
           _remainingDays = null;
           _subscriptionStatusError = null;
@@ -148,10 +183,14 @@ class SubscriptionProvider extends ChangeNotifier {
         }
         _subscriptionStatusError = e.message;
       } else {
-        _subscriptionStatusError = e.toString().replaceAll('Exception: ', '').trim();
+        _subscriptionStatusError = e
+            .toString()
+            .replaceAll('Exception: ', '')
+            .trim();
       }
 
-      if (_subscriptionStatusError == null || _subscriptionStatusError!.isEmpty) {
+      if (_subscriptionStatusError == null ||
+          _subscriptionStatusError!.isEmpty) {
         _subscriptionStatusError = 'Failed to fetch subscription status';
       }
       if (expectedMinLevel == null) {
@@ -160,7 +199,7 @@ class SubscriptionProvider extends ChangeNotifier {
       }
       return false;
     } finally {
-      _isLoading = false;
+      _isStatusLoading = false;
       notifyListeners();
     }
   }
@@ -222,7 +261,9 @@ class SubscriptionProvider extends ChangeNotifier {
   /// Calculates an estimated upgrade quote for the given target plan relative to active subscription
   UpgradeQuote? getUpgradeQuote(Plan targetPlan) {
     if (_currentSubscription == null ||
-        !_currentSubscription!.isCurrentlyValid(remainingDays: _remainingDays)) {
+        !_currentSubscription!.isCurrentlyValid(
+          remainingDays: _remainingDays,
+        )) {
       return null;
     }
 
@@ -296,6 +337,7 @@ class SubscriptionProvider extends ChangeNotifier {
 
   Future<bool> verifyApplePayment(Map<String, dynamic> paymentData) async {
     _isLoading = true;
+    _activeAppleVerifications++;
     _error = null;
     notifyListeners();
 
@@ -305,25 +347,31 @@ class SubscriptionProvider extends ChangeNotifier {
         // Determine expected tier level from productId or target plan
         int? targetLevel;
         final productId = paymentData['productId']?.toString();
-        if (productId == 'com.app.catchWatch.sub.premium.yearly') {
+        if (isOttYearlyProduct(productId)) {
           targetLevel = 3;
-        } else if (productId == 'com.app.catchWatch.sub.premium.monthly') {
+        } else if (isOttMonthlyProduct(productId)) {
           targetLevel = 2;
-        } else if (productId == 'com.app.catchWatch.sub.premium.weekly') {
+        } else if (isOttWeeklyProduct(productId)) {
           targetLevel = 1;
         }
 
         // If backend verification directly returned the updated subscription, parse it
-        final dynamic subJson = response['subscription'] ?? response['data']?['subscription'];
+        final dynamic subJson =
+            response['subscription'] ?? response['data']?['subscription'];
         if (subJson is Map<String, dynamic>) {
           try {
             _currentSubscription = SubscriptionData.fromJson(subJson);
-            final remDays = response['remainingDays'] ?? response['data']?['remainingDays'];
+            final remDays =
+                response['remainingDays'] ?? response['data']?['remainingDays'];
             if (remDays != null) {
-              _remainingDays = remDays is int ? remDays : int.tryParse(remDays.toString());
+              _remainingDays = remDays is int
+                  ? remDays
+                  : int.tryParse(remDays.toString());
             }
           } catch (e) {
-            debugPrint('[SUBSCRIPTION] Error parsing subscription from verifyApplePayment: $e');
+            debugPrint(
+              '[SUBSCRIPTION] Error parsing subscription from verifyApplePayment: $e',
+            );
           }
         }
 
@@ -344,6 +392,7 @@ class SubscriptionProvider extends ChangeNotifier {
       return false;
     } finally {
       _isLoading = false;
+      if (_activeAppleVerifications > 0) _activeAppleVerifications--;
       notifyListeners();
     }
   }
@@ -353,7 +402,7 @@ class SubscriptionProvider extends ChangeNotifier {
       _error = "No active subscription";
       return false;
     }
-    
+
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -369,8 +418,12 @@ class SubscriptionProvider extends ChangeNotifier {
         _currentSubscription!.id!,
         userId,
       );
-      
-      if (response['success'] == true || (response['message'] != null && response['message'].toString().toLowerCase().contains('success'))) {
+
+      if (response['success'] == true ||
+          (response['message'] != null &&
+              response['message'].toString().toLowerCase().contains(
+                'success',
+              ))) {
         await fetchSubscriptionStatus();
         return true;
       } else {

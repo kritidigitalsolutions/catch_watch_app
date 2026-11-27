@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../../models/plan_model.dart';
 import '../../../res/app_colors.dart';
 import '../../../services/iap_service.dart';
@@ -95,9 +94,6 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
   Future<void>? _fetchStatusFuture;
 
   bool get _isIosPlatform => DeleteAccountDialog.debugMockIsIOS ?? Platform.isIOS;
-
-  static const String _appleSubscriptionUrl =
-      'https://apps.apple.com/account/subscriptions';
 
   static const List<String> _reasons = [
     'I no longer use Catch & Watch',
@@ -260,38 +256,6 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
       return true;
     }
     return false;
-  }
-
-  Future<void> _openAppleSubscriptions(BuildContext context) async {
-    final uri = Uri.parse(_appleSubscriptionUrl);
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Please open Settings > Apple ID > Subscriptions to manage your subscription.',
-              ),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('[DELETE_ACCOUNT] Error launching Apple subscriptions URL: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Unable to open Apple Subscriptions. Please open Settings > Apple ID > Subscriptions manually.',
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
   }
 
   @override
@@ -684,7 +648,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
           ),
           const SizedBox(height: 12),
           Text(
-            'We could not verify your subscription status with the server. Catch & Watch needs to check if you have an active Apple subscription so you aren\'t billed after deleting your account.',
+          'We could not verify your purchase status with the server. Catch & Watch needs to confirm any remaining access period before you delete your account.',
             style: text13(color: AppColors.textPrimary),
           ),
           const SizedBox(height: 12),
@@ -702,26 +666,6 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
             ),
           ),
           const SizedBox(height: 12),
-          if (_isIosPlatform) ...[
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () => _openAppleSubscriptions(context),
-                icon: const Icon(Icons.open_in_new_rounded, size: 16),
-                label: const Text('Manage Apple Subscription'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1C1C1E),
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(vertical: 11),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-          ],
           InkWell(
             onTap: () {
               setState(() {
@@ -757,7 +701,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'I understand my subscription status could not be verified with the server. If I have an active Apple subscription, deleting my account will not cancel recurring charges and I must manage it manually in Apple Settings.',
+                      'I understand my Apple purchase status could not be verified. Deleting my account may affect my Catch & Watch access, and I should contact support if I need help confirming its expiry.',
                       style: text11(
                         color: _hasAcknowledgedAppleWarning
                             ? AppColors.primary
@@ -783,8 +727,9 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
         ) ??
         EntitlementClassification.none;
 
-    final bool isAutoRenewing =
-        classification == EntitlementClassification.activeEntitlement;
+    final bool hasActiveEntitlement =
+        classification == EntitlementClassification.activeEntitlement ||
+        classification == EntitlementClassification.cancelledWithEntitlement;
     final planName = sub?.getEffectivePlanName(subProvider.plans) ??
         'Catch & Watch Premium Subscription';
     final remainingDays = subProvider.remainingDays;
@@ -862,16 +807,16 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: isAutoRenewing
+                      color: hasActiveEntitlement
                           ? const Color(0xFFE8F5E9)
                           : const Color(0xFFFFF3E0),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      isAutoRenewing ? 'Active' : 'Cancelled',
+                      hasActiveEntitlement ? 'Active' : 'Expired',
                       style: text11(
                         fontWeight: FontWeight.bold,
-                        color: isAutoRenewing
+                        color: hasActiveEntitlement
                             ? const Color(0xFF2E7D32)
                             : const Color(0xFFE65100),
                       ),
@@ -882,9 +827,9 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
               const SizedBox(height: 6),
               if (formattedEndDate != null)
                 Text(
-                  isAutoRenewing
-                      ? 'Next renewal: $formattedEndDate'
-                      : 'Entitled until: $formattedEndDate',
+                  hasActiveEntitlement
+                      ? 'Access ends: $formattedEndDate'
+                      : 'Access ended: $formattedEndDate',
                   style: text12(color: AppColors.grey800),
                 ),
               if (remainingDays != null && remainingDays > 0)
@@ -921,7 +866,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      'Important Apple Billing Guidance',
+                      'Apple Purchase & Access',
                       style: text12(
                         fontWeight: FontWeight.bold,
                         color: const Color(0xFFF57F17),
@@ -931,41 +876,17 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
                 ],
               ),
               const SizedBox(height: 8),
+              _warningBullet('This Apple purchase does not renew automatically.'),
               _warningBullet(
-                'Deleting your Catch & Watch account does not cancel your Apple subscription.',
+                'Access is limited to the purchased validity and ends on the expiry date shown above.',
               ),
               _warningBullet(
-                isAutoRenewing
-                    ? 'Apple will continue to charge your Apple ID on future renewal dates unless you cancel through Apple.'
-                    : 'Account deletion does not trigger an Apple refund for remaining paid time.',
-              ),
-              _warningBullet(
-                'You must manage or cancel this subscription directly in Apple ID Settings.',
+                'Deleting your account may end access to Catch & Watch. Apple refund eligibility follows Apple policy.',
               ),
             ],
           ),
         ),
         const SizedBox(height: 12),
-
-        // Action button to open Apple Subscription Settings
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: () => _openAppleSubscriptions(context),
-            icon: const Icon(Icons.open_in_new_rounded, size: 16),
-            label: const Text('Manage Apple Subscription'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1C1C1E),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(vertical: 11),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
 
         // Delayed backend updates guidance card
         Container(
@@ -985,7 +906,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      'Recently cancelled in Apple Settings?',
+                      'Recent purchase or restore?',
                       style: text11(fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                     ),
                   ),
@@ -993,7 +914,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
               ),
               const SizedBox(height: 4),
               Text(
-                'Apple subscription updates may take a few moments to sync with our servers. Your cancellation is effective on Apple\'s side. You can refresh below or proceed to delete your account.',
+              'Purchase or restore verification may take a few moments to appear on our servers. Refresh the status before proceeding.',
                 style: text11(color: AppColors.textSecondary),
               ),
               const SizedBox(height: 4),
@@ -1060,9 +981,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    isAutoRenewing
-                        ? 'I understand that my Apple subscription must be cancelled through Apple Settings to stop recurring charges, and deleting my account will not issue a refund.'
-                        : 'I understand that deleting my account will immediately end my access and Apple does not issue automatic refunds for remaining days.',
+                    'I understand this Apple purchase does not renew automatically, and deleting my account may affect access before the displayed expiry. Refund eligibility follows Apple policy.',
                     style: text11(
                       color: _hasAcknowledgedAppleWarning
                           ? AppColors.primary
@@ -1294,7 +1213,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Reminder: Deleting your account will NOT cancel your Apple subscription. You must cancel it directly in Apple Settings.',
+                    'Reminder: Your Apple purchase does not renew automatically. Deleting your account may end access to Catch & Watch before the purchase expiry.',
                     style: text11(
                       color: const Color(0xFFE65100),
                       fontWeight: FontWeight.w600,
@@ -1327,7 +1246,7 @@ class _DeleteAccountDialogState extends State<DeleteAccountDialog>
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Warning: Subscription status could not be verified with the server. If you have an active Apple subscription, deleting your account will NOT cancel recurring charges. You must cancel it directly in Apple Settings.',
+                    'Warning: Purchase status could not be verified with the server. Deleting your account may affect Catch & Watch access; contact support if you need help confirming your purchase expiry.',
                     style: text11(
                       color: const Color(0xFFE65100),
                       fontWeight: FontWeight.w600,
