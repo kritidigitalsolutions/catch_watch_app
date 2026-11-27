@@ -2,6 +2,7 @@ import 'package:catch_watch/models/reel_model.dart';
 import 'package:catch_watch/view_model/after_login_provider/notification_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/subscription_provider.dart';
 import 'package:catch_watch/views/after_login_pages/cricket/live_cricket_home_section.dart';
+import 'package:catch_watch/views/after_login_pages/live_shows/live_show_home_section.dart';
 import 'package:catch_watch/view_model/after_login_provider/watchlist_provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:catch_watch/utils/custom_button.dart';
@@ -168,8 +169,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _buildDotIndicator(provider),
         const SizedBox(height: 24),
 
-        // Live Cricket Matches Section (Right after Carousel)
+        // Live Cricket Matches Section
         LiveCricketHomeSection(),
+
+        // Live Shows Section
+        LiveShowHomeSection(),
 
         // First Category
         if (categories.isNotEmpty) ...[

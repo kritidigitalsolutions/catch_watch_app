@@ -17,7 +17,7 @@ class LiveCricketHomeSection extends StatelessWidget {
         builder: (context, provider, child) {
           if (provider.isLoading && provider.matches.isEmpty) {
             return const SizedBox(
-              height: 240,
+              height: 180,
               child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
             );
           }
@@ -29,81 +29,52 @@ class LiveCricketHomeSection extends StatelessWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Section Header & Explore All Button
+              // Clean Header: Title on left ('Live Sport'), Explore button on right
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withAlpha(25),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(Icons.live_tv, color: AppColors.primary, size: 24),
+                    Row(
+                      children: [
+                        Text(
+                          'Live Sport',
+                          style: text18(color: AppColors.black, fontWeight: FontWeight.w900),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: AppColors.error,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const LiveMatchesScreen()),
+                        );
+                      },
+                      child: Row(
                         children: [
-                          Row(
-                            children: [
-                              Text(
-                                'Live Cricket Matches',
-                                style: text18(color: AppColors.black, fontWeight: FontWeight.w900),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: const BoxDecoration(
-                                  color: AppColors.error,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Stream live cricket matches, real-time ball-by-ball scoreboards & tournament broadcasts',
-                            style: text11(color: AppColors.grey600),
-                            maxLines: 2,
-                          ),
+                          Text('Explore', style: text13(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                          const SizedBox(width: 4),
+                          const Icon(Icons.arrow_forward_ios, color: AppColors.primary, size: 12),
                         ],
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 4),
 
-              // Explore All Button
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const LiveMatchesScreen()),
-                    );
-                  },
-                  icon: const Text('Explore All', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  label: const Icon(Icons.arrow_forward, color: Colors.white, size: 16),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size(double.infinity, 44),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-
-              // Horizontal Match Cards List
+              // Horizontal Match Cards List (Matching reference card proportions)
               SizedBox(
-                height: 335,
+                height: 285,
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -114,7 +85,7 @@ class LiveCricketHomeSection extends StatelessWidget {
                   },
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
             ],
           );
         },

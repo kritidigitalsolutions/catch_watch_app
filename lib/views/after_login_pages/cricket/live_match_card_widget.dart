@@ -7,11 +7,16 @@ import 'live_match_detail_screen.dart';
 
 class LiveMatchCardWidget extends StatelessWidget {
   final CricketMatch match;
+  final bool isFullWidth;
 
-  const LiveMatchCardWidget({super.key, required this.match});
+  const LiveMatchCardWidget({super.key, required this.match, this.isFullWidth = false});
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final cardWidth = isFullWidth ? screenWidth - 32 : (screenWidth * 0.82).clamp(280.0, 400.0);
+    final imageUrl = match.banner ?? '';
+
     return GestureDetector(
       onTap: () {
         Navigator.push(
@@ -22,50 +27,49 @@ class LiveMatchCardWidget extends StatelessWidget {
         );
       },
       child: Container(
-        width: 320,
-        margin: const EdgeInsets.only(right: 16),
+        width: cardWidth,
+        margin: EdgeInsets.only(right: isFullWidth ? 0 : 16),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.grey300, width: 1),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withAlpha(15),
+              color: Colors.black.withAlpha(12),
               blurRadius: 8,
-              offset: const Offset(0, 4),
+              offset: const Offset(0, 3),
             ),
           ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Top Banner Image & Tags (Supports WebP, PNG, JPG, JPEG, SVG, AVIF)
+            // Large Poster Image & Badges (Height 180 matching Live Show cards)
             ClipRRect(
               borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
               child: Stack(
                 children: [
-                  match.banner != null && match.banner!.isNotEmpty
+                  imageUrl.isNotEmpty
                       ? UniversalImage(
-                          url: match.banner!,
-                          height: 140,
+                          url: imageUrl,
+                          height: 180,
                           width: double.infinity,
                           fit: BoxFit.cover,
                         )
                       : Container(
-                          height: 140,
+                          height: 180,
                           color: AppColors.grey800,
                           child: const Center(
                             child: Icon(Icons.sports_cricket, color: Colors.white, size: 40),
                           ),
                         ),
-                  // Gradient overlay
                   Container(
-                    height: 140,
+                    height: 180,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Colors.black.withAlpha(180)],
+                        colors: [Colors.transparent, Colors.black.withAlpha(160)],
                       ),
                     ),
                   ),
@@ -94,7 +98,7 @@ class LiveMatchCardWidget extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: AppColors.error,
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(14),
                         ),
                         child: Row(
                           children: [
@@ -116,7 +120,7 @@ class LiveMatchCardWidget extends StatelessWidget {
               ),
             ),
 
-            // Content Area
+            // Compact Content Area
             Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -124,7 +128,7 @@ class LiveMatchCardWidget extends StatelessWidget {
                 children: [
                   Text(
                     match.title ?? 'Match Title',
-                    style: text14(color: AppColors.black, fontWeight: FontWeight.bold),
+                    style: text14(color: AppColors.black, fontWeight: FontWeight.w900),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -141,20 +145,20 @@ class LiveMatchCardWidget extends StatelessWidget {
                   // Latest Ticker / Commentary Snippet
                   if (match.latestTicker != null && match.latestTicker!.isNotEmpty)
                     Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                       decoration: BoxDecoration(
                         color: AppColors.primary.withAlpha(15),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppColors.primary.withAlpha(50)),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: AppColors.primary.withAlpha(40)),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.bolt, color: AppColors.primary, size: 16),
-                          const SizedBox(width: 6),
+                          const Icon(Icons.bolt, color: AppColors.primary, size: 14),
+                          const SizedBox(width: 4),
                           Expanded(
                             child: Text(
                               match.latestTicker!,
-                              style: text11(color: AppColors.primary, fontWeight: FontWeight.w600),
+                              style: text10(color: AppColors.primary, fontWeight: FontWeight.w600),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -162,38 +166,6 @@ class LiveMatchCardWidget extends StatelessWidget {
                         ],
                       ),
                     ),
-
-                  const SizedBox(height: 10),
-                  const Divider(height: 1, color: AppColors.grey200),
-                  const SizedBox(height: 8),
-
-                  // Venue & Watch button
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            const Icon(Icons.location_on, size: 14, color: AppColors.grey500),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                match.venue ?? 'Stadium',
-                                style: text11(color: AppColors.grey600),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Watch →',
-                        style: text12(color: AppColors.primary, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),
@@ -212,19 +184,19 @@ class LiveMatchCardWidget extends StatelessWidget {
           children: [
             team.logo != null && team.logo!.isNotEmpty
                 ? ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(8),
                     child: UniversalImage(
                       url: team.logo!,
-                      width: 20,
-                      height: 20,
+                      width: 18,
+                      height: 18,
                       fit: BoxFit.cover,
                     ),
                   )
-                : const Icon(Icons.flag, size: 20, color: AppColors.primary),
-            const SizedBox(width: 8),
+                : const Icon(Icons.flag, size: 18, color: AppColors.primary),
+            const SizedBox(width: 6),
             Text(
               team.name ?? 'Team',
-              style: text12(
+              style: text11(
                 color: team.isBatting == true ? AppColors.black : AppColors.grey700,
                 fontWeight: team.isBatting == true ? FontWeight.bold : FontWeight.w500,
               ),
@@ -235,7 +207,7 @@ class LiveMatchCardWidget extends StatelessWidget {
           team.score != null && team.score!.isNotEmpty
               ? '${team.score} ${team.overs != null && !team.score!.contains('ov') ? '(${team.overs} ov)' : ''}'
               : '—',
-          style: text12(
+          style: text11(
             color: team.isBatting == true ? AppColors.primary : AppColors.grey700,
             fontWeight: FontWeight.bold,
           ),

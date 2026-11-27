@@ -1,5 +1,5 @@
 class AppUrl {
-  // static const String serverUrl = 'http://192.168.1.17:5000';
+  // static const String serverUrl = 'http://192.168.1.38:5000';
   static const String serverUrl = 'https://api.catchandwatch.com';
   // static const String serverUrl = 'https://catch-watch.vercel.app';
   static const String baseUrl = '$serverUrl/api';
@@ -152,4 +152,10 @@ class AppUrl {
   static String matchScorecard(String matchId) => '$baseUrl/live-matches/$matchId/scorecard';
   static String matchCommentary(String matchId) => '$baseUrl/live-matches/$matchId/commentary';
   static String matchSquads(String matchId) => '$baseUrl/live-matches/$matchId/squads';
+
+  /// Live Shows APIs (CatchWatch Live Shows & Live Streaming)
+  static const String liveShows = '$baseUrl/live-shows';
+  static const String featuredLiveShow = '$baseUrl/live-shows/featured';
+  static String liveShowDetails(String showId) => '$baseUrl/live-shows/$showId';
+  static String liveShowViewHeartbeat(String showId) => '$baseUrl/live-shows/$showId/view';
 }
