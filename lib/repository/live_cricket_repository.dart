@@ -7,24 +7,21 @@ import '../res/appUrl.dart';
 ///
 /// Implements endpoints documented for Catch & Watch Live Cricket:
 /// - GET /api/live-matches
+/// - GET /api/live-matches/upcoming
+/// - GET /api/live-matches/completed
 /// - GET /api/live-matches/featured
 /// - GET /api/live-matches/:id
+/// - GET /api/live-matches/:id/live-activity
+/// - GET /api/live-matches/:id/scorecard
+/// - GET /api/live-matches/:id/commentary
+/// - GET /api/live-matches/:id/squads
 /// - POST /api/live-matches/:id/view
-///
-/// Note: Authentication is optional per the backend contract.
 class LiveCricketRepository {
   final BaseApiService _apiService;
 
   LiveCricketRepository({BaseApiService? apiService})
       : _apiService = apiService ?? NetworkApiService();
 
-  /// Fetches list of live, upcoming, and completed cricket matches.
-  ///
-  /// Supports documented query parameters:
-  /// - [status]: Filter by match status ('LIVE', 'UPCOMING', 'COMPLETED').
-  /// - [tournament]: Filter by tournament or series name.
-  /// - [format]: Filter by match format ('T20', 'ODI', 'TEST').
-  /// - [limit]: Limit number of returned matches.
   Future<List<LiveMatchModel>> getLiveMatches({
     String? status,
     String? tournament,
@@ -33,9 +30,6 @@ class LiveCricketRepository {
   }) async {
     try {
       final queryParams = <String, String>{};
-      if (status != null && status.trim().isNotEmpty) {
-        queryParams['status'] = status.trim();
-      }
       if (tournament != null && tournament.trim().isNotEmpty) {
         queryParams['tournament'] = tournament.trim();
       }
@@ -47,6 +41,17 @@ class LiveCricketRepository {
       }
 
       String url = AppUrl.liveMatches;
+      if (status != null && status.trim().isNotEmpty) {
+        final st = status.trim().toUpperCase();
+        if (st == 'UPCOMING') {
+          url = AppUrl.upcomingLiveMatches;
+        } else if (st == 'COMPLETED' || st == 'ENDED') {
+          url = AppUrl.completedLiveMatches;
+        } else {
+          queryParams['status'] = st;
+        }
+      }
+
       if (queryParams.isNotEmpty) {
         final queryString = Uri(queryParameters: queryParams).query;
         url = '$url?$queryString';
@@ -56,7 +61,6 @@ class LiveCricketRepository {
 
       if (response == null) return <LiveMatchModel>[];
 
-      // Handle raw List response
       if (response is List) {
         return response
             .whereType<Map>()
@@ -64,7 +68,6 @@ class LiveCricketRepository {
             .toList();
       }
 
-      // Handle Map response with wrapped keys
       if (response is Map) {
         final dynamic listData = response['matches'] ??
             response['data'] ??
@@ -85,7 +88,6 @@ class LiveCricketRepository {
     }
   }
 
-  /// Fetches the current featured live cricket match.
   Future<LiveMatchModel?> getFeaturedLiveMatch() async {
     try {
       final dynamic response =
@@ -94,10 +96,10 @@ class LiveCricketRepository {
       if (response == null) return null;
 
       if (response is Map) {
-        // If response has a wrapped object
+        final dynamic data = response['data'];
         final dynamic matchData = response['match'] ??
             response['featuredMatch'] ??
-            response['data'] ??
+            (data is Map ? (data['match'] ?? data['featuredMatch'] ?? data) : null) ??
             (response.containsKey('id') || response.containsKey('_id')
                 ? response
                 : null);
@@ -113,7 +115,6 @@ class LiveCricketRepository {
     }
   }
 
-  /// Fetches complete details and live stream URLs for a single match.
   Future<LiveMatchModel?> getLiveMatchDetails(String matchId) async {
     if (matchId.trim().isEmpty) return null;
 
@@ -124,8 +125,9 @@ class LiveCricketRepository {
       if (response == null) return null;
 
       if (response is Map) {
+        final dynamic data = response['data'];
         final dynamic matchData = response['match'] ??
-            response['data'] ??
+            (data is Map ? (data['match'] ?? data) : null) ??
             (response.containsKey('id') || response.containsKey('_id')
                 ? response
                 : null);
@@ -141,8 +143,50 @@ class LiveCricketRepository {
     }
   }
 
-  /// Records a single view event when video playback starts.
-  /// Note: This is a single-shot registration call, not a periodic heartbeat.
+  Future<Map<String, dynamic>?> getLiveMatchActivity(String matchId) async {
+    if (matchId.trim().isEmpty) return null;
+    try {
+      final res = await _apiService.getApi(AppUrl.liveMatchLiveActivity(matchId.trim()));
+      if (res is Map) return Map<String, dynamic>.from(res);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getMatchScorecard(String matchId) async {
+    if (matchId.trim().isEmpty) return null;
+    try {
+      final res = await _apiService.getApi(AppUrl.liveMatchScorecard(matchId.trim()));
+      if (res is Map) return Map<String, dynamic>.from(res);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getMatchCommentary(String matchId) async {
+    if (matchId.trim().isEmpty) return null;
+    try {
+      final res = await _apiService.getApi(AppUrl.liveMatchCommentary(matchId.trim()));
+      if (res is Map) return Map<String, dynamic>.from(res);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getMatchSquads(String matchId) async {
+    if (matchId.trim().isEmpty) return null;
+    try {
+      final res = await _apiService.getApi(AppUrl.liveMatchSquads(matchId.trim()));
+      if (res is Map) return Map<String, dynamic>.from(res);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> recordLiveMatchView(String matchId) async {
     if (matchId.trim().isEmpty) return false;
 
@@ -157,7 +201,6 @@ class LiveCricketRepository {
       }
       return true;
     } catch (_) {
-      // Non-critical metric: do not crash user experience if view counting fails
       return false;
     }
   }

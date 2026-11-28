@@ -13,13 +13,14 @@ class LiveMatchCard extends StatelessWidget {
   const LiveMatchCard({
     super.key,
     required this.match,
-    this.width = 280,
+    this.width = 310,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final bool isLive = match.isLive;
+    final bannerUrl = match.banner ?? '';
 
     return GestureDetector(
       onTap: () {
@@ -35,313 +36,201 @@ class LiveMatchCard extends StatelessWidget {
         }
       },
       child: Container(
-        width: width,
-        margin: const EdgeInsets.only(right: 14),
+        width: width ?? 310,
+        margin: const EdgeInsets.only(right: 16),
         decoration: BoxDecoration(
-          color: isLive ? const Color(0xFF161F2E) : Colors.white,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isLive ? Colors.transparent : AppColors.grey200,
-            width: 1,
-          ),
+          border: Border.all(color: AppColors.grey300, width: 1),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+              color: Colors.black.withAlpha(12),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Top Bar: Status Badge + Tournament
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _buildBadge(isLive),
-                    if (match.matchType != null && match.matchType!.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: isLive
-                              ? Colors.white.withOpacity(0.12)
-                              : AppColors.grey100,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          match.matchType!,
-                          style: text10(
-                            color: isLive ? Colors.white70 : AppColors.textSecondary,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-
-              // Center: Teams & Scores
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    // Team 1
-                    Expanded(
-                      child: Column(
-                        children: [
-                          _buildCrest(match.team1, isLive),
-                          const SizedBox(height: 4),
-                          Text(
-                            match.team1?.displayName ?? 'TBD',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: text13(
-                              color: isLive ? Colors.white : AppColors.textPrimary,
-                              fontWeight: FontWeight.w800,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Large Poster Image & Badges (Height 180)
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
+              child: Stack(
+                children: [
+                  bannerUrl.isNotEmpty
+                      ? Image.network(
+                          bannerUrl,
+                          height: 180,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            height: 180,
+                            color: AppColors.grey800,
+                            child: const Center(
+                              child: Icon(Icons.sports_cricket, color: Colors.white, size: 40),
                             ),
                           ),
-                          if (match.team1?.score != null) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              match.team1!.score!,
-                              style: text11(
-                                color: isLive ? Colors.white70 : AppColors.textSecondary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-
-                    // VS or Center Info
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Text(
-                        'VS',
-                        style: text12(
-                          color: isLive ? Colors.white38 : AppColors.grey400,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-
-                    // Team 2
-                    Expanded(
-                      child: Column(
-                        children: [
-                          _buildCrest(match.team2, isLive),
-                          const SizedBox(height: 4),
-                          Text(
-                            match.team2?.displayName ?? 'TBD',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: text13(
-                              color: isLive ? Colors.white : AppColors.textPrimary,
-                              fontWeight: FontWeight.w800,
-                            ),
+                        )
+                      : Container(
+                          height: 180,
+                          color: AppColors.grey800,
+                          child: const Center(
+                            child: Icon(Icons.sports_cricket, color: Colors.white, size: 40),
                           ),
-                          if (match.team2?.score != null) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              match.team2!.score!,
-                              style: text11(
-                                color: isLive ? Colors.white70 : AppColors.textSecondary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ],
+                        ),
+                  Container(
+                    height: 180,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, Colors.black.withAlpha(160)],
                       ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Bottom Note or Timing
-              if (match.statusNote != null && match.statusNote!.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-                  child: Text(
-                    match.statusNote!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: text11(
-                      color: isLive ? Colors.white70 : AppColors.textSecondary,
                     ),
                   ),
-                )
-              else if (match.startTime != null && match.isUpcoming)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  // LIVE Indicator Badge (Top Left)
+                  if (isLive)
+                    Positioned(
+                      top: 12,
+                      left: 12,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppColors.error,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: const BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text('LIVE', style: text10(color: Colors.white, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  // Format & Series Tag (Top Right)
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withAlpha(180),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Text(
+                        match.matchType ?? 'T20',
+                        style: text10(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Content Area
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    match.title ?? 'Match Title',
+                    style: text14(color: AppColors.black, fontWeight: FontWeight.w900),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Team 1 Score
+                  _buildTeamScoreRow(match.team1),
+                  const SizedBox(height: 4),
+                  // Team 2 Score
+                  _buildTeamScoreRow(match.team2),
+                ],
+              ),
+            ),
+
+            const Divider(height: 1, color: AppColors.grey200),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
                     children: [
-                      const Icon(Icons.access_time_rounded, size: 12, color: AppColors.primary),
+                      const Icon(Icons.location_on_outlined, size: 14, color: AppColors.textSecondary),
                       const SizedBox(width: 4),
                       Text(
-                        _formatStartTime(match.startTime!),
-                        style: text11(
-                          color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        match.venue ?? match.series ?? 'Stadium',
+                        style: text11(color: AppColors.textSecondary, fontWeight: FontWeight.w600),
                       ),
                     ],
                   ),
-                ),
-
-              const SizedBox(height: 8),
-
-              // Bottom Bar: Tournament
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: isLive
-                      ? Colors.white.withOpacity(0.06)
-                      : AppColors.grey50,
-                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(15)),
-                ),
-                child: Text(
-                  match.series ?? match.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: text11(
-                    color: isLive ? Colors.white60 : AppColors.textSecondary,
-                    fontWeight: FontWeight.w600,
+                  Row(
+                    children: [
+                      Text(
+                        'Watch Broadcast',
+                        style: text12(color: AppColors.primary, fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(width: 2),
+                      const Icon(Icons.arrow_forward_rounded, size: 14, color: AppColors.primary),
+                    ],
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTeamScoreRow(TeamModel? team) {
+    if (team == null) return const SizedBox();
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            team.logo != null && team.logo!.isNotEmpty
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      team.logo!,
+                      width: 18,
+                      height: 18,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const Icon(Icons.flag, size: 18, color: AppColors.primary),
+                    ),
+                  )
+                : const Icon(Icons.flag, size: 18, color: AppColors.primary),
+            const SizedBox(width: 6),
+            Text(
+              team.displayName ?? 'Team',
+              style: text11(
+                color: AppColors.black,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        Text(
+          team.score ?? '—',
+          style: text11(
+            color: AppColors.primary,
+            fontWeight: FontWeight.bold,
           ),
         ),
-      ),
+      ],
     );
-  }
-
-  Widget _buildBadge(bool isLive) {
-    if (isLive) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: const Color(0xFFE50914),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 5,
-              height: 5,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 4),
-            Text(
-              'LIVE',
-              style: text10(color: Colors.white, fontWeight: FontWeight.w900),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (match.isUpcoming) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFFF0E8),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.calendar_today_rounded, size: 11, color: AppColors.primary),
-            const SizedBox(width: 4),
-            Text(
-              'Upcoming',
-              style: text10(color: AppColors.primary, fontWeight: FontWeight.w800),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: AppColors.grey200,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        '✔ Completed',
-        style: text10(color: AppColors.textSecondary, fontWeight: FontWeight.w700),
-      ),
-    );
-  }
-
-  Widget _buildCrest(TeamModel? team, bool isLive) {
-    final name = team?.displayName ?? 'TBD';
-    return Container(
-      width: 42,
-      height: 42,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: isLive ? Colors.white.withOpacity(0.12) : AppColors.grey100,
-        border: Border.all(
-          color: isLive ? Colors.white24 : AppColors.grey300,
-          width: 1,
-        ),
-      ),
-      child: ClipOval(
-        child: team?.logo != null && team!.logo!.isNotEmpty
-            ? Image.network(
-                team.logo!,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) =>
-                    _buildFallbackCrest(name, isLive),
-              )
-            : _buildFallbackCrest(name, isLive),
-      ),
-    );
-  }
-
-  Widget _buildFallbackCrest(String name, bool isLive) {
-    return Center(
-      child: Text(
-        name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '🏏',
-        style: text14(
-          color: isLive ? Colors.white : AppColors.textPrimary,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-    );
-  }
-
-  String _formatStartTime(DateTime dt) {
-    final now = DateTime.now();
-    final isToday = dt.year == now.year && dt.month == now.month && dt.day == now.day;
-    final isTomorrow = dt.year == now.year &&
-        dt.month == now.month &&
-        dt.day == now.day + 1;
-
-    final hour = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
-    final period = dt.hour >= 12 ? 'PM' : 'AM';
-    final minute = dt.minute.toString().padLeft(2, '0');
-    final timeStr = '$hour:$minute $period';
-
-    if (isToday) return 'Today, $timeStr';
-    if (isTomorrow) return 'Tomorrow, $timeStr';
-    return '${dt.day}/${dt.month}, $timeStr';
   }
 }

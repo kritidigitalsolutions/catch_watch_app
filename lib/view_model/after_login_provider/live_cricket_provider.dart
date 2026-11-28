@@ -73,6 +73,18 @@ class LiveCricketProvider with ChangeNotifier, WidgetsBindingObserver {
   bool get isDetailLoading => _isDetailLoading;
   String? get detailError => _detailError;
 
+  Map<String, dynamic>? _liveActivity;
+  Map<String, dynamic>? get liveActivity => _liveActivity;
+
+  Map<String, dynamic>? _scorecard;
+  Map<String, dynamic>? get scorecard => _scorecard;
+
+  Map<String, dynamic>? _commentary;
+  Map<String, dynamic>? get commentary => _commentary;
+
+  Map<String, dynamic>? _squads;
+  Map<String, dynamic>? get squads => _squads;
+
   // --- Primary / Backup Stream Switching ---
   bool _useBackupStream = false;
   bool get useBackupStream => _useBackupStream;
@@ -101,8 +113,8 @@ class LiveCricketProvider with ChangeNotifier, WidgetsBindingObserver {
     }
   }
 
-  // --- Polling State & Management (25-second interval) ---
-  static const Duration pollingInterval = Duration(seconds: 25);
+  // --- Polling State & Management (3-second interval) ---
+  static const Duration pollingInterval = Duration(seconds: 3);
   Timer? _pollingTimer;
   String? _pollingMatchId;
   bool _isPollingPaused = false;
@@ -166,12 +178,22 @@ class LiveCricketProvider with ChangeNotifier, WidgetsBindingObserver {
 
     _isPollingInFlight = true;
     try {
-      final updatedMatch = await _repository.getLiveMatchDetails(matchId);
-      if (updatedMatch != null && !_isDisposed) {
-        _selectedMatch = updatedMatch;
+      final results = await Future.wait([
+        _repository.getLiveMatchDetails(matchId),
+        _repository.getLiveMatchActivity(matchId),
+      ]);
+      final updatedMatch = results[0] as LiveMatchModel?;
+      final activity = results[1] as Map<String, dynamic>?;
+
+      if (!_isDisposed) {
+        if (updatedMatch != null) {
+          _selectedMatch = updatedMatch;
+          _syncMatchInLists(updatedMatch);
+        }
+        if (activity != null) {
+          _liveActivity = activity;
+        }
         _detailError = null;
-        // Also update match if it exists in current lists
-        _syncMatchInLists(updatedMatch);
         notifyListeners();
       }
     } catch (e) {
@@ -286,6 +308,24 @@ class LiveCricketProvider with ChangeNotifier, WidgetsBindingObserver {
     }
   }
 
+  Future<void> fetchMatchSubData(String matchId) async {
+    final cleanId = matchId.trim();
+    if (cleanId.isEmpty) return;
+    try {
+      final results = await Future.wait([
+        _repository.getLiveMatchActivity(cleanId),
+        _repository.getMatchScorecard(cleanId),
+        _repository.getMatchCommentary(cleanId),
+        _repository.getMatchSquads(cleanId),
+      ]);
+      _liveActivity = results[0];
+      _scorecard = results[1];
+      _commentary = results[2];
+      _squads = results[3];
+      notifyListeners();
+    } catch (_) {}
+  }
+
   /// Fetches details for a single match and resets stream selection.
   Future<void> fetchMatchDetails(String matchId) async {
     final cleanId = matchId.trim();
@@ -299,6 +339,8 @@ class LiveCricketProvider with ChangeNotifier, WidgetsBindingObserver {
     try {
       _selectedMatch = await _repository.getLiveMatchDetails(cleanId);
       _detailError = null;
+      notifyListeners();
+      await fetchMatchSubData(cleanId);
     } catch (e) {
       _detailError = e.toString();
       _selectedMatch = null;
@@ -314,6 +356,7 @@ class LiveCricketProvider with ChangeNotifier, WidgetsBindingObserver {
     _useBackupStream = false;
     _detailError = null;
     notifyListeners();
+    fetchMatchSubData(match.id);
   }
 
   /// Clears selected match state when exiting the player or details screen.
@@ -321,6 +364,10 @@ class LiveCricketProvider with ChangeNotifier, WidgetsBindingObserver {
     stopLiveScorePolling();
     _selectedMatch = null;
     _detailError = null;
+    _liveActivity = null;
+    _scorecard = null;
+    _commentary = null;
+    _squads = null;
     _useBackupStream = false;
     notifyListeners();
   }

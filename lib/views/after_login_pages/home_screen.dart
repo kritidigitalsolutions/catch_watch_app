@@ -14,12 +14,17 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/content_model.dart';
 import '../../models/live_match_model.dart';
+import '../../models/live_show_model.dart';
 import '../../res/app_colors.dart';
 import '../../utils/text_style.dart';
 import '../../view_model/after_login_provider/live_cricket_provider.dart';
+import '../../view_model/after_login_provider/live_show_provider.dart';
 import 'cricket/live_match_list_screen.dart';
 import 'cricket/widgets/featured_match_card.dart';
 import 'cricket/widgets/live_match_card.dart';
+import 'live_shows/live_show_list_screen.dart';
+import 'live_shows/widgets/featured_show_card.dart';
+import 'live_shows/widgets/live_show_card.dart';
 
 Future<void> _openShortFilm(BuildContext context, Content content) async {
   await EntitlementHelper.openContent(context, content);
@@ -53,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context.read<HomeScreenProvider>().fetchAllContent();
       context.read<NotificationProvider>().fetchNotifications();
       context.read<LiveCricketProvider>().fetchAllCricketData();
+      context.read<LiveShowProvider>().fetchAllLiveShowData();
     });
   }
 
@@ -188,17 +194,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _buildDotIndicator(provider),
         const SizedBox(height: 12),
 
-        // Featured Live Cricket Match
-        Consumer<LiveCricketProvider>(
-          builder: (context, cricketProvider, _) {
-            final featured = cricketProvider.featuredMatch;
-            if (featured == null) return const SizedBox.shrink();
-            return FeaturedMatchCard(match: featured);
-          },
-        ),
-
-        const SizedBox(height: 12),
-
         // First Category (e.g. Trending)
         if (categories.isNotEmpty) ...[
           _buildCategorySection(provider, categories[0]),
@@ -212,8 +207,33 @@ class _HomeScreenState extends State<HomeScreen> {
               ...cricketProvider.upcomingMatches,
               ...cricketProvider.completedMatches,
             ];
-            if (allMatches.isEmpty) return const SizedBox.shrink();
-            return _buildLiveCricketSection(context, cricketProvider, allMatches);
+            final uniqueMap = <String, LiveMatchModel>{};
+            for (final m in allMatches) {
+              uniqueMap[m.id] = m;
+            }
+            final uniqueMatches = uniqueMap.values.toList();
+            if (uniqueMatches.isEmpty) return const SizedBox.shrink();
+            return _buildLiveCricketSection(context, cricketProvider, uniqueMatches);
+          },
+        ),
+
+        const SizedBox(height: 12),
+
+        // Live Shows Horizontal Tray Section
+        Consumer<LiveShowProvider>(
+          builder: (context, showProvider, _) {
+            final allShows = <LiveShowModel>[
+              ...showProvider.liveShows,
+              ...showProvider.upcomingShows,
+              ...showProvider.endedShows,
+            ];
+            final uniqueMap = <String, LiveShowModel>{};
+            for (final s in allShows) {
+              uniqueMap[s.id] = s;
+            }
+            final uniqueShows = uniqueMap.values.toList();
+            if (uniqueShows.isEmpty) return const SizedBox.shrink();
+            return _buildLiveShowsSection(context, showProvider, uniqueShows);
           },
         ),
 
@@ -408,7 +428,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildTabBar(HomeScreenProvider provider) {
-    final int totalCount = provider.tabs.length + 1;
+    final int totalCount = provider.tabs.length + 2;
     return SizedBox(
       height: 40,
       child: ListView.builder(
@@ -447,6 +467,48 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(width: 5),
                     Text(
                       'Live Cricket',
+                      style: text13(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          if (index == provider.tabs.length + 1) {
+            // Live Shows Pill Button
+            return GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LiveShowListScreen()),
+                );
+              },
+              child: Container(
+                margin: const EdgeInsets.only(right: 12, bottom: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF0E8),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.35)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFE50914),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Live Shows',
                       style: text13(
                         color: AppColors.primary,
                         fontWeight: FontWeight.w800,
@@ -503,7 +565,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Row(
                 children: [
                   Text(
-                    'Live Cricket',
+                    'Live Sport',
                     style: text16(
                       color: AppColors.textPrimary,
                       fontWeight: FontWeight.w800,
@@ -511,14 +573,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE50914),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      'LIVE',
-                      style: text10(color: Colors.white, fontWeight: FontWeight.w900),
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFE50914),
+                      shape: BoxShape.circle,
                     ),
                   ),
                 ],
@@ -533,9 +592,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Row(
                   children: [
                     Text(
-                      'More',
+                      'Explore',
                       style: text12(color: AppColors.primary, fontWeight: FontWeight.w700),
                     ),
+                    const SizedBox(width: 2),
                     const Icon(Icons.arrow_forward_ios_rounded, color: AppColors.primary, size: 12),
                   ],
                 ),
@@ -545,7 +605,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 10),
         SizedBox(
-          height: 160,
+          height: 320,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -553,7 +613,81 @@ class _HomeScreenState extends State<HomeScreen> {
             itemBuilder: (context, index) {
               return LiveMatchCard(
                 match: matches[index],
-                width: 270,
+                width: 330,
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildLiveShowsSection(
+    BuildContext context,
+    LiveShowProvider provider,
+    List<LiveShowModel> shows,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'Live Shows',
+                    style: text16(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFE50914),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ],
+              ),
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const LiveShowListScreen()),
+                  );
+                },
+                child: Row(
+                  children: [
+                    Text(
+                      'Explore',
+                      style: text12(color: AppColors.primary, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(width: 2),
+                    const Icon(Icons.arrow_forward_ios_rounded, color: AppColors.primary, size: 12),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 260,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: shows.length,
+            itemBuilder: (context, index) {
+              return LiveShowCard(
+                show: shows[index],
+                width: 330,
               );
             },
           ),

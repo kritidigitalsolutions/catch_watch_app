@@ -104,6 +104,7 @@ class TeamModel {
           json['code']?.toString() ??
           json['short_name']?.toString(),
       logo: json['logo']?.toString() ??
+          json['flagUrl']?.toString() ??
           json['image']?.toString() ??
           json['flag']?.toString(),
       score: json['score']?.toString(),
@@ -145,6 +146,7 @@ class LiveMatchModel {
   final TeamModel? team2;
   final String? streamUrl;
   final String? backupStreamUrl;
+  final String? youtubeVideoId;
   final bool isPremium;
   final bool isFeatured;
   final int viewerCount;
@@ -165,6 +167,7 @@ class LiveMatchModel {
     this.team2,
     this.streamUrl,
     this.backupStreamUrl,
+    this.youtubeVideoId,
     this.isPremium = false,
     this.isFeatured = false,
     this.viewerCount = 0,
@@ -229,7 +232,7 @@ class LiveMatchModel {
     final rawStatus =
         (json['status'] ?? json['matchStatus'] ?? 'UPCOMING').toString().trim();
 
-    // Parse Teams
+    // Parse Teams (supporting team1, teamA, team2, teamB)
     TeamModel? parsedTeam1;
     if (json['team1'] != null) {
       parsedTeam1 = TeamModel.fromDynamic(json['team1']);
@@ -265,6 +268,12 @@ class LiveMatchModel {
         ?.toString()
         .trim();
 
+    final youtubeVideoId = (json['youtubeVideoId'] ??
+            json['youtube_video_id'] ??
+            json['ytVideoId'])
+        ?.toString()
+        .trim();
+
     // Parse Boolean flags safely
     final isPremium = json['isPremium'] == true ||
         json['is_premium'] == true ||
@@ -274,9 +283,11 @@ class LiveMatchModel {
         json['is_featured'] == true ||
         json['featured'] == true;
 
-    // Parse Viewer count safely
+    // Parse Viewer count safely (viewersCount, viewerCount, viewers, views)
     int viewers = 0;
-    if (json['viewerCount'] != null) {
+    if (json['viewersCount'] != null) {
+      viewers = int.tryParse(json['viewersCount'].toString()) ?? 0;
+    } else if (json['viewerCount'] != null) {
       viewers = int.tryParse(json['viewerCount'].toString()) ?? 0;
     } else if (json['viewers'] != null) {
       viewers = int.tryParse(json['viewers'].toString()) ?? 0;
@@ -299,17 +310,27 @@ class LiveMatchModel {
       parsedEndTime = DateTime.tryParse(json['endTime'].toString());
     }
 
+    final banner = (json['banner'] ??
+            json['streamThumbnailUrl'] ??
+            json['bannerUrl'] ??
+            json['coverImage'])
+        ?.toString();
+
+    final series = (json['series'] ?? json['tournament'] ?? json['seriesName'])?.toString();
+    final matchType = (json['matchType'] ?? json['format'] ?? json['matchFormat'] ?? json['type'])?.toString();
+    final venue = (json['venue'] ?? json['stadium'] ?? json['location'])?.toString();
+
     return LiveMatchModel(
       id: id,
       title: title,
-      series: (json['series'] ?? json['seriesName'] ?? json['tournament'])
-          ?.toString(),
-      matchType: (json['matchType'] ?? json['format'] ?? json['type'])?.toString(),
-      venue: (json['venue'] ?? json['stadium'] ?? json['location'])?.toString(),
+      series: series,
+      matchType: matchType,
+      venue: venue,
       rawStatus: rawStatus,
       statusNote: (json['statusNote'] ??
               json['matchStatusText'] ??
               json['statusMessage'] ??
+              json['currentStatusText'] ??
               json['note'])
           ?.toString(),
       team1: parsedTeam1,
@@ -318,13 +339,12 @@ class LiveMatchModel {
       backupStreamUrl: (backupStreamUrl != null && backupStreamUrl.isNotEmpty)
           ? backupStreamUrl
           : null,
+      youtubeVideoId: (youtubeVideoId != null && youtubeVideoId.isNotEmpty) ? youtubeVideoId : null,
       isPremium: isPremium,
       isFeatured: isFeatured,
       viewerCount: viewers,
-      banner: (json['banner'] ?? json['bannerUrl'] ?? json['coverImage'])
-          ?.toString(),
-      poster: (json['poster'] ?? json['posterUrl'] ?? json['thumbnail'])
-          ?.toString(),
+      banner: banner,
+      poster: json['poster']?.toString() ?? banner,
       startTime: parsedStartTime,
       endTime: parsedEndTime,
     );
@@ -343,6 +363,7 @@ class LiveMatchModel {
       if (team2 != null) 'team2': team2!.toJson(),
       if (streamUrl != null) 'streamUrl': streamUrl,
       if (backupStreamUrl != null) 'backupStreamUrl': backupStreamUrl,
+      if (youtubeVideoId != null) 'youtubeVideoId': youtubeVideoId,
       'isPremium': isPremium,
       'isFeatured': isFeatured,
       'viewerCount': viewerCount,
@@ -365,6 +386,7 @@ class LiveMatchModel {
     TeamModel? team2,
     String? streamUrl,
     String? backupStreamUrl,
+    String? youtubeVideoId,
     bool? isPremium,
     bool? isFeatured,
     int? viewerCount,
@@ -385,6 +407,7 @@ class LiveMatchModel {
       team2: team2 ?? this.team2,
       streamUrl: streamUrl ?? this.streamUrl,
       backupStreamUrl: backupStreamUrl ?? this.backupStreamUrl,
+      youtubeVideoId: youtubeVideoId ?? this.youtubeVideoId,
       isPremium: isPremium ?? this.isPremium,
       isFeatured: isFeatured ?? this.isFeatured,
       viewerCount: viewerCount ?? this.viewerCount,

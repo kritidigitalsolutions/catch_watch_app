@@ -232,12 +232,24 @@ class AppUrl {
   static const String vipAccessCheck = '$baseUrl/support/vip/access-check';
   static const String vipTickets = '$baseUrl/support/vip';
   static String vipTicketDetail(String ticketId) => '$baseUrl/support/vip/$ticketId';
-  static String vipReplyTicket(String ticketId) => '$baseUrl/support/vip/reply/$ticketId';
+   static String vipReplyTicket(String ticketId) => '$baseUrl/support/vip/reply/$ticketId';
 
   /// Live Cricket Endpoints
   /// Note: Authorization is optional. URLs use baseUrl ($serverUrl/api) without /api duplication.
   static const String liveMatches = '$baseUrl/live-matches';
+  static const String upcomingLiveMatches = '$baseUrl/live-matches/upcoming';
+  static const String completedLiveMatches = '$baseUrl/live-matches/completed';
   static const String featuredLiveMatch = '$baseUrl/live-matches/featured';
   static String liveMatchDetails(String matchId) => '$baseUrl/live-matches/$matchId';
   static String recordLiveMatchView(String matchId) => '$baseUrl/live-matches/$matchId/view';
+  static String liveMatchLiveActivity(String matchId) => '$baseUrl/live-matches/$matchId/live-activity';
+  static String liveMatchScorecard(String matchId) => '$baseUrl/live-matches/$matchId/scorecard';
+  static String liveMatchCommentary(String matchId) => '$baseUrl/live-matches/$matchId/commentary';
+  static String liveMatchSquads(String matchId) => '$baseUrl/live-matches/$matchId/squads';
+
+  /// Live Shows Endpoints
+  static const String liveShows = '$baseUrl/live-shows';
+  static const String featuredLiveShow = '$baseUrl/live-shows/featured';
+  static String liveShowDetails(String showId) => '$baseUrl/live-shows/$showId';
+  static String recordLiveShowView(String showId) => '$baseUrl/live-shows/$showId/view';
 }

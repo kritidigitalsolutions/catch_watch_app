@@ -90,6 +90,10 @@ post_install do |installer|
         'PERMISSION_PHOTOS=1',
         'PERMISSION_NOTIFICATIONS=1',
       ]
+   # Ensure minimum deployment target is 15.0 to resolve Xcode Target Integrity warnings
+         if config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].nil? || config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 15.0
+           config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+         end
     end
   end
 

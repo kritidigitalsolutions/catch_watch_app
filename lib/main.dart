@@ -38,6 +38,7 @@ import 'package:catch_watch/view_model/after_login_provider/call_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/report_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/block_provider.dart';
 import 'package:catch_watch/view_model/after_login_provider/live_cricket_provider.dart';
+import 'package:catch_watch/view_model/after_login_provider/live_show_provider.dart';
 import 'package:catch_watch/views/after_login_pages/message/call_overlay.dart';
 import 'package:cryptography_flutter/cryptography_flutter.dart';
 
@@ -130,6 +131,7 @@ void main() async {
           ChangeNotifierProvider(create: (_) => ReportProvider()),
           ChangeNotifierProvider(create: (_) => BlockProvider()),
           ChangeNotifierProvider(create: (_) => LiveCricketProvider()),
+          ChangeNotifierProvider(create: (_) => LiveShowProvider()),
         ],
         child: const MyApp(),
       ),
